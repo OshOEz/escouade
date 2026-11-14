@@ -44,8 +44,9 @@ Pourquoi maintenant : le demandeur veut développer entièrement sur un VPS, et 
 ## L'existant (main, a1410cd0)
 
 - Front : tous les appels au cœur sont dans `src/lib/ipc.ts` (321 `invoke`). 16 fichiers importent `@tauri-apps/*`, dont 7 composants (dialogue de dossier, ouverture de fichier, barre de titre, fenêtre « Pages », vues des plugins).
-- Cœur : 228 `#[tauri::command]` dans `src-tauri/src/commands.rs`. Ils prennent `State<Arc<Core>>` ; 7 prennent un `Channel` (1 pour les événements dans `subscribe`, 6 pour des sorties de terminal) ; 15 prennent un `AppHandle` (presse-papiers, enregistrer une image, quitter, mise à jour, `devpage`).
-- `Core<R: Runtime>` garde un `AppHandle` (`core.rs:912`) pour les notifications, le tray, les menus et l'état de la voix. Les tests font déjà tourner le cœur sans WebView (`tauri::test::mock_app`).
+- Cœur : 347 commandes Tauri dans `src-tauri/src/commands.rs` (228 écrites `#[tauri::command]`, 119 `#[tauri::command(async)]` ; compte rendu du lot 0, § 5). Elles prennent `State<Arc<Core>>` ; 7 prennent un `Channel` (1 pour les événements dans `subscribe`, 6 pour des sorties de terminal) ; 15 occurrences d'`AppHandle`, soit 14 commandes et un utilitaire (presse-papiers, enregistrer une image, quitter, mise à jour, `devpage`).
+- `Core<R: Runtime>` garde un `AppHandle` (`core.rs:912`) pour les notifications, le tray, les menus et l'état de la voix. Les tests font déjà tourner le cœur sans WebView (`tauri::test::mock_app`) ; le lot 0 l'a démarré ainsi dans un conteneur Linux sans affichage.
+- Deux crates du cœur tirent ce qu'on ne voit pas depuis `src-tauri` (compte rendu du lot 0, § 3) : `escouade-plugins` dépend de `tauri` pour un seul `tauri::async_runtime::spawn`, et `escouade-forge` et `escouade-updates` en héritent ; `escouade-vectors` (la recherche par le sens) dépend de `escouade-voice-local` pour `ort`, si bien qu'exclure la voix exclut aussi la recherche par le sens, sauf à déplacer `ort` (à trancher par le demandeur).
 - `hub.rs` garde un seul `Channel<UiEvent>` : le dernier abonné reçoit tout.
 - `src-tauri` est une seule crate, et environ 80 fichiers hors tests utilisent `tauri::`. Sous Linux, lier Tauri tire WebKitGTK et GTK.
 - Les e2e actuels (environ 130 fichiers) pilotent la vraie app Tauri par les DevTools de WebView2 (`playwright.config.ts`).
@@ -62,7 +63,7 @@ Navigateur ──(tunnel de l'utilisateur : ssh -L, Tailscale, son proxy)──�
                                                                           └─ le cœur (agents, Git, Kanban, PTY, serveur MCP)
 ```
 
-- **Pas de Tauri à l'édition de liens du serveur.** `escouade-server` ne lie ni WebKitGTK ni GTK (`docs/REMOTE.md` : « sans WebKit ni GTK »). Le lot 0 dit par quelle voie : des fonctionnalités Cargo sur la crate actuelle, ou le cœur sorti dans une crate à lui. Le plan du lot 1 s'écrit après ce compte rendu.
+- **Pas de Tauri à l'édition de liens du serveur.** `escouade-server` ne lie ni WebKitGTK ni GTK (`docs/REMOTE.md` : « sans WebKit ni GTK »). C'est mesuré : sous Linux, aucune combinaison des fonctionnalités de `tauri` 2.12 ne retire GTK ni WebKitGTK, même sur le runtime factice (compte rendu du lot 0, § 1) ; le cœur du serveur ne dépend donc ni de `tauri`, ni de `tauri-runtime`, ni de `muda`. Le compte rendu recommande la voie (A), des fonctionnalités Cargo sur la crate actuelle (le bureau derrière une fonctionnalité par défaut, le serveur construit sans, un job de CI Linux sans GTK qui le construit), plutôt que (B), le cœur sorti dans une crate à lui : **à confirmer par le demandeur**. Dans les deux voies, le cœur se passe d'abord de Tauri (lot 1). Le plan du lot 1 s'écrit après cette confirmation.
 - **Le cœur sans fenêtre.** Ce que le cœur demande à l'app (notifier, attirer l'attention, tray, menus, version, redémarrer) passe par un trait `Host`. L'app de bureau l'implémente avec Tauri ; le serveur l'implémente sans rien afficher et pousse à la place un événement que le navigateur rend.
 - **Une seule liste des commandes**, servie à la fois par l'IPC de Tauri et par la WebSocket. Le moyen (macro, génération, table) est au constructeur ; la contrainte est qu'ajouter une commande à un seul endroit la rende disponible des deux côtés, et qu'un test échoue sinon.
 - **Les flux.** Les 7 `Channel` deviennent une sortie abstraite qui écrit soit dans un `Channel` de Tauri, soit dans la WebSocket. Les sorties de terminal restent binaires, multiplexées sur la même connexion.
@@ -70,7 +71,7 @@ Navigateur ──(tunnel de l'utilisateur : ssh -L, Tailscale, son proxy)──�
 - **L'état d'interface partagé.** `UiState` reste unique : un navigateur le lit au chargement, et le dernier qui l'écrit gagne. Naviguer dans un navigateur ne déplace pas les autres en direct (confirmé par le demandeur ; `docs/REMOTE.md` vise à terme un état par client).
 - **La reprise.** À la connexion, le client reçoit `InitialState` puis les événements. Chaque terminal et chaque lancement garde un tampon de sortie, comme les vues d'agent aujourd'hui (4 Mo), pour redessiner l'écran.
 - **Le front sur deux transports.** `ipc.ts` choisit Tauri ou la WebSocket selon l'endroit où il tourne. Les composants ne le savent pas. Un build web à part (configuration Vite) produit les fichiers que le serveur embarque.
-- **Les commandes sans objet sur un serveur** (les 15 à `AppHandle`, la voix) : l'interface web cache ce qui les appelle, et l'API les refuse avec une erreur claire.
+- **Les commandes sans objet sur un serveur** (les 14 commandes à `AppHandle`, la voix) : l'interface web cache ce qui les appelle, et l'API les refuse avec une erreur claire. Prendre un `AppHandle` ne suffit pas à les reconnaître : `open_url`, `open_path` et `play_chime` supposent aussi un bureau sans en prendre (compte rendu du lot 0, § 3) ; sur un serveur, elles suivent la table « Ce qui change de machine ».
 - **Les plugins.** Les plugins livrés avec Escouade (les harness, les hébergeurs de code) tournent dans le cœur et marchent tels quels. La vue Plugins et le store (installer, mettre à jour) marchent aussi dans le navigateur dès cette version (décidé par le demandeur, 2026-11-14) : leurs appels à la fenêtre (dialogues, ouverture de liens, l'`invoke` de `src/lib/plugins.ts` hors de `ipc.ts`) passent par les deux transports ; c'est du travail en plus dans les lots 4 et 5.
 
 ### Sécurité
@@ -95,7 +96,7 @@ Navigateur ──(tunnel de l'utilisateur : ssh -L, Tailscale, son proxy)──�
 
 ### Installation
 
-Un binaire et un service systemd de l'utilisateur (`loginctl enable-linger`), posé par `escouade-server install`. Les données restent dans `~/.escouade`. Un verrou par fichier remplace `single-instance` (qui passe par D-Bus).
+Un binaire et un service systemd de l'utilisateur (`loginctl enable-linger`), posé par `escouade-server install`. Les données restent dans `~/.escouade`. Un verrou par fichier remplace `single-instance`, qui passe à l'exécution par le bus de session D-Bus (par `zbus`, en Rust pur, sans bibliothèque à la construction). La bibliothèque D-Bus que lie l'app vient de `tao`, par Tauri, et part avec lui (compte rendu du lot 0, § 3).
 
 ## Les lots
 
@@ -103,12 +104,14 @@ Chaque lot est une PR proposable à l'amont, relisible seule, et a son propre pl
 
 | Lot | Livre | Preuve |
 | --- | --- | --- |
-| 0. Essais | Le cœur lancé dans un process sans fenêtre, dans un conteneur Linux sans affichage ; la liste de ce qui suppose un bureau (D-Bus, cpal, GTK du presse-papiers) | Un compte rendu, pas de code gardé |
-| 1. `Host` | Le trait à la place de l'`AppHandle` du cœur | Les tests existants passent, l'app de bureau est inchangée |
+| 0. Essais | Le cœur lancé dans un process sans fenêtre, dans un conteneur Linux sans affichage ; la liste de ce qui suppose un bureau (D-Bus, cpal, GTK du presse-papiers) | Un compte rendu (`2026-11-14-mode-serveur-lot0-compte-rendu.md`), pas de code gardé |
+| 1. `Host` | Le trait à la place de l'`AppHandle` du cœur ; le paramètre `R: Runtime` retiré du cœur ; un runtime à soi à la place de `tauri::async_runtime` (ce qui retire `tauri` d'`escouade-plugins`) ; les tests sur un faux `Host`. Environ 105 fichiers, 1 000 à 1 200 lignes touchées, aux trois quarts mécaniques (estimation du compte rendu, § 6) | Les tests existants passent, l'app de bureau est inchangée |
 | 2. API distante | La liste unique des commandes, la sortie abstraite des flux, le serveur WebSocket (dans l'app de bureau, éteint par défaut) | Un test appelle une commande et reçoit un événement par la WebSocket |
 | 3. Plusieurs abonnés et reprise | `hub.rs` à plusieurs abonnés, les tampons des terminaux et des lancements | Deux clients reçoivent le même événement ; un client reconnecté retrouve l'écran d'un terminal |
 | 4. Front sur deux transports | `ipc.ts` sur Tauri ou WebSocket, le build web | Un parcours court (ouvrir un projet, lancer un agent sur un faux harness, répondre, ouvrir un terminal) passe dans Chromium sur la WebSocket, sous Linux ; pas toute la suite e2e (**mon choix**) |
 | 5. `escouade-server` | Le binaire, l'appairage, le service, et la table « Ce qui change de machine » | Le parcours du but 3, dans un e2e sur un conteneur sans affichage |
+
+La séparation par fonctionnalités Cargo de la voie (A) et son job de CI Linux sans GTK (130 à 210 lignes touchées, estimation du compte rendu, § 5) vont **soit à la fin du lot 2** (plus tôt, et protège plus tôt contre le retour de Tauri dans le cœur), **soit au début du lot 5** (avec le binaire) : à trancher par le demandeur.
 
 Le premier plan couvre le lot 0 seul (confirmé par le demandeur) ; celui du lot 1 dépend de son compte rendu. Les PR partent de `upstream/main`, après avoir regardé où en est `release/2.3`.
 
@@ -122,5 +125,5 @@ Le premier plan couvre le lot 0 seul (confirmé par le demandeur) ; celui du lot
 ## Risques connus
 
 - L'amont annonce ce chantier pour la 2.3 et pousse tous les jours : chaque lot se rebase sur `upstream/main` avant d'être proposé, et reste petit.
-- La connexion d'un harness sans navigateur sur le serveur n'a jamais été essayée ; le lot 0 l'essaie pour Claude Code.
+- La connexion d'un harness sans navigateur sur le serveur n'a jamais été essayée ; le lot 0 l'a préparée pour Claude Code (l'image, les scripts, ce qu'Escouade lit), mais le `/login` lui-même reste à faire par le demandeur (compte rendu du lot 0, § 4).
 - Le mainteneur peut préférer un autre découpage : les lots 1 à 4 suivent son ordre pour limiter ce risque.
