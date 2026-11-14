@@ -67,17 +67,17 @@ Navigateur ──(tunnel de l'utilisateur : ssh -L, Tailscale, son proxy)──�
 - **Une seule liste des commandes**, servie à la fois par l'IPC de Tauri et par la WebSocket. Le moyen (macro, génération, table) est au constructeur ; la contrainte est qu'ajouter une commande à un seul endroit la rende disponible des deux côtés, et qu'un test échoue sinon.
 - **Les flux.** Les 7 `Channel` deviennent une sortie abstraite qui écrit soit dans un `Channel` de Tauri, soit dans la WebSocket. Les sorties de terminal restent binaires, multiplexées sur la même connexion.
 - **Plusieurs abonnés.** `hub.rs` diffuse à tous les navigateurs connectés. Une réponse donnée dans l'un (autorisation, question) se ferme dans les autres.
-- **L'état d'interface partagé.** `UiState` reste unique : un navigateur le lit au chargement, et le dernier qui l'écrit gagne. Naviguer dans un navigateur ne déplace pas les autres en direct (**mon choix**, le plus simple ; `docs/REMOTE.md` vise à terme un état par client).
+- **L'état d'interface partagé.** `UiState` reste unique : un navigateur le lit au chargement, et le dernier qui l'écrit gagne. Naviguer dans un navigateur ne déplace pas les autres en direct (confirmé par le demandeur ; `docs/REMOTE.md` vise à terme un état par client).
 - **La reprise.** À la connexion, le client reçoit `InitialState` puis les événements. Chaque terminal et chaque lancement garde un tampon de sortie, comme les vues d'agent aujourd'hui (4 Mo), pour redessiner l'écran.
 - **Le front sur deux transports.** `ipc.ts` choisit Tauri ou la WebSocket selon l'endroit où il tourne. Les composants ne le savent pas. Un build web à part (configuration Vite) produit les fichiers que le serveur embarque.
 - **Les commandes sans objet sur un serveur** (les 15 à `AppHandle`, la voix) : l'interface web cache ce qui les appelle, et l'API les refuse avec une erreur claire.
-- **Les plugins.** Les plugins livrés avec Escouade (les harness, les hébergeurs de code) tournent dans le cœur et marchent tels quels. La vue Plugins et le store (installer, mettre à jour, leurs dialogues) sont cachés dans le navigateur pour cette version (**mon choix**) ; `src/lib/plugins.ts` appelle `invoke` hors de `ipc.ts` et devra y passer quand ils arriveront.
+- **Les plugins.** Les plugins livrés avec Escouade (les harness, les hébergeurs de code) tournent dans le cœur et marchent tels quels. La vue Plugins et le store (installer, mettre à jour) marchent aussi dans le navigateur dès cette version (décidé par le demandeur, 2026-11-14) : leurs appels à la fenêtre (dialogues, ouverture de liens, l'`invoke` de `src/lib/plugins.ts` hors de `ipc.ts`) passent par les deux transports ; c'est du travail en plus dans les lots 4 et 5.
 
 ### Sécurité
 
 - Écoute sur `127.0.0.1` seulement. Pas d'option pour écouter ailleurs dans cette version (**mon choix**, conforme à `docs/REMOTE.md` : « jamais un port ouvert sur Internet »).
 - `escouade-server pair` affiche une adresse à usage unique ; l'ouvrir dans le navigateur pose un jeton d'appareil. Les jetons se listent et se révoquent un par un (`escouade-server devices`).
-- Contrôle de `Host` et d'`Origin` sur chaque requête et sur l'ouverture de la WebSocket, comme le fait déjà le serveur MCP. Par défaut, seuls `localhost` et `127.0.0.1` sont acceptés (le cas `ssh -L`). Une option `--origin https://nom` ajoute l'adresse d'un proxy ou de `tailscale serve` (**mon choix**) ; `pair` affiche alors cette adresse. Les notifications du navigateur demandent un contexte sûr : `localhost` ou https.
+- Contrôle de `Host` et d'`Origin` sur chaque requête et sur l'ouverture de la WebSocket, comme le fait déjà le serveur MCP. Par défaut, seuls `localhost` et `127.0.0.1` sont acceptés (le cas `ssh -L`). Une option `--origin https://nom` ajoute l'adresse d'un proxy ou de `tailscale serve` (confirmé par le demandeur) ; `pair` affiche alors cette adresse. Les notifications du navigateur demandent un contexte sûr : `localhost` ou https.
 - Dans le lot 2, le serveur WebSocket de l'app de bureau ne s'allume que par une variable d'environnement qui porte aussi son jeton : il sert aux tests, pas aux utilisateurs (**mon choix**). L'appairage arrive au lot 5.
 - L'interface dit que les identifiants des comptes vivent sur le serveur.
 
@@ -110,7 +110,7 @@ Chaque lot est une PR proposable à l'amont, relisible seule, et a son propre pl
 | 4. Front sur deux transports | `ipc.ts` sur Tauri ou WebSocket, le build web | Un parcours court (ouvrir un projet, lancer un agent sur un faux harness, répondre, ouvrir un terminal) passe dans Chromium sur la WebSocket, sous Linux ; pas toute la suite e2e (**mon choix**) |
 | 5. `escouade-server` | Le binaire, l'appairage, le service, et la table « Ce qui change de machine » | Le parcours du but 3, dans un e2e sur un conteneur sans affichage |
 
-Le premier plan couvre le lot 0 seul ; celui du lot 1 dépend de son compte rendu. Les PR partent de `upstream/main`, après avoir regardé où en est `release/2.3`.
+Le premier plan couvre le lot 0 seul (confirmé par le demandeur) ; celui du lot 1 dépend de son compte rendu. Les PR partent de `upstream/main`, après avoir regardé où en est `release/2.3`.
 
 ## Laissé au constructeur
 
