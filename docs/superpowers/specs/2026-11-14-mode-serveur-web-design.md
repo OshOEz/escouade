@@ -71,7 +71,7 @@ Navigateur ──(tunnel de l'utilisateur : ssh -L, Tailscale, son proxy)──�
 - **L'état d'interface partagé.** `UiState` reste unique : un navigateur le lit au chargement, et le dernier qui l'écrit gagne. Naviguer dans un navigateur ne déplace pas les autres en direct (confirmé par le demandeur ; `docs/REMOTE.md` vise à terme un état par client).
 - **La reprise.** À la connexion, le client reçoit `InitialState` puis les événements. Chaque terminal et chaque lancement garde un tampon de sortie, comme les vues d'agent aujourd'hui (4 Mo), pour redessiner l'écran.
 - **Le front sur deux transports.** `ipc.ts` choisit Tauri ou la WebSocket selon l'endroit où il tourne. Les composants ne le savent pas. Un build web à part (configuration Vite) produit les fichiers que le serveur embarque.
-- **Les commandes sans objet sur un serveur** (les 14 commandes à `AppHandle`, la voix) : l'interface web cache ce qui les appelle, et l'API les refuse avec une erreur claire. Prendre un `AppHandle` ne suffit pas à les reconnaître : `open_url`, `open_path` et `play_chime` supposent aussi un bureau sans en prendre (compte rendu du lot 0, § 3) ; sur un serveur, elles suivent la table « Ce qui change de machine ».
+- **Les commandes sans objet sur un serveur** (les 14 commandes à `AppHandle`, la voix) : l'interface web cache ce qui les appelle, et l'API les refuse avec une erreur claire. Prendre un `AppHandle` ne suffit pas à les reconnaître : `open_url`, `open_path` et `play_chime` supposent aussi un bureau sans en prendre (compte rendu du lot 0, § 3) ; sur un serveur, elles suivent la table « Ce qui change de machine » et, pour les liens de la vue Plugins, la décision juste en dessous ; `open_url` ailleurs reste à décider (compte rendu du lot 0, question 4).
 - **Les plugins.** Les plugins livrés avec Escouade (les harness, les hébergeurs de code) tournent dans le cœur et marchent tels quels. La vue Plugins et le store (installer, mettre à jour) marchent aussi dans le navigateur dès cette version (décidé par le demandeur, 2026-11-14) : leurs appels à la fenêtre (dialogues, ouverture de liens, l'`invoke` de `src/lib/plugins.ts` hors de `ipc.ts`) passent par les deux transports ; c'est du travail en plus dans les lots 4 et 5.
 
 ### Sécurité
@@ -111,7 +111,7 @@ Chaque lot est une PR proposable à l'amont, relisible seule, et a son propre pl
 | 4. Front sur deux transports | `ipc.ts` sur Tauri ou WebSocket, le build web | Un parcours court (ouvrir un projet, lancer un agent sur un faux harness, répondre, ouvrir un terminal) passe dans Chromium sur la WebSocket, sous Linux ; pas toute la suite e2e (**mon choix**) |
 | 5. `escouade-server` | Le binaire, l'appairage, le service, et la table « Ce qui change de machine » | Le parcours du but 3, dans un e2e sur un conteneur sans affichage |
 
-La séparation par fonctionnalités Cargo de la voie (A) et son job de CI Linux sans GTK (130 à 210 lignes touchées, estimation du compte rendu, § 5) vont **soit à la fin du lot 2** (plus tôt, et protège plus tôt contre le retour de Tauri dans le cœur), **soit au début du lot 5** (avec le binaire) : à trancher par le demandeur.
+La séparation par fonctionnalités Cargo de la voie (A) et son job de CI Linux sans GTK (125 à 205 lignes touchées, estimation du compte rendu, § 5, hors voix locale et recherche par le sens, non chiffré (question 3)) vont **soit à la fin du lot 2** (plus tôt, et protège plus tôt contre le retour de Tauri dans le cœur), **soit au début du lot 5** (avec le binaire) : à trancher par le demandeur.
 
 Le premier plan couvre le lot 0 seul (confirmé par le demandeur) ; celui du lot 1 dépend de son compte rendu. Les PR partent de `upstream/main`, après avoir regardé où en est `release/2.3`.
 
@@ -125,5 +125,5 @@ Le premier plan couvre le lot 0 seul (confirmé par le demandeur) ; celui du lot
 ## Risques connus
 
 - L'amont annonce ce chantier pour la 2.3 et pousse tous les jours : chaque lot se rebase sur `upstream/main` avant d'être proposé, et reste petit.
-- La connexion d'un harness sans navigateur sur le serveur n'a jamais été essayée ; le lot 0 l'a préparée pour Claude Code (l'image, les scripts, ce qu'Escouade lit), mais le `/login` lui-même reste à faire par le demandeur (compte rendu du lot 0, § 4).
+- La connexion d'un harness sans navigateur sur le serveur n'est essayée que pour Claude Code : son `/login` a marché dans un conteneur sans navigateur, et Escouade y lirait « connecté, jeton en date » (compte rendu du lot 0, § 4). Pas essayés : les autres harness, un vrai VPS (seulement arm64, dans Docker sur un Mac), le renouvellement du jeton dans le temps.
 - Le mainteneur peut préférer un autre découpage : les lots 1 à 4 suivent son ordre pour limiter ce risque.
