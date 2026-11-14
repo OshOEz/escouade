@@ -17,6 +17,18 @@ Pourquoi maintenant : le demandeur veut développer entièrement sur un VPS, et 
 - **Contribution à l'amont** : généraliste, dans le sens de `docs/REMOTE.md`.
 - Aucune issue n'est ouverte chez l'amont avant le code.
 
+## Décidé par le demandeur après le lot 0 (2026-11-15)
+
+Sur le compte rendu `docs/superpowers/specs/2026-11-14-mode-serveur-lot0-compte-rendu.md` :
+
+- **La voie (A)** : des fonctionnalités Cargo sur la crate actuelle, le bureau derrière une fonctionnalité `desktop`. Le cœur n'est pas déplacé dans une crate à lui.
+- **La recherche par le sens reste sur le serveur** : `ort` sort d'`escouade-voice-local` pour qu'`escouade-vectors` ne tire plus la voix (ALSA, libclang). C'est un petit lot à part, non chiffré.
+- **La graine des plugins et sa liste de révocations sont embarquées dans `escouade-server`** ; la taille du binaire est à vérifier au plan du lot 5.
+- **Le job de CI Linux sans GTK arrive tôt**, à la fin du lot 2, avec la séparation par fonctionnalités.
+- La branche de travail est poussée sur le fork GitHub du demandeur ; rien n'est proposé à l'amont.
+
+Là où la suite de ce document dit encore « à confirmer par le demandeur » ou présente deux options sur ces points, c'est cette section qui vaut.
+
 ## Buts
 
 1. Sur un Linux sans affichage (x64 et arm64), un binaire `escouade-server` lance le cœur sans WebView, sans GTK, sans D-Bus.
