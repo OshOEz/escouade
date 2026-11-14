@@ -16,7 +16,7 @@ Les chiffrages sont marqués **(estimation)**. Tout a tourné dans un conteneur 
 2. `escouade-server` ne peut pas dépendre de `tauri` : sous Linux, aucune combinaison des fonctionnalités de `tauri` 2.12 ne retire GTK ni WebKitGTK, même sur le runtime factice **[mesuré]** **[vérifié]**.
 3. Le cœur démarre sans affichage ni bus de session dans un conteneur arm64 (vide : 0 projet, 0 compte, 20 s), mais seulement si les bibliothèques de bureau sont installées pour l'édition de liens **[mesuré]**.
 4. Une image sans ces bibliothèques demande de sortir du binaire Tauri **et** la voix locale (ALSA, libclang), que la recherche par le sens tire aussi **[mesuré]** **[vérifié]**.
-5. Lot 1 (`Host`, sans `R: Runtime` ni runtime de Tauri) : environ 105 fichiers, 1 000 à 1 200 lignes touchées (estimation) ; la connexion `/login` de Claude Code a marché dans un conteneur sans navigateur, et Escouade y lirait « connecté, jeton en date » **[mesuré]** (arm64, Docker sur un Mac ; ni les autres harness ni le renouvellement du jeton).
+5. Lot 1 (`Host`, sans `R: Runtime` ni runtime de Tauri) : environ 105 fichiers, 1 000 à 1 200 lignes touchées (estimation) ; la connexion `/login` de Claude Code a marché dans un conteneur sans navigateur, et Escouade y lirait « connecté, jeton en date » **[mesuré]** (arm64, Docker sur un Mac ; parcours non décrit pas à pas ; ni les autres harness ni le renouvellement du jeton ; § 4).
 
 ## 1. Ce que Tauri lie sous Linux
 
@@ -96,7 +96,7 @@ Lancé par le demandeur le 2026-11-15, dans son terminal : `spikes/lot0/login.sh
 
 - la connexion a marché, dans le conteneur sans affichage ni navigateur ;
 - `/claude-account/.credentials.json` existe, avec `claudeAiOauth.accessToken`, `claudeAiOauth.expiresAt` et `claudeAiOauth.refreshToken`, les champs qu'attend Escouade ;
-- la règle de `stored_of` en tire « connecté, jeton en date » : Escouade verrait le compte connecté ;
+- la règle de `stored_of`, rejouée en jq par `login-check.sh`, en tire « connecté, jeton en date » : Escouade verrait le compte connecté ;
 - `claude -p "réponds OK"` répond `OK`.
 
 Non observé : le parcours de `/login` pas à pas (le demandeur ne l'a pas décrit, et n'a signalé aucun écueil) ; une autre machine que Docker sur un Mac, en arm64 ; les autres harness ; le renouvellement du jeton dans le temps.
@@ -105,7 +105,7 @@ Non observé : le parcours de `/login` pas à pas (le demandeur ne l'a pas décr
 
 Source : `results/tauri-uses.md` (le script `spikes/lot0/tauri-uses.sh`, lancé sur `a1410cd0`, la base de la conception).
 
-**Le compte** : 79 fichiers hors tests nomment Tauri, pour 1 143 occurrences **[mesuré]**. Le lien du cœur est étroit : l'`AppHandle` de `Core` (`core.rs:912`) sert à 11 lignes dans 3 fichiers (version, attention, toast, tray, état de la voix, fenêtre visible, crochet de mise à jour) **[mesuré]**. Le gros est mécanique : le paramètre `R: Runtime` (506 lignes brutes dans 75 fichiers, dont 4 où `<R>` n'est pas celui de Tauri) et `tauri::async_runtime` (89 lignes dans 28 fichiers) **[mesuré]**. `commands.rs` porte **347** commandes : 228 écrites `#[tauri::command]` et 119 `#[tauri::command(async)]`, à `a1410cd0` comme à `ca45bbd6` (`git grep -c -F '#[tauri::command]' <commit> -- src-tauri/src/commands.rs`, et de même avec `(async)`) **[vérifié]** ; `generate_handler!` en liste 347 **[mesuré]**.
+**Le compte** : 79 fichiers hors tests nomment Tauri, pour 1 143 occurrences **[mesuré]**. Le lien du cœur est étroit : l'`AppHandle` de `Core` (`core.rs:912`) sert à 11 lignes dans 3 fichiers (version, attention, toast, tray, état de la voix, fenêtre visible, crochet de mise à jour) **[mesuré]**. Ce compte ne cherche que `self.app` et `core.app`, et en oublie : `Core::load(app: AppHandle<R>, …)` (`core.rs:1866`) se sert encore du handle trois fois, pour la version (`app.package_info()`, `core.rs:1999`), la table des origines de fichiers (`app.try_state::<crate::fileorigin::FileOrigins>()`, `core.rs:2006`) et la graine des plugins de l'installateur avec sa liste de révocations (`Seed::of_app(app.path().resource_dir()…)`, `core.rs:2014-2015`) ; et le cœur garde trois types de modules de bureau : `Core.page_crash: Mutex<Option<crate::pagecrash::PageCrash>>` (`core.rs:1001` ; `pagecrash.rs` utilise `tauri` et `webkit2gtk`), `Core.file_origins: crate::fileorigin::FileOrigins` (`core.rs:1087` ; `fileorigin.rs` utilise `tauri`), et `crate::devpage::PageEvent` dans `model.rs:287` **[vérifié, à `a1410cd0`]**. Le trait `Host` tel que listé ici ne les couvre pas ; le travail en plus est petit (quelques dizaines de lignes, estimation), mais le serveur n'a pas de dossier de ressources de Tauri d'où lire la graine (question 5). Le gros est mécanique : le paramètre `R: Runtime` (506 lignes brutes dans 75 fichiers, dont 4 où `<R>` n'est pas celui de Tauri) et `tauri::async_runtime` (89 lignes dans 28 fichiers) **[mesuré]**. `commands.rs` porte **347** commandes : 228 écrites `#[tauri::command]` et 119 `#[tauri::command(async)]`, à `a1410cd0` comme à `ca45bbd6` (`git grep -c -F '#[tauri::command]' <commit> -- src-tauri/src/commands.rs`, et de même avec `(async)`) **[vérifié]** ; `generate_handler!` en liste 347 **[mesuré]**.
 
 **Ce qui est commun aux deux voies, et qui est le lot 1** : un trait `Host` à la place de `pub app: AppHandle<R>` ; le paramètre `R` retiré ; un module de runtime à soi qui garde, comme celui de Tauri, un runtime tokio global (`spawn` marche hors d'un runtime, ce que `tokio::spawn` ne fait pas) **[vérifié]**, donné à Tauri au démarrage par `tauri::async_runtime::set` ; les tests sur un faux `Host`. Sans ces quatre points, aucune voie ne sort le cœur de Tauri. Les voies ne diffèrent que par la façon dont le build du serveur laisse de côté l'app de bureau (13 fichiers triés à la main : `lib.rs`, `commands.rs`, `menus.rs`, `notify.rs`, `navigation.rs`, `pagecrash.rs`, `devpage.rs`, `devpage_probe.rs`, `fileorigin.rs`, `windowthread.rs`, `clipboard.rs`, `deeplink.rs`, `updates.rs`) **[vérifié]**.
 
@@ -121,7 +121,7 @@ Source : `results/tauri-uses.md` (le script `spikes/lot0/tauri-uses.sh`, lancé 
 
 1. La liste de la tâche 5 : `src-tauri/Cargo.toml` et `build.rs` (25), `lib.rs` (20), `telemetry.rs` et `outside.rs` (10) : **environ 55 lignes dans 5 fichiers** (estimation). Elle compte aussi 2 lignes pour retirer `tauri` de `crates/escouade-plugins/Cargo.toml`, laissées de côté ici : le lot 1 le fait déjà.
 2. Ce qu'elle oublie : un binaire `escouade-server` minimal que la CI construit (20 à 40 lignes, 1 à 2 fichiers) ; le job de CI sans GTK (30 à 50 lignes, 1 fichier) ; les `cfg` dans les fichiers du cœur qui appellent l'app de bureau (20 à 60 lignes, 3 à 10 fichiers) (estimation). `hub.rs` va au lot 2 et n'est pas compté ici.
-3. Total : **125 à 205 lignes touchées dans 10 à 18 fichiers**, soit jusqu'à environ 300 lignes de diff (estimation).
+3. Total : **125 à 205 lignes touchées dans 10 à 18 fichiers**, soit jusqu'à environ 400 lignes de diff si toutes étaient modifiées (estimation).
 4. **Non chiffré** : rendre facultatives `escouade-voice-local` et, selon la réponse à la question 3 ci-dessous, la recherche par le sens. La tâche 5 ne les compte pas ; la tâche 4 montre qu'il le faut pour une image sans ALSA ni libclang.
 
 Les numéros de ligne de `src-tauri/Cargo.toml` donnés par `tauri-uses.md` sont décalés d'une ligne par endroits ; au commit `ca45bbd6` de la branche d'essai (les commits suivants n'y touchent pas) : `tauri` ligne 29, les `tauri-plugin-*` lignes 30 à 35 et 38, `escouade-voice-local` 92, `gtk` 135, `webkit2gtk` 137, `tauri-plugin-notification` 140 **[vérifié]**.
@@ -142,7 +142,7 @@ Son prix : le job de CI Linux sans GTK.
 | --- | --- | --- |
 | Le paramètre `R` retiré | 75, dont 4 faux positifs **[mesuré]** | ≈ 500 modifiées, mécaniques **[mesuré]** |
 | Le runtime à soi (dont le seul `spawn` d'`escouade-plugins`, ce qui y retire `tauri`) | 28 + 2 de tests **[mesuré]**, + 1 module neuf | 91 modifiées **[mesuré]**, ≈ 50 neuves (estimation) |
-| `Host` et ses sites | 3 du cœur **[mesuré]**, + `lib.rs`, `notify.rs` (coupé en deux), `menus.rs` | 11 sites **[mesuré]**, ≈ 200 neuves (estimation) |
+| `Host` et ses sites | 3 du cœur **[mesuré]**, + `lib.rs`, `notify.rs` (coupé en deux), `menus.rs` | 11 sites **[mesuré]**, + 3 dans `Core::load` et 3 types de bureau gardés par le cœur **[vérifié]** (§ 5), ≈ 200 neuves et quelques dizaines pour ceux-là (estimation) |
 | Les tests sur un faux `Host` | 22 **[mesuré]** | 116 modifiées **[mesuré]**, ≈ 50 neuves (estimation) |
 | **Total** | **≈ 105** (83 hors tests et 22 de tests, union mesurée) | **≈ 1 000 à 1 200 lignes touchées**, dont ≈ 750 mécaniques, soit ≈ 1 700 à 2 100 lignes de diff (estimation) |
 
@@ -168,3 +168,4 @@ Corrigé dans `2026-11-14-mode-serveur-web-design.md`, sans toucher à ce que le
 2. **Où vont la séparation par fonctionnalités et le job de CI sans GTK** : à la fin du lot 2, ou au début du lot 5 ?
 3. **La recherche par le sens quand la voix est exclue** : déplacer `ort` hors d'`escouade-voice-local` pour que `escouade-vectors` ne tire plus ALSA ni libclang, ou laisser la recherche par le sens hors du serveur dans cette version ?
 4. **Ce que la conception ne prévoit pas** (tâche 4, colonne « non prévu ») : sortir `tauri` d'`escouade-plugins` (un `spawn`, couvert par le lot 1 ci-dessus) ; ce qui tient lieu, sur un serveur, de ce qui n'a de sens qu'avec une fenêtre (taille et place de la fenêtre, surveillance de son fil, nom du programme, schéma `escouade://`, dialogue « recharger une page figée ») ; `open_url` hors de la vue Plugins ; la connexion d'Antigravity lue par `secret-tool` ; la corbeille, qui marche a priori telle quelle.
+5. **La graine des plugins sur le serveur** : d'où `escouade-server` tient-il la graine des plugins et sa liste de révocations, que l'app de bureau lit dans le dossier de ressources de Tauri (`core.rs:2014-2015`) ?
