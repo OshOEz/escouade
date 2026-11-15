@@ -1,6 +1,7 @@
 //! The attribute of the app's commands (docs/REMOTE.md, « La fondation commune », point 2): a `#[command]` stays the
 //! Tauri command it was, and also gives its entry of the remote table (`remoteapi::table` of the app), which calls it
-//! with JSON without Tauri. `handlers!` gives both lists from one, for the two never to differ.
+//! with JSON without Tauri. `handlers!` gives both lists from one, for the two never to differ. Both only work inside
+//! the app's crate: what they write names `crate::remoteapi::table`.
 
 use proc_macro::TokenStream;
 use proc_macro2::TokenStream as Tokens;
@@ -24,6 +25,7 @@ pub fn command(args: TokenStream, item: TokenStream) -> TokenStream {
 }
 
 /// `handlers![commands::a, commands::b]`: `(tauri::generate_handler![commands::a, commands::b], &[their entries])`.
+/// Bare paths only: no attribute on an item (a `#[cfg]`), no `#![plugin(…)]` as `generate_handler!` takes.
 /// Every item must be a `#[command]`: a `#[tauri::command]` in the list fails with « cannot find value
 /// `__REMOTE_…` ».
 #[proc_macro]
@@ -83,7 +85,6 @@ fn entry(function: &ItemFn, desktop: bool) -> syn::Result<Tokens> {
     Ok(quote! {
         #(#cfgs)*
         #[doc(hidden)]
-        #[allow(dead_code)]
         #vis const #constant: crate::remoteapi::table::Entry = crate::remoteapi::table::Entry {
             name: #name,
             call: #call,
@@ -420,7 +421,6 @@ mod tests {
             pub(crate) fn f(core: CoreState, agent_id: String) {}
             #[cfg(target_os = "macos")]
             #[doc(hidden)]
-            #[allow(dead_code)]
             pub(crate) const __REMOTE_F: crate::remoteapi::table::Entry
         };
         assert!(got.starts_with(&want_command.to_string()), "{got}");

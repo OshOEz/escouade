@@ -149,16 +149,25 @@ pub struct InitialState {
 }
 
 // Off the main thread: finding a `claude` of WSL may start its distribution (seconds).
-#[tauri::command(async)]
+#[command(async, desktop)]
 pub fn subscribe(
     core: CoreState,
     updates: State<crate::updates::Updates>,
-    voice: VoiceState,
     channel: Channel<UiEvent>,
 ) -> InitialState {
-    core.hub.set_sink(channel.into());
+    let mut state = subscribe_to(core.inner(), channel.into());
+    // The updates are the desktop app's alone.
+    state.installed = updates.take_installed();
+    state.restart_at = updates.restart_at();
+    state.failed_update = updates.failed();
+    state
+}
+
+/// `subscribe` with its flow to `sink`: the window's channel, or a remote client's.
+pub(crate) fn subscribe_to(core: &Arc<Core>, sink: Sink<UiEvent>) -> InitialState {
+    core.hub.set_sink(sink);
     // A page that loads again has no dictation under way: the one of the page before stops.
-    voice.cancel();
+    core.host.cancel_dictation();
     core.reset_unsaved();
     core.held.lock().clear();
     // One lock at a time, each guard ending with its statement: in a struct literal the guards
@@ -198,9 +207,9 @@ pub fn subscribe(
         usage,
         git,
         terminals,
-        installed: updates.take_installed(),
-        restart_at: updates.restart_at(),
-        failed_update: updates.failed(),
+        installed: None,
+        restart_at: None,
+        failed_update: None,
         version,
         models,
         engine_models,
@@ -221,7 +230,7 @@ pub fn subscribe(
 
 /// A link the window opens outside (the system's browser; Windows' under WSLg, `outside`): the
 /// schemes Tauri's opener allowed it, http, https, mailto and tel.
-#[tauri::command(async)]
+#[command(async)]
 pub fn open_url(url: String) -> Res<()> {
     let scheme = url.split(':').next().unwrap_or("").to_ascii_lowercase();
     if !["http", "https", "mailto", "tel"].contains(&scheme.as_str()) {
@@ -232,7 +241,7 @@ pub fn open_url(url: String) -> Res<()> {
 
 /// A file or a folder the window opens outside (its program, the file manager; Windows' under
 /// WSLg, `outside`).
-#[tauri::command(async)]
+#[command(async)]
 pub fn open_path(path: String) -> Res<()> {
     crate::outside::open(crate::outside::What::Path(std::path::Path::new(&path))).map_err(err)
 }
@@ -245,18 +254,15 @@ pub fn set_ui(core: CoreState, ui: UiState) {
 
 /// The settings as the window saves them; the Claude accounts are left as they are (their tab
 /// changes them with the `account_*` commands).
-#[tauri::command(async)]
-pub fn save_settings(
-    core: CoreState,
-    voice: VoiceState,
-    settings: Settings,
-) -> Res<Vec<ShellInfo>> {
+#[command(async)]
+pub fn save_settings(core: CoreState, settings: Settings) -> Res<Vec<ShellInfo>> {
     let remote_was_on = core.settings.read().remote_control_all;
     core.save_window_settings(settings.clone()).map_err(err)?;
     // An account saved (a code host's among them): the CI of the targets read at once (ESC-63).
     core.wake_ticket_prs();
     // A conversation under way takes the voice, its language, pace and volume (ESC-115).
-    voice.conversation_tune(&conv_choice(&core.settings.read(), &*core.secrets, &voice.catalog).0);
+    core.host
+        .tune_conversation(&core.settings.read(), &*core.secrets);
     if settings.remote_control_all && !remote_was_on {
         core.telemetry
             .track(Event::RemoteControlEnabled { from: "global" });
@@ -283,7 +289,7 @@ pub async fn engines(core: CoreState<'_>) -> Res<Vec<crate::engine::registry::En
 
 /// The harnesses the registry has now, as the window got them at its start (`InitialState::engines`): those the
 /// plugins describe change with them (PLG-6).
-#[tauri::command(async)]
+#[command(async)]
 pub fn engines_declared(core: CoreState) -> Vec<crate::engine::registry::EngineDecl> {
     core.sync_harnesses();
     crate::engine::registry::declared()
@@ -292,7 +298,7 @@ pub fn engines_declared(core: CoreState) -> Vec<crate::engine::registry::EngineD
 /// The harnesses found now, the PATH of today read first (ESC-186): the window back in front, the
 /// menu « Harness » opened. A harness found since gets Escouade's server, and its accounts' models
 /// are read.
-#[tauri::command(async)]
+#[command(async)]
 pub fn engines_found_now(core: CoreState) -> Vec<crate::model::EngineId> {
     let before = core.engines_found();
     core.sync_harnesses();
@@ -308,40 +314,40 @@ pub fn engines_found_now(core: CoreState) -> Vec<crate::model::EngineId> {
 
 /// The harnesses whose plugin is off or not installed now (ESC-391), after a plugin changed: the menus « Harness » do
 /// not offer them.
-#[tauri::command(async)]
+#[command(async)]
 pub fn engines_off_now(core: CoreState) -> Vec<crate::model::EngineId> {
     core.sync_harnesses();
     core.engines_unplugged()
 }
 
 /// What stopped the sign-in of an account before it was signed in, when it is known (ESC-133).
-#[tauri::command(async)]
+#[command(async)]
 pub fn account_sign_in_ended(core: CoreState, id: String) -> Option<String> {
     core.sign_in_ended(&id)
 }
 
 /// Where Escouade's update of Claude Code stands (ESC-133), for « Réglages › Comptes et harness ».
-#[tauri::command(async)]
+#[command(async)]
 pub fn claude_update_status(core: CoreState) -> crate::selfupdate::Status {
     crate::selfupdate::status(&core.settings.read())
 }
 
 /// The folder of Escouade's data (`~/.escouade`, another one for a development build or a sandbox), for
 /// « Réglages › À propos › Données locales » and its « Ouvrir le dossier ».
-#[tauri::command(async)]
+#[command(async)]
 pub fn data_dir(core: CoreState) -> String {
     core.data.root().display().to_string()
 }
 
 /// The installed plugins (ESC-173), as last read from their folders.
-#[tauri::command(async)]
+#[command(async)]
 pub fn plugins_list(core: CoreState) -> Vec<crate::plugins::PluginView> {
     core.plugins.list(crate::i18n::ui())
 }
 
 /// What installing the plugin of a local folder would do (the install window, PLG-4): its copy
 /// set aside until `plugin_install` or `plugin_discard`.
-#[tauri::command(async)]
+#[command(async)]
 pub fn plugin_inspect_folder(
     core: CoreState,
     path: String,
@@ -352,7 +358,7 @@ pub fn plugin_inspect_folder(
 
 /// The store as last read (STORE-9): its catalogue kept on this machine, when it was read, the
 /// version this Escouade would install of each plugin, the revocation list's serial.
-#[tauri::command(async)]
+#[command(async)]
 pub fn store_view(core: CoreState) -> crate::plugins::store::StoreView {
     core.store.view()
 }
@@ -360,7 +366,7 @@ pub fn store_view(core: CoreState) -> crate::plugins::store::StoreView {
 /// « Pour <projet> » (choice 215): up to 6 plugins of the catalogue that what Escouade sees on this
 /// machine (a harness's program on the PATH) and in the project (ticket keys in its last 200
 /// commits) calls for, none installed, each with its reason. Read here, nothing sent.
-#[tauri::command(async)]
+#[command(async)]
 pub async fn store_suggestions(
     core: CoreState<'_>,
     project: Option<String>,
@@ -406,7 +412,7 @@ pub async fn store_suggestions(
 }
 
 /// Reads the store's catalogue and revocation list again, now.
-#[tauri::command(async)]
+#[command(async)]
 pub async fn store_refresh(core: CoreState<'_>) -> Result<crate::plugins::store::StoreView, ()> {
     core.refresh_store().await;
     Ok(core.store.view())
@@ -416,7 +422,7 @@ pub async fn store_refresh(core: CoreState<'_>) -> Result<crate::plugins::store:
 /// Escouade can run when None): downloaded, every fingerprint and the signature checked, set aside
 /// until `plugin_install` or `plugin_discard`. « N'installer que des versions vérifiées » refuses a
 /// version without the seal.
-#[tauri::command(async)]
+#[command(async)]
 pub async fn plugin_inspect_store(
     core: CoreState<'_>,
     id: String,
@@ -442,7 +448,7 @@ pub async fn plugin_inspect_store(
 
 /// What installing the seed's version of the plugin `id` would do (ESC-338): read from the installer, every fingerprint and
 /// the signature checked, set aside until `plugin_install` or `plugin_discard`. No network.
-#[tauri::command(async)]
+#[command(async)]
 pub fn plugin_inspect_seed(
     core: CoreState,
     id: String,
@@ -451,14 +457,14 @@ pub fn plugin_inspect_seed(
 }
 
 /// « Ajouter un compte… » on `engine` (ESC-373): its plugin from the seed when it is not installed, with no network.
-#[tauri::command(async)]
+#[command(async)]
 pub fn plugin_need_engine(core: CoreState, engine: EngineId) {
     core.need_engine_plugin(engine);
 }
 
 /// « Installer » of a plugin the seed proposes (ESC-373): installed at once from the seed, with no network, as the gesture
 /// that needs it would; its view, or why the seed refuses it.
-#[tauri::command(async)]
+#[command(async)]
 pub fn plugin_install_seed(
     core: CoreState,
     id: String,
@@ -467,13 +473,13 @@ pub fn plugin_install_seed(
 }
 
 /// What the app's seed holds that is not installed: what the user uninstalled, what it refused to install.
-#[tauri::command(async)]
+#[command(async)]
 pub fn plugin_seed_offers(core: CoreState) -> Vec<crate::plugins::seed::Offer> {
     core.plugins.seed_offers(crate::i18n::ui())
 }
 
 /// What installing the plugin of a git repository at a tag would do: cloned and set aside.
-#[tauri::command(async)]
+#[command(async)]
 pub async fn plugin_inspect_git(
     core: CoreState<'_>,
     url: String,
@@ -485,7 +491,7 @@ pub async fn plugin_inspect_git(
 }
 
 /// What loading a plugin's folder in development in place would do.
-#[tauri::command(async)]
+#[command(async)]
 pub fn plugin_inspect_dev(
     core: CoreState,
     path: String,
@@ -496,14 +502,14 @@ pub fn plugin_inspect_dev(
 
 /// The icon of an installed plugin (PLG-13), by its id alone: a `data:image/png` address, or
 /// none (the window draws its letters). Réglages › Plugins and the store in the app show it.
-#[tauri::command(async)]
+#[command(async)]
 pub fn plugin_icon(core: CoreState, id: String) -> Result<Option<String>, String> {
     core.plugins.icon(&id)
 }
 
 /// Installs what an inspection set aside, once the user agreed: in place of the same id (an
 /// update), whose process stops and whose host is forgotten.
-#[tauri::command(async)]
+#[command(async)]
 pub fn plugin_install(
     core: CoreState,
     token: String,
@@ -537,14 +543,14 @@ pub fn plugin_install(
 }
 
 /// Forgets what an inspection set aside: the user did not install it.
-#[tauri::command(async)]
+#[command(async)]
 pub fn plugin_discard(core: CoreState, token: String) {
     core.plugins.discard(&token);
 }
 
 /// Uninstalls a plugin: its process stopped, its copy, its settings, its secrets and its journal
 /// removed; `keep`: its settings and its secrets kept for a later install.
-#[tauri::command(async)]
+#[command(async)]
 pub fn plugin_remove(core: CoreState, id: String, keep: Option<bool>) -> Result<bool, String> {
     let keep = keep.unwrap_or(false);
     let keys = core
@@ -583,7 +589,7 @@ fn plugin_view(core: &CoreState, id: &str) -> Result<crate::plugins::PluginView,
 }
 
 /// The app's switch of a plugin: off, its process stops and nothing of it reaches a project.
-#[tauri::command(async)]
+#[command(async)]
 pub fn plugin_set_enabled(
     core: CoreState,
     id: String,
@@ -598,7 +604,7 @@ pub fn plugin_set_enabled(
 }
 
 /// A plugin's switch in a project (a private one included: the user sets it there one by one).
-#[tauri::command(async)]
+#[command(async)]
 pub async fn plugin_set_project(
     core: CoreState<'_>,
     id: String,
@@ -614,20 +620,20 @@ pub async fn plugin_set_project(
 
 /// « Activer » of a harness for a project (ESC-404): the user's agreement, asked by the window before the first agent
 /// of a private project, or on the card of an agent or a ticket whose harness is off there. No tool does it.
-#[tauri::command(async)]
+#[command(async)]
 pub fn harness_enable_in(core: CoreState, project: String, engine: EngineId) -> Res<()> {
     core.enable_harness_in(&project, engine).map_err(err)
 }
 
 /// The plugin a harness goes through (ESC-404): the window's question shows what it will get and its permissions.
-#[tauri::command(async)]
+#[command(async)]
 pub fn harness_plugin_of(engine: EngineId) -> Option<String> {
     crate::plugins::harness::plugin_of(engine)
 }
 
 /// The harnesses that are not on, project by project (ESC-404): `off`, not offered; `asks`, offered behind the
 /// question of a private project.
-#[tauri::command(async)]
+#[command(async)]
 pub fn harness_scope(
     core: CoreState,
 ) -> std::collections::BTreeMap<String, crate::harness_scope::HarnessScope> {
@@ -637,7 +643,7 @@ pub fn harness_scope(
 /// Takes back a permission of a plugin, or gives it again: its process stops, and the next one
 /// is given what is left (`plugins::granted`). Its program itself is not taken back: the plugin is
 /// switched off instead.
-#[tauri::command(async)]
+#[command(async)]
 pub fn plugin_set_permission(
     core: CoreState,
     id: String,
@@ -665,7 +671,7 @@ pub fn plugin_set_permission(
 
 /// The value of a plugin's setting (one of `contributes.settings`); `null` puts it back to its
 /// default.
-#[tauri::command(async)]
+#[command(async)]
 pub fn plugin_set_setting(
     core: CoreState,
     id: String,
@@ -698,7 +704,7 @@ pub fn plugin_set_setting(
 }
 
 /// Which of a plugin's secrets are kept (their values never leave the keychain).
-#[tauri::command(async)]
+#[command(async)]
 pub fn plugin_secrets(core: CoreState, id: String) -> Result<Vec<(String, bool)>, String> {
     let view = plugin_view(&core, &id)?;
     Ok(view
@@ -717,7 +723,7 @@ pub fn plugin_secrets(core: CoreState, id: String) -> Result<Vec<(String, bool)>
 }
 
 /// Keeps a plugin's secret in the keychain, under its own name; empty forgets it.
-#[tauri::command(async)]
+#[command(async)]
 pub fn plugin_set_secret(
     core: CoreState,
     id: String,
@@ -744,7 +750,7 @@ pub struct PluginRun {
     journal: Vec<crate::plugins::journal::Entry>,
 }
 
-#[tauri::command(async)]
+#[command(async)]
 pub fn plugin_run(core: CoreState, id: String) -> PluginRun {
     PluginRun {
         status: core.plugin_runtime.status(&id),
@@ -753,7 +759,7 @@ pub fn plugin_run(core: CoreState, id: String) -> PluginRun {
 }
 
 /// Starts a plugin's process now (« Démarrer »), or again after it was stopped (« Relancer »).
-#[tauri::command(async)]
+#[command(async)]
 pub fn plugin_start(core: CoreState, id: String) -> Result<PluginRun, String> {
     let rt = &core.plugin_runtime;
     let stopped = rt.status(&id).phase == crate::plugins::runtime::PhaseName::Stopped;
@@ -775,7 +781,7 @@ pub struct UpdatesLooked {
 }
 
 /// Looks for newer versions of the installed plugins (offered, never installed), the store read again first (ESC-405).
-#[tauri::command(async)]
+#[command(async)]
 pub async fn plugins_check_updates(core: CoreState<'_>) -> Result<UpdatesLooked, ()> {
     core.look_for_updates().await;
     Ok(UpdatesLooked {
@@ -786,7 +792,7 @@ pub async fn plugins_check_updates(core: CoreState<'_>) -> Result<UpdatesLooked,
 
 /// The user agrees to the commands a plugin runs on facts, as they are now, or takes the
 /// agreement back (`on`: false), which stops them (PLG-5). Gives the plugin as it is now.
-#[tauri::command]
+#[command]
 pub fn plugin_approve_commands(
     core: CoreState,
     id: String,
@@ -800,7 +806,7 @@ pub fn plugin_approve_commands(
 
 /// Where the `claude` of a path of the settings is (empty: the one found by itself), the
 /// distribution of the settings (`wsl_distro`) for one of WSL: the line under the field.
-#[tauri::command(async)]
+#[command(async)]
 pub fn claude_locate(path: String, wsl_distro: String) -> crate::engine::Located {
     // Asked by the user: what was not found is looked for again (maybe just installed).
     crate::wsl::forget(false);
@@ -817,7 +823,7 @@ pub struct ClaudeFound {
     engines_found: Vec<crate::model::EngineId>,
 }
 
-#[tauri::command(async)]
+#[command(async)]
 pub fn claude_found(core: CoreState) -> ClaudeFound {
     // Asked once a path is saved: every `claude` of WSL is looked for again (installed, removed),
     // and the PATH of today read (ESC-186: « Chercher à nouveau »).
@@ -837,7 +843,7 @@ pub fn claude_found(core: CoreState) -> ClaudeFound {
 
 /// The items of the folder of the Principal of `engine` (Claude Code's by default) a new account
 /// of it may share (those it has).
-#[tauri::command(async)]
+#[command(async)]
 pub fn account_shareable(core: CoreState, engine: Option<EngineId>) -> Vec<String> {
     core.shareable(engine.unwrap_or(EngineId::CLAUDE))
 }
@@ -845,7 +851,7 @@ pub fn account_shareable(core: CoreState, engine: Option<EngineId>) -> Vec<Strin
 /// « Créer et se connecter »: a new account of `engine` (Claude Code by default), its folder made
 /// and the items `share` of its Principal's linked or copied into it (`mode`), saved last in the
 /// settings.
-#[tauri::command(async)]
+#[command(async)]
 pub fn account_create(
     core: CoreState,
     name: String,
@@ -861,38 +867,38 @@ pub fn account_create(
 }
 
 /// « Le compte de la machine » of `engine` added (its Principal, ESC-128).
-#[tauri::command(async)]
+#[command(async)]
 pub fn account_add_machine(core: CoreState, engine: EngineId) -> Res<ClaudeAccount> {
     let r = core.add_machine_account(engine).map_err(err);
     counted(&core, Event::AccountCreated, r)
 }
 
 /// What « Ajouter un compte… » says of the machine's account of `engine`.
-#[tauri::command]
+#[command]
 pub async fn account_machine(core: CoreState<'_>, engine: EngineId) -> Res<MachineAccount> {
     Ok(core.machine_account(engine).await)
 }
 
 /// The account's name, `claude` and « Actif »; the accounts as they then are.
-#[tauri::command(async)]
+#[command(async)]
 pub fn account_update(core: CoreState, account: ClaudeAccount) -> Res<Vec<ClaudeAccount>> {
     core.update_claude_account(account).map_err(err)
 }
 
 /// The accounts in the order of `ids`, as they then are.
-#[tauri::command(async)]
+#[command(async)]
 pub fn account_reorder(core: CoreState, ids: Vec<String>) -> Res<Vec<ClaudeAccount>> {
     core.reorder_claude_accounts(&ids).map_err(err)
 }
 
 /// « Ordre des harness » set to `order`; the order as it then is.
-#[tauri::command(async)]
+#[command(async)]
 pub fn engine_order_set(core: CoreState, order: Vec<EngineId>) -> Res<Vec<EngineId>> {
     core.set_engine_order(&order).map_err(err)
 }
 
 /// `model` of `engine` marked as a favorite (or no longer); the favorites as they then are.
-#[tauri::command(async)]
+#[command(async)]
 pub fn favorite_model_set(
     core: CoreState,
     engine: EngineId,
@@ -904,14 +910,14 @@ pub fn favorite_model_set(
 }
 
 /// The account removed (its folder stays on the disk); the accounts as they then are.
-#[tauri::command(async)]
+#[command(async)]
 pub fn account_remove(core: CoreState, id: String) -> Res<Vec<ClaudeAccount>> {
     core.remove_claude_account(&id).map_err(err)
 }
 
 /// The menu of the models of the account `id` opened (ESC-186): read again when none were, or a
 /// day ago (`Core::refresh_account_models`), in the background; the window is told by an event.
-#[tauri::command]
+#[command]
 pub fn account_models_refresh(core: CoreState, id: String) {
     let core = core.inner().clone();
     escouade_base::rt::spawn(async move { core.refresh_account_models(&id).await });
@@ -925,14 +931,14 @@ pub async fn account_status(core: CoreState<'_>, id: String) -> Res<AccountStatu
 
 /// « Clé d’API » of a Cursor account (ESC-43): kept in the system keychain, its status as it then
 /// is. Never logged.
-#[tauri::command]
+#[command]
 pub async fn account_key(core: CoreState<'_>, id: String, key: String) -> Res<AccountStatus> {
     core.set_account_key(&id, &key).await.map_err(err)
 }
 
 /// « Se connecter… »: the account's `claude` in an interactive terminal (written to, resized and
 /// killed as the others: `term_write`, `term_resize`, `term_kill`).
-#[tauri::command(async)]
+#[command(async, desktop)]
 pub fn account_login(
     core: CoreState,
     id: String,
@@ -940,7 +946,17 @@ pub fn account_login(
     rows: u16,
     output: Channel<InvokeResponseBody>,
 ) -> Res<TermInfo> {
-    let output: Sink<Vec<u8>> = output.into();
+    account_login_to(core, id, cols, rows, output.into())
+}
+
+/// `account_login` with the terminal's bytes to `output`.
+pub(crate) fn account_login_to(
+    core: CoreState,
+    id: String,
+    cols: u16,
+    rows: u16,
+    output: Sink<Vec<u8>>,
+) -> Res<TermInfo> {
     core.claude_login(&id, (cols, rows), move |bytes| {
         let _ = output.send(bytes);
     })
@@ -948,7 +964,7 @@ pub fn account_login(
 }
 
 /// « Vue Claude Code »: the agent runs in Claude Code's own interface, or in Escouade's view.
-#[tauri::command]
+#[command]
 pub async fn set_agent_view(core: CoreState<'_>, id: String, terminal: bool) -> Res<()> {
     core.set_agent_view(&id, terminal).await.map_err(err)?;
     if terminal {
@@ -961,7 +977,7 @@ pub async fn set_agent_view(core: CoreState<'_>, id: String, terminal: bool) -> 
 /// as the others: `term_write`, `term_resize`, `term_kill`). `manual`: the user asked for it
 /// (« Relancer »), as opposed to the window opening the view: an automatic start is refused once
 /// the interface stopped as soon as it started twice in a row.
-#[tauri::command]
+#[command(desktop)]
 pub async fn agent_terminal(
     core: CoreState<'_>,
     id: String,
@@ -970,7 +986,18 @@ pub async fn agent_terminal(
     manual: Option<bool>,
     output: Channel<InvokeResponseBody>,
 ) -> Res<TermInfo> {
-    let output: Sink<Vec<u8>> = output.into();
+    agent_terminal_to(core, id, cols, rows, manual, output.into()).await
+}
+
+/// `agent_terminal` with the terminal's bytes to `output`.
+pub(crate) async fn agent_terminal_to(
+    core: CoreState<'_>,
+    id: String,
+    cols: u16,
+    rows: u16,
+    manual: Option<bool>,
+    output: Sink<Vec<u8>>,
+) -> Res<TermInfo> {
     core.open_agent_terminal(&id, (cols, rows), manual.unwrap_or(false), move |bytes| {
         let _ = output.send(bytes);
     })
@@ -980,13 +1007,13 @@ pub async fn agent_terminal(
 
 /// Whether the agent's interface asks the question about the trust of its folder (Codex, Copilot
 /// CLI), which the user answers in its terminal.
-#[tauri::command(async)]
+#[command(async)]
 pub fn tui_asks_trust(core: CoreState, id: String) -> Res<bool> {
     core.tui_asks_trust(&id).map_err(err)
 }
 
 /// An image pasted in the agent's Claude Code interface, written to a file: the path to type there.
-#[tauri::command(async)]
+#[command(async)]
 pub fn paste_image(core: CoreState, id: String, media_type: String, data: String) -> Res<String> {
     core.paste_image(&id, &media_type, &data).map_err(err)
 }
@@ -1009,7 +1036,7 @@ pub struct FolderInfo {
 
 /// Always `Ok`: an async command that borrows the state must return a `Result`. `history_id`: the
 /// closed project of this folder the window means to bring back, if it has several.
-#[tauri::command]
+#[command]
 pub async fn inspect_folder(
     core: CoreState<'_>,
     path: String,
@@ -1099,7 +1126,7 @@ pub struct SetupInfo {
 }
 
 /// Always `Ok`: an async command that borrows the state must return a `Result`.
-#[tauri::command]
+#[command]
 pub async fn inspect_setup(
     _core: CoreState<'_>,
     path: String,
@@ -1157,7 +1184,7 @@ pub async fn inspect_setup(
 }
 
 /// « Faire un premier commit »: the folder made a repository if need be, with an empty first commit.
-#[tauri::command]
+#[command]
 pub async fn first_commit(_core: CoreState<'_>, path: String) -> Res<()> {
     crate::git::first_commit(path.trim()).await.map_err(err)
 }
@@ -1166,7 +1193,7 @@ pub async fn first_commit(_core: CoreState<'_>, path: String) -> Res<()> {
 /// false starts a project of its own, the history staying among the closed projects.
 /// `history_id`: which of the folder's histories comes back, when it has several (else the latest
 /// closed).
-#[tauri::command]
+#[command]
 #[allow(clippy::too_many_arguments)]
 pub async fn create_project(
     core: CoreState<'_>,
@@ -1194,32 +1221,32 @@ pub async fn create_project(
 }
 
 /// « Rechercher à nouveau » (ESC-169): the project's repositories looked for again; the project.
-#[tauri::command]
+#[command]
 pub async fn refresh_repos(core: CoreState<'_>, id: String) -> Res<Project> {
     core.refresh_repos(&id, false).await.map_err(err)?;
     core.project(&id).map_err(err)
 }
 
 /// The workflows of the project (ESC-192): the last reading, read again if a file it read changed.
-#[tauri::command]
+#[command]
 pub async fn get_workflows(core: CoreState<'_>, id: String) -> Res<crate::workflow::Scan> {
     core.refresh_workflows(&id, false).await.map_err(err)
 }
 
 /// Where each agent of the project is in its workflows, and where it has been (ESC-193).
-#[tauri::command]
+#[command]
 pub fn get_workflow_tracks(core: CoreState, id: String) -> Vec<crate::workflow_track::TrackView> {
     core.workflow_tracks(&id)
 }
 
 /// « Relire » the project's workflows (ESC-192).
-#[tauri::command]
+#[command]
 pub async fn refresh_workflows(core: CoreState<'_>, id: String) -> Res<crate::workflow::Scan> {
     core.refresh_workflows(&id, true).await.map_err(err)
 }
 
 /// What « Affiner… » will do, said before (ESC-196): the model, the account, the cost estimated.
-#[tauri::command]
+#[command]
 pub async fn workflow_refine_plan(
     core: CoreState<'_>,
     id: String,
@@ -1229,7 +1256,7 @@ pub async fn workflow_refine_plan(
 
 /// « Affiner… »: a short agent refines the project's workflows, the rules check what it says
 /// (ESC-196).
-#[tauri::command]
+#[command]
 pub async fn refine_workflows(
     core: CoreState<'_>,
     id: String,
@@ -1238,7 +1265,7 @@ pub async fn refine_workflows(
 }
 
 /// The project's workflows as the user corrected them (ESC-195): what follows the agents reads.
-#[tauri::command]
+#[command]
 pub async fn effective_workflows(
     core: CoreState<'_>,
     id: String,
@@ -1249,7 +1276,7 @@ pub async fn effective_workflows(
 }
 
 /// « Retirer du dépôt » (ESC-195): the file of a workflow this machine does not read goes.
-#[tauri::command]
+#[command]
 pub async fn remove_workflow_file(
     core: CoreState<'_>,
     id: String,
@@ -1260,7 +1287,7 @@ pub async fn remove_workflow_file(
 
 /// « Supprimer » a workflow (`removed`: its file goes, never written again), « Laisser supprimé »
 /// one proposed again, or « Rétablir » it (ESC-309).
-#[tauri::command]
+#[command]
 pub async fn set_workflow_removed(
     core: CoreState<'_>,
     id: String,
@@ -1273,50 +1300,50 @@ pub async fn set_workflow_removed(
 }
 
 /// « Oublier » a repository gone from the project's folder (ESC-169).
-#[tauri::command(async)]
+#[command(async)]
 pub fn forget_repo(core: CoreState, id: String, repo: String) -> Res<Project> {
     core.forget_repo(&id, &repo).map_err(err)
 }
 
 /// « Choisir une image… » (`path`) or « Retirer » (None) of the project's logo (ESC-167).
-#[tauri::command(async)]
+#[command(async)]
 pub fn set_project_logo(core: CoreState, id: String, path: Option<String>) -> Res<Project> {
     core.set_project_logo(&id, path.as_deref()).map_err(err)
 }
 
 /// « Recherche par le sens » (ESC-254): the vectors' model, whether it is downloaded.
-#[tauri::command(async)]
+#[command(async)]
 pub fn vectors_model(core: CoreState) -> crate::vectors::wiring::VectorsModelInfo {
     core.vectors_model_info()
 }
 
 /// Downloads the vectors' model (its progress in `UiEvent::VectorsDownload`); « Annuler » ends it with what came kept.
-#[tauri::command]
+#[command]
 pub async fn vectors_model_download(
     core: CoreState<'_>,
 ) -> Res<crate::vectors::wiring::VectorsModelInfo> {
     core.vectors_model_download().await.map_err(err)
 }
 
-#[tauri::command]
+#[command]
 pub fn vectors_model_cancel(core: CoreState) {
     core.vectors_model_cancel();
 }
 
-#[tauri::command(async)]
+#[command(async)]
 pub fn vectors_model_delete(core: CoreState) -> Res<crate::vectors::wiring::VectorsModelInfo> {
     core.vectors_model_delete().map_err(err)
 }
 
 /// The project's logo for its tile, as a `data:` URL; null when it has none.
-#[tauri::command(async)]
+#[command(async)]
 pub fn project_logo(core: CoreState, id: String) -> Option<String> {
     core.project_logo(&id)
 }
 
 /// The image of `path` as a logo would be taken, as a `data:` URL: the preview of a logo chosen
 /// before it is saved, or why it would be refused.
-#[tauri::command(async)]
+#[command(async)]
 pub fn read_logo(path: String) -> Res<String> {
     crate::projectlogo::read_in(crate::i18n::ui(), std::path::Path::new(path.trim()))
         .map(|l| crate::projectlogo::data_url(l.media_type, &l.bytes))
@@ -1325,14 +1352,14 @@ pub fn read_logo(path: String) -> Res<String> {
 
 /// How many certificates the `.pem` file of « Autorités de certification supplémentaires »
 /// holds, or why it would not be read (`crate::tls`).
-#[tauri::command(async)]
+#[command(async)]
 pub fn check_authorities(path: String) -> Res<usize> {
     crate::tls::read_authorities(path.trim())
         .map(|c| c.len())
         .map_err(err)
 }
 
-#[tauri::command(async)]
+#[command(async)]
 pub fn update_project(core: CoreState, project: Project) -> Res<()> {
     let remote_was_on = core.project(&project.id).is_ok_and(|p| p.remote_control);
     let remote_on = project.remote_control;
@@ -1345,14 +1372,14 @@ pub fn update_project(core: CoreState, project: Project) -> Res<()> {
 }
 
 /// « Faire confiance à ces commandes »: those of the project's `.escouade.yml` the user read.
-#[tauri::command(async)]
+#[command(async)]
 pub fn shared_trust(core: CoreState, project_id: String, hash: String) -> Res<Project> {
     core.trust_shared(&project_id, &hash).map_err(err)
 }
 
 /// « Exporter vers .escouade.yml » (`keys` none), or « Écrire dans .escouade.yml » of the keys
 /// kept on this machine.
-#[tauri::command(async)]
+#[command(async)]
 pub fn shared_write(
     core: CoreState,
     project_id: String,
@@ -1362,24 +1389,24 @@ pub fn shared_write(
 }
 
 /// « Reprendre la valeur du fichier »: a key kept on this machine follows the file again.
-#[tauri::command(async)]
+#[command(async)]
 pub fn shared_unkeep(core: CoreState, project_id: String, key: String) -> Res<Project> {
     core.unkeep_shared(&project_id, &key).map_err(err)
 }
 
 /// The settings the `.escouade.yml` of a folder gives a new project (the assistant's start).
-#[tauri::command(async)]
+#[command(async)]
 pub fn shared_preview(path: String) -> Option<Project> {
     crate::projectfile::preview(&path)
 }
 
-#[tauri::command(async)]
+#[command(async)]
 pub fn reorder_projects(core: CoreState, ids: Vec<String>) {
     core.reorder_projects(&ids);
 }
 
 /// A folder of agents; with `agent_id`, it takes that agent's place and holds it.
-#[tauri::command(async)]
+#[command(async)]
 pub fn agent_folder_create(
     core: CoreState,
     project_id: String,
@@ -1390,7 +1417,7 @@ pub fn agent_folder_create(
         .map_err(err)
 }
 
-#[tauri::command(async)]
+#[command(async)]
 pub fn agent_folder_rename(
     core: CoreState,
     project_id: String,
@@ -1401,12 +1428,12 @@ pub fn agent_folder_rename(
         .map_err(err)
 }
 
-#[tauri::command(async)]
+#[command(async)]
 pub fn agent_folder_delete(core: CoreState, project_id: String, folder_id: String) -> Res<()> {
     core.folder_delete(&project_id, &folder_id).map_err(err)
 }
 
-#[tauri::command(async)]
+#[command(async)]
 pub fn agent_folder_principal(
     core: CoreState,
     project_id: String,
@@ -1417,7 +1444,7 @@ pub fn agent_folder_principal(
         .map_err(err)
 }
 
-#[tauri::command(async)]
+#[command(async)]
 pub fn agent_folder_fold(
     core: CoreState,
     project_id: String,
@@ -1428,7 +1455,7 @@ pub fn agent_folder_fold(
         .map_err(err)
 }
 
-#[tauri::command(async)]
+#[command(async)]
 pub fn agent_folder_move(
     core: CoreState,
     project_id: String,
@@ -1441,7 +1468,7 @@ pub fn agent_folder_move(
 }
 
 /// `erase`: its history goes too; by default it is kept (`closed_projects`).
-#[tauri::command]
+#[command]
 pub async fn remove_project(core: CoreState<'_>, id: String, erase: Option<bool>) -> Res<()> {
     core.remove_project(&id, erase.unwrap_or(false))
         .await
@@ -1449,14 +1476,14 @@ pub async fn remove_project(core: CoreState<'_>, id: String, erase: Option<bool>
 }
 
 /// The projects closed with their history kept, the latest closed first.
-#[tauri::command(async)]
+#[command(async)]
 pub fn closed_projects(core: CoreState) -> Vec<ClosedProjectInfo> {
     core.closed_projects()
 }
 
 /// « Effacer l'historique » of a closed project (the file of an unreadable one alone), away from
 /// the async workers: it reads the history and removes its logs.
-#[tauri::command]
+#[command]
 pub async fn erase_closed_project(core: CoreState<'_>, id: String) -> Res<()> {
     let core = core.inner().clone();
     tokio::task::spawn_blocking(move || core.erase_closed_project(&id))
@@ -1465,7 +1492,7 @@ pub async fn erase_closed_project(core: CoreState<'_>, id: String) -> Res<()> {
         .map_err(err)
 }
 
-#[tauri::command]
+#[command]
 /// `isolated`: in a worktree of its own or not, whatever « Un worktree par agent » says (« Nouvel
 /// agent dans un worktree », « sans worktree »).
 pub async fn create_agent(
@@ -1498,19 +1525,19 @@ pub async fn create_agent(
     Ok(agent)
 }
 
-#[tauri::command]
+#[command]
 pub fn warm_agent(core: CoreState, id: String) {
     core.warm(&id);
 }
 
 /// « Relancer » (« Outils d'Escouade au prochain démarrage »): the agent's process, at rest,
 /// started again on the same session.
-#[tauri::command]
+#[command]
 pub async fn restart_agent_process(core: CoreState<'_>, id: String) -> Res<()> {
     core.restart_process(&id).await.map_err(err)
 }
 
-#[tauri::command(async)]
+#[command(async)]
 pub fn get_conversation(core: CoreState, id: String) -> Res<Vec<Value>> {
     // Buffered deltas are already in the snapshot: send them before it, not after.
     core.flush_conv();
@@ -1520,7 +1547,7 @@ pub fn get_conversation(core: CoreState, id: String) -> Res<Vec<Value>> {
 }
 
 /// Searches the conversations (Ctrl+K) away from the window's threads: it reads every log.
-#[tauri::command]
+#[command]
 pub async fn search_conversations(
     core: CoreState<'_>,
     query: String,
@@ -1537,7 +1564,7 @@ pub async fn search_conversations(
 
 /// A message to the agent. `files`: the files joined by their path (`attachfiles`); a window that
 /// does not send any (an older one) sends none.
-#[tauri::command]
+#[command]
 pub async fn send_message(
     core: CoreState<'_>,
     id: String,
@@ -1553,14 +1580,14 @@ pub async fn send_message(
 }
 
 /// A file to copy for `owner` (an agent's id, or `"draft"`): its handle, for its chunks.
-#[tauri::command(async)]
+#[command(async)]
 pub fn attach_open(core: CoreState, owner: String, name: String, size: u64) -> Res<String> {
     core.attach_open(&owner, &name, size).map_err(err)
 }
 
 /// The next bytes of a copy, as they are (`invoke('attach_chunk', bytes, { headers: { 'x-handle':
 /// handle } })`: no base64 round trip through JSON).
-#[tauri::command(async)]
+#[command(async, desktop)]
 pub fn attach_chunk(core: CoreState, request: tauri::ipc::Request) -> Res<()> {
     let tauri::ipc::InvokeBody::Raw(bytes) = request.body() else {
         return Err(tr!(
@@ -1577,34 +1604,34 @@ pub fn attach_chunk(core: CoreState, request: tauri::ipc::Request) -> Res<()> {
 }
 
 /// The end of a copy: the file, once all its bytes are there.
-#[tauri::command(async)]
+#[command(async)]
 pub fn attach_finish(core: CoreState, handle: String) -> Res<AttachedFile> {
     core.attach_finish(&handle).map_err(err)
 }
 
 /// A copy given up: what was written goes.
-#[tauri::command(async)]
+#[command(async)]
 pub fn attach_cancel(core: CoreState, handle: String) -> Res<()> {
     core.attach_cancel(&handle);
     Ok(())
 }
 
 /// A finished copy removed (its chip removed); never a path out of its owner's folder.
-#[tauri::command(async)]
+#[command(async)]
 pub fn attach_discard(core: CoreState, owner: String, path: String) -> Res<()> {
     core.attach_discard(&owner, &path).map_err(err)
 }
 
 /// A file of the user's own, joined as it is: checked, nothing copied. `id` is the one the window
 /// asked `file_origin` the path of, never a path: only a path the host itself read is joined.
-#[tauri::command(async)]
+#[command(async)]
 pub fn attach_origin(core: CoreState, owner: String, id: String) -> Res<AttachedFile> {
     core.attach_origin(&owner, &id).map_err(err)
 }
 
 /// The image on the system's clipboard, as PNG (empty without one), for a paste WebKitGTK leaves
 /// without it.
-#[tauri::command]
+#[command(desktop)]
 pub async fn clipboard_image(app: tauri::AppHandle) -> Res<tauri::ipc::Response> {
     crate::clipboard::image_png(&app)
         .await
@@ -1612,13 +1639,13 @@ pub async fn clipboard_image(app: tauri::AppHandle) -> Res<tauri::ipc::Response>
         .map_err(err)
 }
 
-#[tauri::command]
+#[command]
 pub async fn interrupt(core: CoreState<'_>, id: String) -> Res<()> {
     core.interrupt(&id).await.map_err(err)
 }
 
 /// A message to a subagent of the agent `id`, by the agent (`call`: the call that launched it).
-#[tauri::command]
+#[command]
 pub async fn message_subagent(
     core: CoreState<'_>,
     id: String,
@@ -1629,21 +1656,21 @@ pub async fn message_subagent(
 }
 
 /// « Arrêter » on a subagent of the agent `id`, `call` the call that launched it.
-#[tauri::command]
+#[command]
 pub async fn stop_subagent(core: CoreState<'_>, id: String, call: String) -> Res<()> {
     core.stop_subagent(&id, &call).await.map_err(err)
 }
 
 /// « Arrêter » on a task Claude Code runs in the background for the agent `id` (a command, a
 /// monitor, a remote agent, a teammate: a `BgTask` of its plan; or a workflow): `stop_task`.
-#[tauri::command]
+#[command]
 pub async fn stop_bg_task(core: CoreState<'_>, id: String, task: String) -> Res<()> {
     core.stop_bg_task(&id, &task).await.map_err(err)
 }
 
 /// The end of the output of a background task of the agent `id`: 8 KiB at most while it runs (its
 /// process's, else its output file's), up to 256 KiB of its output file once it is over.
-#[tauri::command]
+#[command]
 pub async fn task_output(
     core: CoreState<'_>,
     id: String,
@@ -1655,7 +1682,7 @@ pub async fn task_output(
 /// The conversation of a subagent of the agent `id` in the Claude Code view (`call` launched it),
 /// read from its transcript: a file read, off the async workers. `cursor` is the one the read
 /// before gave: null back when its files did not change since.
-#[tauri::command]
+#[command]
 pub async fn subagent_transcript(
     core: CoreState<'_>,
     id: String,
@@ -1669,12 +1696,12 @@ pub async fn subagent_transcript(
         .map_err(err)
 }
 
-#[tauri::command(async)]
+#[command(async)]
 pub fn answer_question(core: CoreState, id: String, request_id: String, answers: Value) -> Res<()> {
     core.answer_question(&id, &request_id, answers).map_err(err)
 }
 
-#[tauri::command(async)]
+#[command(async)]
 pub fn answer_permission(
     core: CoreState,
     id: String,
@@ -1686,7 +1713,7 @@ pub fn answer_permission(
         .map_err(err)
 }
 
-#[tauri::command]
+#[command]
 pub async fn set_agent_options(
     core: CoreState<'_>,
     id: String,
@@ -1701,14 +1728,14 @@ pub async fn set_agent_options(
 
 /// The Claude account of an agent that has not started (the Composer's chip); empty is
 /// « Automatique ».
-#[tauri::command]
+#[command]
 pub async fn set_agent_account(core: CoreState<'_>, id: String, account: String) -> Res<()> {
     core.set_agent_account(&id, &account).await.map_err(err)
 }
 
 /// « Continuer sur <harness> » and « Revenir sur <harness> »: the agent goes on on another harness,
 /// by a handover (`handover`).
-#[tauri::command]
+#[command]
 pub async fn continue_on_engine(
     core: CoreState<'_>,
     agent_id: String,
@@ -1721,7 +1748,7 @@ pub async fn continue_on_engine(
 
 /// « Reprendre sur <compte> »: the agent stopped by the usage limit goes on, with its session, on
 /// another account.
-#[tauri::command]
+#[command]
 pub async fn resume_on_account(core: CoreState<'_>, agent_id: String, account: String) -> Res<()> {
     core.resume_on_account(&agent_id, &account)
         .await
@@ -1730,40 +1757,40 @@ pub async fn resume_on_account(core: CoreState<'_>, agent_id: String, account: S
 
 /// `/login` typed to the agent (ESC-401): its account was just signed in; it goes on, on it,
 /// with its session.
-#[tauri::command]
+#[command]
 pub async fn agent_signed_in(core: CoreState<'_>, id: String) -> Res<()> {
     core.agent_signed_in(&id).await.map_err(err)
 }
 
 /// `/logout` typed to the agent (ESC-401), confirmed: its account signs out by its harness.
-#[tauri::command]
+#[command]
 pub async fn agent_logout(core: CoreState<'_>, id: String) -> Res<()> {
     core.agent_logout(&id).await.map_err(err)
 }
 
 /// « Revenir sur <compte> »: a resume on another account failed; the agent goes back.
-#[tauri::command]
+#[command]
 pub async fn back_to_previous_account(core: CoreState<'_>, agent_id: String) -> Res<()> {
     core.back_to_previous_account(&agent_id).await.map_err(err)
 }
 
 /// Renames the agent, and its own branch after it: why the branch kept its name, when it did.
-#[tauri::command]
+#[command]
 pub async fn rename_agent(core: CoreState<'_>, id: String, name: String) -> Res<Option<String>> {
     core.rename_agent(&id, &name).await.map_err(err)
 }
 
-#[tauri::command]
+#[command]
 pub async fn duplicate_agent(core: CoreState<'_>, id: String) -> Res<AgentView> {
     core.duplicate_agent(&id).await.map_err(err)
 }
 
-#[tauri::command]
+#[command]
 pub async fn archive_agent(core: CoreState<'_>, id: String, archived: bool) -> Res<()> {
     core.archive_agent(&id, archived).await.map_err(err)
 }
 
-#[tauri::command]
+#[command]
 pub async fn delete_agent(
     core: CoreState<'_>,
     id: String,
@@ -1772,7 +1799,7 @@ pub async fn delete_agent(
     core.delete_agent(&id, remove_worktree).await.map_err(err)
 }
 
-#[tauri::command]
+#[command]
 pub async fn merge_agent(
     core: CoreState<'_>,
     id: String,
@@ -1791,7 +1818,7 @@ pub async fn merge_agent(
 }
 
 /// What merging the agent would do in each of its repositories (ESC-169).
-#[tauri::command]
+#[command]
 pub async fn agent_merge_check(
     core: CoreState<'_>,
     id: String,
@@ -1800,7 +1827,7 @@ pub async fn agent_merge_check(
 }
 
 /// « Merger api seul » (ESC-169): the merge of some of the agent's repositories.
-#[tauri::command]
+#[command]
 pub async fn merge_agent_repos(
     core: CoreState<'_>,
     id: String,
@@ -1818,7 +1845,7 @@ pub async fn merge_agent_repos(
     counted(&core, Event::Merged, r)
 }
 
-#[tauri::command]
+#[command]
 pub async fn get_commands(core: CoreState<'_>, id: String) -> Res<Vec<Value>> {
     let h = core.agent(&id).map_err(err)?;
     let cached = h.lock().commands.clone();
@@ -1835,12 +1862,12 @@ pub async fn get_commands(core: CoreState<'_>, id: String) -> Res<Vec<Value>> {
     Ok(cmds)
 }
 
-#[tauri::command]
+#[command]
 pub async fn file_suggestions(core: CoreState<'_>, id: String, query: String) -> Res<Vec<String>> {
     core.file_suggestions(&id, &query).await.map_err(err)
 }
 
-#[tauri::command]
+#[command]
 pub async fn git_files(
     core: CoreState<'_>,
     project_id: String,
@@ -1849,7 +1876,7 @@ pub async fn git_files(
     core.git_files(&project_id, agent_id).await.map_err(err)
 }
 
-#[tauri::command]
+#[command]
 pub async fn git_diff(
     core: CoreState<'_>,
     project_id: String,
@@ -1861,12 +1888,12 @@ pub async fn git_diff(
         .map_err(err)
 }
 
-#[tauri::command]
+#[command]
 pub async fn git_project_diff(core: CoreState<'_>, project_id: String) -> Res<Vec<OwnedDiff>> {
     core.git_project_diff(&project_id).await.map_err(err)
 }
 
-#[tauri::command]
+#[command]
 pub async fn git_log(
     core: CoreState<'_>,
     project_id: String,
@@ -1876,7 +1903,7 @@ pub async fn git_log(
     core.git_log(&project_id, agent_id, repo).await.map_err(err)
 }
 
-#[tauri::command]
+#[command]
 pub async fn git_show(
     core: CoreState<'_>,
     project_id: String,
@@ -1886,7 +1913,7 @@ pub async fn git_show(
     core.git_show(&project_id, &hash, repo).await.map_err(err)
 }
 
-#[tauri::command]
+#[command]
 pub async fn git_fetch(
     core: CoreState<'_>,
     project_id: String,
@@ -1899,7 +1926,7 @@ pub async fn git_fetch(
     counted(&core, Event::GitSync { op: "fetch" }, r)
 }
 
-#[tauri::command]
+#[command]
 pub async fn git_pull(
     core: CoreState<'_>,
     project_id: String,
@@ -1912,7 +1939,7 @@ pub async fn git_pull(
     counted(&core, Event::GitSync { op: "pull" }, r)
 }
 
-#[tauri::command]
+#[command]
 pub async fn git_push(
     core: CoreState<'_>,
     project_id: String,
@@ -1940,7 +1967,7 @@ fn branch_err(e: anyhow::Error) -> String {
 }
 
 /// The project's branches: local ones (the folder's first), then remote ones.
-#[tauri::command]
+#[command]
 pub async fn branch_list(
     core: CoreState<'_>,
     project_id: String,
@@ -1952,7 +1979,7 @@ pub async fn branch_list(
 }
 
 /// Checks a name for a new branch: as git does, and not taken already.
-#[tauri::command]
+#[command]
 pub async fn branch_check(
     core: CoreState<'_>,
     project_id: String,
@@ -1965,7 +1992,7 @@ pub async fn branch_check(
 }
 
 /// Switches the project's folder to a branch; the stash's name when its changes were put aside.
-#[tauri::command]
+#[command]
 pub async fn branch_switch(
     core: CoreState<'_>,
     project_id: String,
@@ -1979,7 +2006,7 @@ pub async fn branch_switch(
 }
 
 /// Creates a branch at `start` (HEAD when empty), and switches the folder to it with `switch`.
-#[tauri::command]
+#[command]
 pub async fn branch_create(
     core: CoreState<'_>,
     project_id: String,
@@ -1998,7 +2025,7 @@ pub async fn branch_create(
 
 /// Deletes a branch (its remote one too with `remote`); unmerged, only with `force`. Returns what
 /// is left to tell the user: why a remote branch was kept.
-#[tauri::command]
+#[command]
 pub async fn branch_delete(
     core: CoreState<'_>,
     project_id: String,
@@ -2013,7 +2040,7 @@ pub async fn branch_delete(
 }
 
 /// The local branches « Branches mergées » offers to delete.
-#[tauri::command]
+#[command]
 pub async fn branches_merged(
     core: CoreState<'_>,
     project_id: String,
@@ -2025,7 +2052,7 @@ pub async fn branches_merged(
 }
 
 /// The diff from `a` to `b`, two branches or commits of the project's repository.
-#[tauri::command]
+#[command]
 pub async fn git_diff_refs(
     core: CoreState<'_>,
     project_id: String,
@@ -2041,7 +2068,7 @@ pub async fn git_diff_refs(
 /// A new agent in a worktree on an existing branch (a local one, or `origin/feat`). Refused for
 /// the folder's branch and for one a worktree has: `IN_WORKTREE:…` when an agent's. With
 /// `create`, on a new branch of that name, made from where a new agent starts (ESC-155).
-#[tauri::command]
+#[command]
 pub async fn create_agent_on_branch(
     core: CoreState<'_>,
     project_id: String,
@@ -2081,7 +2108,7 @@ pub fn pr_reviews(core: CoreState<'_>, project_id: String) -> Vec<crate::prrevie
 }
 
 /// « Faire relire par un agent » (ESC-66): the review starts; nothing leaves for the host.
-#[tauri::command]
+#[command]
 pub async fn pr_review_start(
     core: CoreState<'_>,
     project_id: String,
@@ -2091,7 +2118,7 @@ pub async fn pr_review_start(
 }
 
 /// A comment of a review kept, edited or dropped.
-#[tauri::command]
+#[command]
 pub fn pr_review_note(
     core: CoreState<'_>,
     project_id: String,
@@ -2105,7 +2132,7 @@ pub fn pr_review_note(
 }
 
 /// The text of a review, edited.
-#[tauri::command]
+#[command]
 pub fn pr_review_summary(
     core: CoreState<'_>,
     project_id: String,
@@ -2117,7 +2144,7 @@ pub fn pr_review_summary(
 }
 
 /// « Publier la relecture »: the only way a review reaches the host, on the user's click.
-#[tauri::command]
+#[command]
 pub async fn pr_review_publish(
     core: CoreState<'_>,
     project_id: String,
@@ -2131,14 +2158,14 @@ pub async fn pr_review_publish(
 }
 
 /// A review dropped.
-#[tauri::command]
+#[command]
 pub fn pr_review_discard(core: CoreState<'_>, project_id: String, number: u64) {
     core.pr_review_discard(&project_id, number);
 }
 
 /// « Lancer un agent sur cette PR » (ESC-65): an agent in a worktree on the branch of the project's
 /// open pull request `number`, a fork's too.
-#[tauri::command]
+#[command]
 pub async fn create_agent_on_pr(
     core: CoreState<'_>,
     project_id: String,
@@ -2155,19 +2182,19 @@ pub async fn create_agent_on_pr(
 }
 
 /// « Intégrer <base> » on an agent with a worktree: its base branch goes into its branch.
-#[tauri::command]
+#[command]
 pub async fn integrate_base(core: CoreState<'_>, id: String) -> Res<crate::core::Integration> {
     core.integrate_base(&id).await.map_err(err)
 }
 
 /// « Ouvrir une PR » on an ordinary agent's branch: the title and the description proposed.
-#[tauri::command]
+#[command]
 pub async fn agent_pr_propose(core: CoreState<'_>, id: String) -> Res<crate::agentprs::PrProposal> {
     core.agent_pr_propose(&id).await.map_err(err)
 }
 
 /// Pushes the agent's branch and opens its pull request as the user validated it.
-#[tauri::command]
+#[command]
 pub async fn agent_pr_open(
     core: CoreState<'_>,
     id: String,
@@ -2177,13 +2204,13 @@ pub async fn agent_pr_open(
 }
 
 /// Reads the agent's pull requests again (at most every 20 s unless `now`).
-#[tauri::command]
+#[command]
 pub async fn agent_prs_refresh(core: CoreState<'_>, id: String, now: bool) -> Res<()> {
     core.agent_prs_refresh(&id, now).await.map_err(err)
 }
 
 /// Switches the agent's worktree to a branch (the status bar's picker); the branch it is on.
-#[tauri::command]
+#[command]
 pub async fn agent_branch_switch(core: CoreState<'_>, id: String, name: String) -> Res<String> {
     core.agent_branch_switch(&id, &name)
         .await
@@ -2191,7 +2218,7 @@ pub async fn agent_branch_switch(core: CoreState<'_>, id: String, name: String) 
 }
 
 /// Fetch, pull or push (`op`) of the agent's own folder; a summary for the user.
-#[tauri::command]
+#[command]
 pub async fn agent_git_sync(core: CoreState<'_>, id: String, op: String) -> Res<String> {
     let (sync, op) = match op.as_str() {
         "pull" => (SyncOp::Pull, "pull"),
@@ -2203,7 +2230,7 @@ pub async fn agent_git_sync(core: CoreState<'_>, id: String, op: String) -> Res<
 }
 
 /// « L'agent corrige » / « L'agent corrige les retours » on pull request `number`.
-#[tauri::command]
+#[command]
 pub async fn agent_pr_fix(
     core: CoreState<'_>,
     id: String,
@@ -2219,7 +2246,7 @@ pub async fn agent_pr_fix(
 
 /// The « PR et CI » tab (ESC-305): the checks, reviews, comments and deployments of the agent's
 /// pull request `number`, or why the host did not give them.
-#[tauri::command]
+#[command]
 pub async fn agent_pr_detail(
     core: CoreState<'_>,
     id: String,
@@ -2232,7 +2259,7 @@ pub async fn agent_pr_detail(
 }
 
 /// The end of the log of a check's job of the agent's pull request `number`.
-#[tauri::command]
+#[command]
 pub async fn agent_pr_log(
     core: CoreState<'_>,
     id: String,
@@ -2246,7 +2273,7 @@ pub async fn agent_pr_log(
 }
 
 /// « Relancer les échecs » on the agent's pull request `number`: how many runs started.
-#[tauri::command]
+#[command]
 pub async fn agent_pr_rerun(
     core: CoreState<'_>,
     id: String,
@@ -2259,13 +2286,13 @@ pub async fn agent_pr_rerun(
 }
 
 /// Why the agent has no « Ouvrir une PR… »; none when it can open one.
-#[tauri::command]
+#[command]
 pub async fn agent_no_pr(core: CoreState<'_>, id: String) -> Res<Option<crate::prview::NoPr>> {
     core.agent_no_pr(&id).await.map_err(err)
 }
 
 /// The open pull requests of the project, or why they could not be read.
-#[tauri::command]
+#[command]
 pub async fn project_prs(
     core: CoreState<'_>,
     project_id: String,
@@ -2274,20 +2301,20 @@ pub async fn project_prs(
 }
 
 /// The background reading of the project on screen's list, for the PR tab's badge (ESC-403).
-#[tauri::command]
+#[command]
 pub async fn project_prs_watch(core: CoreState<'_>, project_id: String) -> Res<bool> {
     Ok(core.project_prs_watch(&project_id).await)
 }
 
 /// The open pull requests of every project, as recently read, for the overview (ESC-68).
-#[tauri::command]
+#[command]
 pub async fn overview_prs(core: CoreState<'_>) -> Res<Vec<crate::prview::OverviewPrs>> {
     Ok(core.overview_prs().await)
 }
 
 /// The environments of the project's host as last read (ESC-67): the view « Environnements »
 /// opens on them, and its project is followed while it is open.
-#[tauri::command]
+#[command]
 pub fn project_environments(
     core: CoreState<'_>,
     project_id: String,
@@ -2296,7 +2323,7 @@ pub fn project_environments(
 }
 
 /// « Rafraîchir » of the view « Environnements »: read now.
-#[tauri::command]
+#[command]
 pub async fn project_environments_read(
     core: CoreState<'_>,
     project_id: String,
@@ -2306,7 +2333,7 @@ pub async fn project_environments_read(
 }
 
 /// The statistics of a period, of every account or (`account`) of one.
-#[tauri::command(async)]
+#[command(async)]
 pub fn stats(
     core: CoreState,
     range: String,
@@ -2318,13 +2345,13 @@ pub fn stats(
     core.stats_view_by(&range, account.as_deref(), engine.as_deref())
 }
 
-#[tauri::command]
+#[command]
 pub async fn refresh_usage(core: CoreState<'_>) -> Res<()> {
     core.inner().refresh_usage().await;
     Ok(())
 }
 
-#[tauri::command]
+#[command]
 pub async fn git_discard(
     core: CoreState<'_>,
     project_id: String,
@@ -2337,7 +2364,7 @@ pub async fn git_discard(
 }
 
 /// What a direct commit of the agent's changes (the project's own checkout without one) takes.
-#[tauri::command]
+#[command]
 pub async fn commit_preview(
     core: CoreState<'_>,
     project_id: String,
@@ -2349,7 +2376,7 @@ pub async fn commit_preview(
 }
 
 /// Haiku's message for a direct commit of `paths`: only proposed.
-#[tauri::command]
+#[command]
 pub async fn commit_propose(
     core: CoreState<'_>,
     project_id: String,
@@ -2362,7 +2389,7 @@ pub async fn commit_propose(
 }
 
 /// Commits `paths` with the user's message; the commit's short hash.
-#[tauri::command]
+#[command]
 pub async fn commit_direct(
     core: CoreState<'_>,
     project_id: String,
@@ -2379,7 +2406,7 @@ pub async fn commit_direct(
 
 // ---------- embedded editor ----------
 
-#[tauri::command]
+#[command]
 pub async fn fs_tree(
     core: CoreState<'_>,
     project_id: String,
@@ -2388,7 +2415,7 @@ pub async fn fs_tree(
     core.fs_tree(&project_id, agent_id).await.map_err(err)
 }
 
-#[tauri::command]
+#[command]
 pub async fn fs_read(
     core: CoreState<'_>,
     project_id: String,
@@ -2406,7 +2433,7 @@ pub async fn fs_read(
 }
 
 #[allow(clippy::too_many_arguments)]
-#[tauri::command]
+#[command]
 pub async fn fs_write(
     core: CoreState<'_>,
     project_id: String,
@@ -2436,7 +2463,7 @@ pub async fn fs_write(
     Ok(hash)
 }
 
-#[tauri::command]
+#[command]
 pub async fn fs_create(
     core: CoreState<'_>,
     project_id: String,
@@ -2454,7 +2481,7 @@ pub async fn fs_create(
 
 /// Renames or moves a file or a folder of the source; refused when something else is at `to`, or
 /// when only the case of what git tracks changes.
-#[tauri::command]
+#[command]
 pub async fn fs_rename(
     core: CoreState<'_>,
     project_id: String,
@@ -2473,7 +2500,7 @@ pub async fn fs_rename(
 }
 
 /// Sends a file or a folder of the source to the system's trash.
-#[tauri::command]
+#[command]
 pub async fn fs_delete(
     core: CoreState<'_>,
     project_id: String,
@@ -2495,7 +2522,7 @@ pub async fn fs_delete(
 
 /// Shows a file or a folder of the source in the system's file manager, selected; the source's
 /// folder opened when no path is given.
-#[tauri::command]
+#[command]
 pub async fn fs_reveal(
     core: CoreState<'_>,
     project_id: String,
@@ -2516,7 +2543,7 @@ pub async fn fs_reveal(
 
 /// The files an agent sent by a call of `SendUserFile` (ESC-171), as shown now: its images
 /// read, its other files looked at.
-#[tauri::command]
+#[command]
 pub async fn sent_files(
     core: CoreState<'_>,
     agent_id: String,
@@ -2526,7 +2553,7 @@ pub async fn sent_files(
 }
 
 /// The file `index` an agent sent opened with its application, or shown in its folder.
-#[tauri::command]
+#[command]
 pub async fn sent_file_open(
     core: CoreState<'_>,
     agent_id: String,
@@ -2541,13 +2568,13 @@ pub async fn sent_file_open(
 
 /// An image of the web a message shows (https), downloaded by the core at the user's click: its
 /// `data:` URL.
-#[tauri::command]
+#[command]
 pub async fn remote_image(core: CoreState<'_>, src: String) -> Res<String> {
     core.remote_image(&src).await.map_err(err)
 }
 
 /// The image a message of the agent shows in Markdown by a local path: its `data:` URL, or none.
-#[tauri::command]
+#[command]
 pub async fn agent_local_image(
     core: CoreState<'_>,
     agent_id: String,
@@ -2557,7 +2584,7 @@ pub async fn agent_local_image(
 }
 
 /// That image opened with its application, or shown in its folder (`reveal`): the image viewer.
-#[tauri::command]
+#[command]
 pub async fn agent_local_open(
     core: CoreState<'_>,
     agent_id: String,
@@ -2572,7 +2599,7 @@ pub async fn agent_local_open(
 /// « Enregistrer sous… » of the image viewer: the image it shows (a `data:` URL the core made),
 /// written where the user picks in the system's dialog, which the core opens: the window never
 /// gives a path. False when the user cancels.
-#[tauri::command]
+#[command(desktop)]
 pub async fn save_image(app: tauri::AppHandle, data_url: String, name: String) -> Res<bool> {
     use tauri_plugin_dialog::DialogExt;
     let (bytes, name) = crate::sentfiles::image_to_save(&data_url, &name).map_err(err)?;
@@ -2594,7 +2621,7 @@ pub async fn save_image(app: tauri::AppHandle, data_url: String, name: String) -
 }
 
 /// Creates an empty folder, its parents with it; refused when something is already there.
-#[tauri::command]
+#[command]
 pub async fn fs_mkdir(
     core: CoreState<'_>,
     project_id: String,
@@ -2608,7 +2635,7 @@ pub async fn fs_mkdir(
     fsedit::mkdir(std::path::Path::new(&root), &path, &worktrees).map_err(err)
 }
 
-#[tauri::command]
+#[command]
 pub async fn fs_base(
     core: CoreState<'_>,
     project_id: String,
@@ -2627,7 +2654,7 @@ pub async fn fs_base(
 }
 
 /// The lines of the source's files matching `query` (the agent's worktree, else the project).
-#[tauri::command]
+#[command]
 pub async fn code_search(
     core: CoreState<'_>,
     project_id: String,
@@ -2642,7 +2669,7 @@ pub async fn code_search(
     counted(&core, Event::CodeSearched, r)
 }
 
-#[tauri::command(async)]
+#[command(async)]
 pub fn cancel_resume(core: CoreState, id: String) -> Res<()> {
     core.cancel_resume(&id).map_err(err)
 }
@@ -2651,7 +2678,7 @@ pub fn cancel_resume(core: CoreState, id: String) -> Res<()> {
 
 /// An interactive terminal in the project's folder; in the agent's worktree when `agent_id` has
 /// one, and in the folder `subdir` of that (a path of the editor's tree) when it is given.
-#[tauri::command]
+#[command(desktop)]
 #[allow(clippy::too_many_arguments)]
 pub async fn term_spawn(
     core: CoreState<'_>,
@@ -2664,7 +2691,26 @@ pub async fn term_spawn(
     rows: u16,
     output: Channel<InvokeResponseBody>,
 ) -> Res<TermInfo> {
-    let output: Sink<Vec<u8>> = output.into();
+    let output = output.into();
+    term_spawn_to(
+        core, project_id, agent_id, subdir, shell, name, cols, rows, output,
+    )
+    .await
+}
+
+/// `term_spawn` with the terminal's bytes to `output`.
+#[allow(clippy::too_many_arguments)]
+pub(crate) async fn term_spawn_to(
+    core: CoreState<'_>,
+    project_id: String,
+    agent_id: Option<String>,
+    subdir: Option<String>,
+    shell: String,
+    name: String,
+    cols: u16,
+    rows: u16,
+    output: Sink<Vec<u8>>,
+) -> Res<TermInfo> {
     let cwd = core
         .term_cwd(&project_id, agent_id, subdir.as_deref())
         .await
@@ -2716,7 +2762,7 @@ pub async fn term_spawn(
 /// `cursor_row` is the row of its log where it starts. With `agent_id`, it runs in that agent's
 /// worktree (`Core::worktree_run`), named after it and with its ports, and stops with its test
 /// launches (archive, deletion, validation, worktree removed).
-#[tauri::command(async)]
+#[command(async, desktop)]
 #[allow(clippy::too_many_arguments)]
 pub fn run_start(
     core: CoreState,
@@ -2727,6 +2773,24 @@ pub fn run_start(
     rows: u16,
     cursor_row: Option<u16>,
     output: Channel<InvokeResponseBody>,
+) -> Res<TermInfo> {
+    let output = output.into();
+    run_start_to(
+        core, project_id, command_id, agent_id, cols, rows, cursor_row, output,
+    )
+}
+
+/// `run_start` with the terminal's bytes to `output`.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn run_start_to(
+    core: CoreState,
+    project_id: String,
+    command_id: String,
+    agent_id: Option<String>,
+    cols: u16,
+    rows: u16,
+    cursor_row: Option<u16>,
+    output: Sink<Vec<u8>>,
 ) -> Res<TermInfo> {
     let project = core.project(&project_id).map_err(err)?;
     let run = project
@@ -2778,7 +2842,7 @@ pub fn run_start(
         launch,
         (cols, rows),
         cursor_row,
-        output.into(),
+        output,
     );
     if let (Some(a), Ok(info)) = (&agent_id, &r) {
         core.track_test_run(a, &info.id, &info.name).map_err(err)?;
@@ -2843,7 +2907,7 @@ fn spawn_launch(
 /// nothing there: `write` only queues the bytes for the terminal's input thread. Returns the
 /// write's number in the terminal's log of writes, which the window sends back with the report of
 /// a slow echo (`term_report`).
-#[tauri::command]
+#[command]
 pub fn term_write(core: CoreState, id: String, data: String) -> Res<u64> {
     core.pty
         .write_from_window(&id, data.as_bytes())
@@ -2853,14 +2917,14 @@ pub fn term_write(core: CoreState, id: String, data: String) -> Res<u64> {
 /// Synchronous, so that resizes keep their order among themselves (the last one wins); it waits
 /// on nothing heavy. It is not in order with the writes queued before it: the terminal's input
 /// thread writes those whenever the program reads.
-#[tauri::command]
+#[command]
 pub fn term_resize(core: CoreState, id: String, cols: u16, rows: u16) -> Res<()> {
     core.pty.resize(&id, cols, rows).map_err(err)
 }
 
 /// Off the main thread, and off the async runtime's workers: ending a process tree (listing the
 /// machine's processes, its windows…) and closing the pseudo-console take their time.
-#[tauri::command]
+#[command]
 pub async fn term_kill(core: CoreState<'_>, id: String) -> Res<()> {
     let core = core.inner().clone();
     escouade_base::rt::spawn_blocking(move || core.kill_terminal(&id))
@@ -2870,12 +2934,12 @@ pub async fn term_kill(core: CoreState<'_>, id: String) -> Res<()> {
 
 /// What the window measured of a terminal (the renderer it draws with, an echo that was slow to
 /// show), for the log.
-#[tauri::command(async)]
+#[command(async)]
 pub fn term_report(core: CoreState, id: String, report: TermReport) {
     core.pty.report(&id, report);
 }
 
-#[tauri::command]
+#[command]
 pub fn play_chime() {
     crate::notify::play_chime();
 }
@@ -2887,21 +2951,21 @@ pub fn quit_app(app: tauri::AppHandle) {
 }
 
 /// How many files the editor holds unsaved: "Quitter" asks the window first when there are some.
-#[tauri::command]
+#[command]
 pub fn set_unsaved(core: CoreState, count: usize) {
     core.unsaved
         .store(count, std::sync::atomic::Ordering::Release);
 }
 
 /// The agents the window holds a message for (`outbox.svelte.ts`).
-#[tauri::command]
+#[command]
 pub fn set_held(core: CoreState, agents: Vec<String>) {
     *core.held.lock() = agents.into_iter().collect();
 }
 
 /// Turns Remote Control on or off for the agent. True when, in the Claude Code view, the change
 /// waits for the interface's next start: it runs, and was started with the other state.
-#[tauri::command]
+#[command]
 pub async fn set_remote_control(core: CoreState<'_>, id: String, enabled: bool) -> Res<bool> {
     let at_next_start = core.set_remote_control(&id, enabled).await.map_err(err)?;
     if enabled {
@@ -2913,7 +2977,7 @@ pub async fn set_remote_control(core: CoreState<'_>, id: String, enabled: bool) 
 
 // ---------- board ----------
 
-#[tauri::command]
+#[command]
 pub async fn ticket_create(
     core: CoreState<'_>,
     project_id: String,
@@ -2924,7 +2988,7 @@ pub async fn ticket_create(
 }
 
 /// Its pasted images are written: off the async workers.
-#[tauri::command]
+#[command]
 pub async fn ticket_update(core: CoreState<'_>, id: String, draft: TicketDraft) -> Res<Ticket> {
     let core = core.inner().clone();
     tokio::task::spawn_blocking(move || core.ticket_update(&id, draft))
@@ -2934,7 +2998,7 @@ pub async fn ticket_update(core: CoreState<'_>, id: String, draft: TicketDraft) 
 }
 
 /// The images of a ticket, with their content, for its form to show: read off the async workers.
-#[tauri::command]
+#[command]
 pub async fn ticket_images(
     core: CoreState<'_>,
     id: String,
@@ -2946,13 +3010,13 @@ pub async fn ticket_images(
         .map_err(err)
 }
 
-#[tauri::command]
+#[command]
 pub async fn ticket_delete(core: CoreState<'_>, id: String) -> Res<()> {
     core.ticket_delete(&id).await.map_err(err)
 }
 
 /// « Nettoyer » in the project's settings: the worktrees its archived agents left (ESC-143).
-#[tauri::command]
+#[command]
 pub async fn clean_worktrees(
     core: CoreState<'_>,
     project_id: String,
@@ -2963,67 +3027,67 @@ pub async fn clean_worktrees(
 }
 
 /// « Partager avec l'équipe », « Arrêter le partage » (ESC-190).
-#[tauri::command(async)]
+#[command(async)]
 pub fn ticket_share(core: CoreState, id: String, on: bool) -> Res<Ticket> {
     core.ticket_share(&id, on).map_err(err)
 }
 
 /// « Masquer chez moi », or back on the board (ESC-190).
-#[tauri::command(async)]
+#[command(async)]
 pub fn ticket_hide(core: CoreState, id: String, hidden: bool) -> Res<Ticket> {
     core.ticket_hide(&id, hidden).map_err(err)
 }
 
 /// « Garder le mien », « Prendre le sien » of a shared ticket's file in conflict (ESC-190).
-#[tauri::command(async)]
+#[command(async)]
 pub fn shared_resolve(core: CoreState, id: String, keep_mine: bool) -> Res<Ticket> {
     core.shared_resolve(&id, keep_mine).map_err(err)
 }
 
 /// `git config user.name`, offered by the first launch's window (ESC-190).
-#[tauri::command]
+#[command]
 pub async fn git_user_name(core: CoreState<'_>, project_id: Option<String>) -> Res<String> {
     Ok(core.git_user_name(project_id).await)
 }
 
-#[tauri::command(async)]
+#[command(async)]
 pub fn ticket_prioritize(core: CoreState, id: String) -> Res<()> {
     core.ticket_prioritize(&id).map_err(err)
 }
 
-#[tauri::command(async)]
+#[command(async)]
 pub fn ticket_start(core: CoreState, id: String) -> Res<()> {
     core.ticket_start(&id).map_err(err)
 }
 
-#[tauri::command]
+#[command]
 pub async fn ticket_resume(core: CoreState<'_>, id: String) -> Res<()> {
     core.ticket_resume(&id).await.map_err(err)
 }
 
-#[tauri::command]
+#[command]
 pub async fn ticket_approve(core: CoreState<'_>, id: String) -> Res<()> {
     let r = core.ticket_approve(&id).await.map_err(err);
     counted(&core, Event::TicketApproved, r)
 }
 
-#[tauri::command]
+#[command]
 pub async fn ticket_reject(core: CoreState<'_>, id: String, comment: String) -> Res<()> {
     core.ticket_reject(&id, &comment).await.map_err(err)
 }
 
-#[tauri::command]
+#[command]
 pub async fn ticket_resolve_conflict(core: CoreState<'_>, id: String) -> Res<()> {
     core.ticket_resolve_conflict(&id).await.map_err(err)
 }
 
-#[tauri::command(async)]
+#[command(async)]
 pub fn ticket_dismiss(core: CoreState, id: String) -> Res<()> {
     core.ticket_dismiss(&id).map_err(err)
 }
 
 /// « Rafraîchir » of the column « En revue » (ESC-59): its pull requests are read now.
-#[tauri::command]
+#[command]
 pub async fn ticket_prs_refresh(core: CoreState<'_>, project_id: String) -> Res<usize> {
     core.ticket_prs_refresh(Some(&project_id))
         .await
@@ -3031,7 +3095,7 @@ pub async fn ticket_prs_refresh(core: CoreState<'_>, project_id: String) -> Res<
 }
 
 /// The CI of each project's target branch as last read (ESC-63): what the headers start with.
-#[tauri::command(async)]
+#[command(async)]
 pub fn target_cis(
     core: CoreState,
 ) -> std::collections::BTreeMap<String, crate::branchci::BranchCi> {
@@ -3040,14 +3104,14 @@ pub fn target_cis(
 
 /// « Rafraîchir » of a CI's pill (ESC-63): the project's target and the branches its tickets
 /// pushed are read now.
-#[tauri::command]
+#[command]
 pub async fn ci_refresh(core: CoreState<'_>, project_id: String) -> Res<()> {
     core.branch_cis_refresh(Some(&project_id), true).await;
     Ok(())
 }
 
 /// The checks of a target, of a pushed branch, of a ticket's pull request or of an agent's branch.
-#[tauri::command]
+#[command]
 pub async fn ci_detail(
     core: CoreState<'_>,
     of: crate::branchci::CiOf,
@@ -3056,7 +3120,7 @@ pub async fn ci_detail(
 }
 
 /// The end of a job's log, in reading only.
-#[tauri::command]
+#[command]
 pub async fn ci_job_log(
     core: CoreState<'_>,
     of: crate::branchci::CiOf,
@@ -3066,13 +3130,13 @@ pub async fn ci_job_log(
 }
 
 /// « Relancer les jobs en échec », on the user's click: how many runs started.
-#[tauri::command]
+#[command]
 pub async fn ci_rerun(core: CoreState<'_>, of: crate::branchci::CiOf) -> Res<usize> {
     core.ci_rerun(&of).await.map_err(err)
 }
 
 /// « Envoyer à un agent »: a failed job and the end of its log go to an agent of the project.
-#[tauri::command]
+#[command]
 pub async fn ci_log_to_agent(
     core: CoreState<'_>,
     of: crate::branchci::CiOf,
@@ -3087,7 +3151,7 @@ pub async fn ci_log_to_agent(
 }
 
 /// « Merger » / « Merger quand c'est vert » on a ticket « En revue » (ESC-62).
-#[tauri::command]
+#[command]
 pub async fn ticket_pr_merge(
     core: CoreState<'_>,
     id: String,
@@ -3096,67 +3160,67 @@ pub async fn ticket_pr_merge(
     core.ticket_pr_merge(&id, when_green).await.map_err(err)
 }
 
-#[tauri::command(async)]
+#[command(async)]
 pub fn ticket_pr_stop_waiting(core: CoreState, id: String) -> Res<()> {
     core.ticket_pr_stop_waiting(&id).map_err(err)
 }
 
 /// « Terminer quand même »: a ticket whose pull request was closed without a merge is done.
-#[tauri::command(async)]
+#[command(async)]
 pub fn ticket_finish_anyway(core: CoreState, id: String) -> Res<()> {
     core.ticket_finish_anyway(&id).map_err(err)
 }
 
 /// « Remettre à faire »: a ticket whose pull request was closed without a merge goes back to do.
-#[tauri::command]
+#[command]
 pub async fn ticket_pr_back_to_todo(core: CoreState<'_>, id: String) -> Res<()> {
     core.ticket_pr_back_to_todo(&id).await.map_err(err)
 }
 
 /// « L'agent corrige » on a ticket « En revue » whose CI failed (ESC-60): its agent gets the
 /// failed jobs and the end of their logs, its worktree made again from its branch.
-#[tauri::command]
+#[command]
 pub async fn ticket_pr_fix_ci(core: CoreState<'_>, id: String) -> Res<()> {
     core.ticket_pr_fix_ci(&id).await.map_err(err)
 }
 
 /// « L'agent corrige les retours » on a ticket « En revue » (ESC-61): its agent gets the review's
 /// comments not resolved that came since its last push of fixes. On a click only.
-#[tauri::command]
+#[command]
 pub async fn ticket_pr_fix_reviews(core: CoreState<'_>, id: String) -> Res<()> {
     core.ticket_pr_fix_reviews(&id).await.map_err(err)
 }
 
 /// « L'agent met à jour la branche » on a ticket « En revue » in conflict with its target (ESC-61).
-#[tauri::command]
+#[command]
 pub async fn ticket_pr_update_branch(core: CoreState<'_>, id: String) -> Res<()> {
     core.ticket_pr_update_branch(&id).await.map_err(err)
 }
 
-#[tauri::command(async)]
+#[command(async)]
 pub fn board_set(core: CoreState, project_id: String, settings: BoardSettings) -> Res<Project> {
     core.board_set(&project_id, settings).map_err(err)
 }
 
 /// « Reprendre maintenant » in the board's header: the autopilot's pause is lifted.
-#[tauri::command(async)]
+#[command(async)]
 pub fn autopilot_resume(core: CoreState) {
     core.autopilot_resume();
 }
 
-#[tauri::command]
+#[command]
 pub async fn git_branches(core: CoreState<'_>, project_id: String) -> Res<Vec<String>> {
     core.git_branches(&project_id).await.map_err(err)
 }
 
-#[tauri::command]
+#[command]
 pub async fn agent_prepare_launch(core: CoreState<'_>, id: String) -> Res<()> {
     core.agent_prepare_launch(&id).await.map_err(err)
 }
 
 /// « Lancer » in the test modal: the user read `recipe`, the agent's recipe as the modal showed it,
 /// and lets it run. Refused when the agent's recipe is no longer that one.
-#[tauri::command(async)]
+#[command(async)]
 pub fn test_recipe_approve(core: CoreState, agent_id: String, recipe: TestRecipe) -> Res<()> {
     core.approve_recipe(&agent_id, recipe).map_err(err)
 }
@@ -3165,7 +3229,7 @@ pub fn test_recipe_approve(core: CoreState, agent_id: String, recipe: TestRecipe
 /// like a launch command, with the system's default shell and the reserved ports exported. One
 /// whose agent was archived, deleted or put to validation meanwhile is stopped at once, and the
 /// error tells why. A recipe the user did not approve (`test_recipe_approve`) runs nothing.
-#[tauri::command(async)]
+#[command(async, desktop)]
 #[allow(clippy::too_many_arguments)]
 pub fn test_run_start(
     core: CoreState,
@@ -3176,6 +3240,22 @@ pub fn test_run_start(
     rows: u16,
     cursor_row: Option<u16>,
     output: Channel<InvokeResponseBody>,
+) -> Res<TermInfo> {
+    let output = output.into();
+    test_run_start_to(core, agent_id, kind, index, cols, rows, cursor_row, output)
+}
+
+/// `test_run_start` with the terminal's bytes to `output`.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn test_run_start_to(
+    core: CoreState,
+    agent_id: String,
+    kind: String,
+    index: usize,
+    cols: u16,
+    rows: u16,
+    cursor_row: Option<u16>,
+    output: Sink<Vec<u8>>,
 ) -> Res<TermInfo> {
     let spec = core.test_run_spec(&agent_id, &kind, index).map_err(err)?;
     let project_id = core
@@ -3207,7 +3287,7 @@ pub fn test_run_start(
         launch,
         (cols, rows),
         cursor_row,
-        output.into(),
+        output,
     )?;
     core.track_test_run(&agent_id, &info.id, &info.name)
         .map_err(err)?;
@@ -3217,20 +3297,20 @@ pub fn test_run_start(
 
 /// The `.isola.toml` of the agent's worktree, whole, as `isola up` will read it: what the test modal
 /// shows before the services start.
-#[tauri::command(async)]
+#[command(async)]
 pub fn isola_config(core: CoreState, agent_id: String) -> Res<String> {
     core.isola_config(&agent_id).map_err(err)
 }
 
 /// « Lancer » in the test modal of an agent whose services isola runs: the user read `config` and the
 /// address to open `open`. Refused when the file or the address is no longer what the modal showed.
-#[tauri::command(async)]
+#[command(async)]
 pub fn isola_approve(core: CoreState, agent_id: String, config: String, open: String) -> Res<()> {
     core.approve_isola(&agent_id, config, open).map_err(err)
 }
 
 /// The services isola runs for the agent's worktree, with their addresses.
-#[tauri::command]
+#[command]
 pub async fn isola_services(
     core: CoreState<'_>,
     agent_id: String,
@@ -3239,13 +3319,13 @@ pub async fn isola_services(
 }
 
 /// Stops the services isola runs for the agent's worktree.
-#[tauri::command]
+#[command]
 pub async fn isola_down(core: CoreState<'_>, agent_id: String) -> Res<()> {
     core.isola_down(&agent_id).await.map_err(err)
 }
 
 /// The setup and teardown Claude suggests for the project's worktrees, from what it reads of it.
-#[tauri::command]
+#[command]
 pub async fn suggest_worktree_steps(
     core: CoreState<'_>,
     project_id: String,
@@ -3254,7 +3334,7 @@ pub async fn suggest_worktree_steps(
 }
 
 /// The launch commands Claude suggests for the project, from what it reads of it (nothing is saved), with how many it gave that were refused.
-#[tauri::command]
+#[command]
 pub async fn suggest_run_commands(
     core: CoreState<'_>,
     project_id: String,
@@ -3263,7 +3343,7 @@ pub async fn suggest_run_commands(
 }
 
 /// The same, for the folder of a project not made yet (the new project's assistant).
-#[tauri::command]
+#[command]
 pub async fn suggest_worktree_steps_at(
     core: CoreState<'_>,
     path: String,
@@ -3272,7 +3352,7 @@ pub async fn suggest_worktree_steps_at(
 }
 
 /// The same, for the folder of a project not made yet (the new project's assistant).
-#[tauri::command]
+#[command]
 pub async fn suggest_run_commands_at(
     core: CoreState<'_>,
     path: String,
@@ -3283,7 +3363,7 @@ pub async fn suggest_run_commands_at(
 /// Looks for a newer release, through the network settings as they are now. `manual`: the user
 /// asked, a failure is shown whatever the checks before it did; else it is kept quiet until it goes
 /// on. A failure is an answer (`failed`, with its cause), not an error of the command.
-#[tauri::command]
+#[command(desktop)]
 pub async fn update_check(
     app: tauri::AppHandle,
     core: CoreState<'_>,
@@ -3298,7 +3378,7 @@ pub async fn update_check(
 /// download that fails reads latest.json again and is tried once more before it is told (`failed`,
 /// with its cause and the release's page, for the browser), under the rule of `update_check`
 /// for `manual`.
-#[tauri::command]
+#[command(desktop)]
 pub async fn update_download(
     updates: State<'_, crate::updates::Updates>,
     id: u32,
@@ -3309,20 +3389,20 @@ pub async fn update_download(
 
 /// « Redémarrer maintenant »: the update downloaded installs, the app stopped cleanly first, and
 /// the app starts again on it.
-#[tauri::command]
+#[command(desktop)]
 pub async fn update_restart(app: tauri::AppHandle) -> Res<()> {
     crate::updates::restart_now(app).await.map_err(err)
 }
 
 /// « Plus tard »: the automatic restart planned is called off.
-#[tauri::command]
+#[command(desktop)]
 pub fn update_postpone(app: tauri::AppHandle) {
     crate::updates::postpone(&app);
 }
 
 /// What the window says of itself for an automatic restart: a modal open, a test launch being
 /// prepared, its last key or mouse input.
-#[tauri::command]
+#[command(desktop)]
 pub fn update_presence(
     updates: State<crate::updates::Updates>,
     presence: crate::updates::Presence,
@@ -3331,14 +3411,14 @@ pub fn update_presence(
 }
 
 /// The update found as `id` is no longer offered.
-#[tauri::command]
+#[command(desktop)]
 pub fn update_close(updates: State<crate::updates::Updates>, id: u32) {
     updates.free(id);
 }
 
 /// One HTTP request to `url` (http or https only) without proxy, 2 s at most: true for any
 /// answer.
-#[tauri::command]
+#[command]
 pub async fn http_ready(core: CoreState<'_>, url: String, agent_id: Option<String>) -> Res<bool> {
     let up = crate::testlaunch::http_ready(&url).await;
     // An agent's test launch answers: said on the facts' bus (PLG-5).
@@ -3350,17 +3430,17 @@ pub async fn http_ready(core: CoreState<'_>, url: String, agent_id: Option<Strin
 
 // ---------- code hosts ----------
 
-#[tauri::command]
+#[command]
 pub async fn forges(core: CoreState<'_>) -> Res<crate::forge::connect::ForgesView> {
     Ok(core.forges_view().await)
 }
 
-#[tauri::command]
+#[command]
 pub async fn forge_check(core: CoreState<'_>) -> Res<crate::forge::connect::ForgesView> {
     Ok(core.forge_check().await)
 }
 
-#[tauri::command]
+#[command]
 pub async fn forge_connect(
     core: CoreState<'_>,
     form: crate::forge::connect::ForgeForm,
@@ -3375,7 +3455,7 @@ pub async fn forge_connect(
     r
 }
 
-#[tauri::command]
+#[command]
 pub async fn forge_disconnect(
     core: CoreState<'_>,
     host: String,
@@ -3386,7 +3466,7 @@ pub async fn forge_disconnect(
 }
 
 /// The project's code host (ESC-390): none without a remote on a host whose plugin is on.
-#[tauri::command]
+#[command]
 pub async fn project_code_host(
     core: CoreState<'_>,
     project_id: String,
@@ -3394,19 +3474,19 @@ pub async fn project_code_host(
     Ok(core.project_code_host(&project_id).await)
 }
 
-#[tauri::command]
+#[command]
 pub async fn forge_guess(core: CoreState<'_>, url: String) -> Res<Option<String>> {
     core.forge_guess(&url).await.map_err(err)
 }
 
-#[tauri::command]
+#[command]
 pub fn forge_token_page(core: CoreState, kind: String, url: String) -> Res<String> {
     core.forge_token_page(&kind, &url).map_err(err)
 }
 
 // ---------- external ticket systems ----------
 
-#[tauri::command]
+#[command]
 pub async fn integration_connect(
     core: CoreState<'_>,
     service: Service,
@@ -3424,7 +3504,7 @@ pub async fn integration_connect(
     counted(&core, Event::IntegrationConnected { service }, r)
 }
 
-#[tauri::command]
+#[command]
 pub fn integration_disconnect(
     core: CoreState,
     service: Service,
@@ -3434,7 +3514,7 @@ pub fn integration_disconnect(
         .map_err(err)
 }
 
-#[tauri::command]
+#[command]
 pub async fn integration_containers(
     core: CoreState<'_>,
     service: Service,
@@ -3450,7 +3530,7 @@ pub async fn integration_containers(
     .map_err(err)
 }
 
-#[tauri::command]
+#[command]
 pub async fn integration_states(
     core: CoreState<'_>,
     service: Service,
@@ -3462,7 +3542,7 @@ pub async fn integration_states(
         .map_err(err)
 }
 
-#[tauri::command]
+#[command]
 pub async fn integration_issues(
     core: CoreState<'_>,
     project_id: String,
@@ -3482,7 +3562,7 @@ pub async fn integration_issues(
         .map_err(err)
 }
 
-#[tauri::command]
+#[command]
 pub async fn integration_import(
     core: CoreState<'_>,
     project_id: String,
@@ -3501,26 +3581,26 @@ pub async fn integration_import(
 }
 
 /// « Resynchroniser » (the ⚠ of an imported ticket's card): its failed syncs go again at once.
-#[tauri::command]
+#[command]
 pub async fn integration_resync(core: CoreState<'_>, ticket_id: String) -> Res<()> {
     core.integration_resync(&ticket_id).await.map_err(err)
 }
 
 /// The MCP server (« Claude et les agents peuvent piloter Escouade »): running or not, its port, why it failed.
 // Off the main thread: a start waiting for its port is no reason for the window to wait.
-#[tauri::command(async)]
+#[command(async)]
 pub fn mcp_status(core: CoreState) -> crate::mcp::McpStatus {
     core.mcp.status()
 }
 
 /// The MCP server's activity log, oldest first (the last 200 entries).
-#[tauri::command]
+#[command]
 pub fn mcp_activity(core: CoreState) -> Vec<crate::mcp::activity::ActivityEntry> {
     core.mcp.activity.entries()
 }
 
 /// « Effacer » of the MCP activity log.
-#[tauri::command]
+#[command]
 pub fn mcp_clear_activity(core: CoreState) {
     core.mcp.activity.clear();
 }
@@ -3528,7 +3608,7 @@ pub fn mcp_clear_activity(core: CoreState) {
 /// « Les agents peuvent piloter Escouade » turned on or off: saved at once, not through the
 /// settings modal's draft (it writes into the config of each account of every harness installed,
 /// which « Annuler » could not take back). The declaration follows by itself (`mcp_declare_status`, `mcpDeclared`).
-#[tauri::command(async)]
+#[command(async)]
 pub fn mcp_set_enabled(core: CoreState, enabled: bool) -> Res<()> {
     core.set_mcp_enabled(enabled).map_err(err)?;
     if enabled {
@@ -3538,7 +3618,7 @@ pub fn mcp_set_enabled(core: CoreState, enabled: bool) -> Res<()> {
 }
 
 /// The answer to « Statistiques d’usage », at the first start.
-#[tauri::command(async)]
+#[command(async)]
 pub fn telemetry_set(core: CoreState, consent: bool) -> Res<()> {
     core.set_telemetry(consent).map_err(err)
 }
@@ -3547,7 +3627,7 @@ pub fn telemetry_set(core: CoreState, consent: bool) -> Res<()> {
 /// and the command to run (or the entry to paste) by hand, its token hidden. Asked when the window
 /// shows it: a harness installed since, or a file changed by hand, is seen to by a new run, which
 /// the window hears of (`mcpDeclared`).
-#[tauri::command]
+#[command]
 pub fn mcp_declare_status(core: CoreState) -> Vec<crate::mcp::install::Declaration> {
     core.declare_in_harnesses();
     core.mcp.declared()
@@ -3555,7 +3635,7 @@ pub fn mcp_declare_status(core: CoreState) -> Vec<crate::mcp::install::Declarati
 
 /// The command that declares the server by hand in the account, with the real token: asked for
 /// when the user copies it, never sent with the state.
-#[tauri::command(async)]
+#[command(async)]
 pub fn mcp_manual_command(core: CoreState, account: String) -> Res<String> {
     core.mcp_manual_command(&account).map_err(err)
 }
@@ -3573,7 +3653,7 @@ pub struct VoiceInfo {
     models: Vec<crate::voice::models::ModelView>,
 }
 
-#[tauri::command(async)]
+#[command(async, desktop)]
 pub fn voice_info(voice: VoiceState) -> VoiceInfo {
     VoiceInfo {
         devices: voice.devices(),
@@ -3604,7 +3684,7 @@ fn voice_err(e: crate::voice::VoiceError) -> String {
 /// Starts listening, on the microphone and with the model of the settings; or says the model is
 /// to be downloaded first. Off the main thread: macOS asks the user for the microphone the first
 /// time, and the answer waits for them.
-#[tauri::command(async)]
+#[command(async, desktop)]
 pub fn voice_start(core: CoreState, voice: VoiceState) -> Res<crate::voice::Started> {
     let choice =
         voice_choice(&core.settings.read(), &*core.secrets, &voice.catalog).map_err(voice_err)?;
@@ -3614,7 +3694,7 @@ pub fn voice_start(core: CoreState, voice: VoiceState) -> Res<crate::voice::Star
 /// Stops listening and gives the text heard (empty when nothing was said), transcribed on a
 /// thread of its own. `target`, where it goes ("composer", "terminal", "ticket"), only for the
 /// usage statistics, which never hold the text.
-#[tauri::command]
+#[command(desktop)]
 pub async fn voice_stop(
     core: CoreState<'_>,
     voice: VoiceState<'_>,
@@ -3665,7 +3745,7 @@ pub async fn voice_stop(
 }
 
 /// Réglages › Voix: the services of « En ligne » whose key is in the keychain (never the keys).
-#[tauri::command(async)]
+#[command(async)]
 pub fn voice_online_keys(core: CoreState) -> Vec<String> {
     let settings = core.settings.read().clone();
     crate::voice::online::usable_keys(&settings, &*core.secrets)
@@ -3673,14 +3753,14 @@ pub fn voice_online_keys(core: CoreState) -> Vec<String> {
 
 /// Réglages › Voix and the accounts of Mistral Vibe: the Mistral account's key by its end, or the Vibe account the voice
 /// goes by (ESC-327).
-#[tauri::command(async)]
+#[command(async)]
 pub fn voice_mistral_key(core: CoreState) -> crate::voice::online::MistralKey {
     crate::voice::online::mistral_state(&core.settings.read())
 }
 
 /// Keeps the key of `service` in the system's keychain, read back to check; never in a file: a
 /// keychain that refuses it (or none, on Linux) leaves it unsaved, and says so.
-#[tauri::command(async)]
+#[command(async)]
 pub fn voice_online_key_set(core: CoreState, service: String, key: String) -> Res<()> {
     // A key given to a service of the first hand: its plugin from the seed if it is not installed (ESC-373).
     core.need_voice_plugin(&service);
@@ -3688,14 +3768,14 @@ pub fn voice_online_key_set(core: CoreState, service: String, key: String) -> Re
 }
 
 /// Forgets the key of `service`.
-#[tauri::command(async)]
+#[command(async)]
 pub fn voice_online_key_delete(core: CoreState, service: String) -> Res<()> {
     crate::voice::online::delete_key(&*core.secrets, &service)
 }
 
 /// Réglages › Voix: the models and the voices of `service` (ESC-132). What was listed is kept; `refresh`, or nothing
 /// listed yet with a key kept, reads its API again with the key (only the key goes).
-#[tauri::command]
+#[command(desktop)]
 pub async fn voice_online_catalog(
     core: CoreState<'_>,
     voice: VoiceState<'_>,
@@ -3731,25 +3811,25 @@ pub async fn voice_online_catalog(
 
 /// Escape, or the field dictated into gone: the listening and the transcription stop, nothing
 /// given.
-#[tauri::command]
+#[command(desktop)]
 pub fn voice_cancel(voice: VoiceState) {
     voice.cancel();
 }
 
 /// Downloads a model (its progress in `UiEvent::Voice`), through the proxy of the settings.
-#[tauri::command]
+#[command(desktop)]
 pub async fn voice_download(core: CoreState<'_>, voice: VoiceState<'_>, model: String) -> Res<()> {
     let client = crate::voice::models::client(&core.settings.read()).map_err(err)?;
     voice.download(&client, &model).await.map_err(err)
 }
 
-#[tauri::command]
+#[command(desktop)]
 pub fn voice_download_cancel(voice: VoiceState, model: String) {
     voice.cancel_download(&model);
 }
 
 /// « Effacer le modèle »: its file goes (it is downloaded again at the next dictation).
-#[tauri::command(async)]
+#[command(async, desktop)]
 pub fn voice_delete_model(voice: VoiceState, model: String) -> Res<()> {
     voice.delete_model(&model).map_err(err)
 }
@@ -3782,7 +3862,7 @@ fn speak_options(settings: &Settings, voice: &str) -> crate::voice::speech::Spea
 }
 
 /// What a conversation is held with, from `settings`, and its language.
-fn conv_choice(
+pub(crate) fn conv_choice(
     settings: &Settings,
     secrets: &dyn crate::integrations::secrets::SecretStore,
     catalog: &crate::voice::online_catalog::CatalogStore,
@@ -3820,13 +3900,13 @@ fn conv_choice(
 }
 
 /// Réglages › Voix: the conversation's voices (which are downloaded), and whether the app can speak here.
-#[tauri::command(async)]
+#[command(async, desktop)]
 pub fn speech_info(voice: VoiceState) -> crate::voice::SpeechInfo {
     voice.speech_info()
 }
 
 /// Starts a conversation with the settings' microphone, model and voice; or says what is to be downloaded first.
-#[tauri::command(async)]
+#[command(async, desktop)]
 pub fn conversation_start(
     core: CoreState,
     voice: VoiceState,
@@ -3856,54 +3936,54 @@ pub fn conversation_start(
     Ok(started)
 }
 
-#[tauri::command]
+#[command(desktop)]
 pub fn conversation_listen(voice: VoiceState, session: u64) {
     voice.conversation_listen(session);
 }
 
-#[tauri::command]
+#[command(desktop)]
 pub fn conversation_hold(voice: VoiceState, session: u64) {
     voice.conversation_hold(session);
 }
 
 /// Reads `text` aloud; the number of the reading, which its end and its barge-in carry.
-#[tauri::command]
+#[command(desktop)]
 pub fn conversation_say(voice: VoiceState, session: u64, text: String) -> Res<u64> {
     voice.conversation_say(session, &text).map_err(voice_err)
 }
 
-#[tauri::command]
+#[command(desktop)]
 pub fn conversation_stop(voice: VoiceState) {
     voice.conversation_stop();
 }
 
 /// A sentence said in the conversation, sent to the agent with the instruction to end with a passage to be read.
-#[tauri::command]
+#[command]
 pub async fn conversation_send(core: CoreState<'_>, id: String, text: String) -> Res<()> {
     let r = core.send_spoken(&id, text).await.map_err(err);
     counted(&core, Event::MessageSent, r)
 }
 
 /// Downloads a voice (its progress in `UiEvent::Voice`), through the proxy of the settings.
-#[tauri::command]
+#[command(desktop)]
 pub async fn speech_download(core: CoreState<'_>, voice: VoiceState<'_>, id: String) -> Res<()> {
     let client = crate::voice::models::client(&core.settings.read()).map_err(err)?;
     voice.download_voice(&client, &id).await.map_err(err)
 }
 
-#[tauri::command]
+#[command(desktop)]
 pub fn speech_download_cancel(voice: VoiceState, id: String) {
     voice.cancel_voice_download(&id);
 }
 
-#[tauri::command(async)]
+#[command(async, desktop)]
 pub fn speech_delete(voice: VoiceState, id: String) -> Res<()> {
     voice.delete_voice(&id).map_err(err)
 }
 
 /// « Écouter »: a sentence read in the voice `id`, with the settings' pace and volume (and `speaker`, for a voice that
 /// has several). Returns once it is heard.
-#[tauri::command(async)]
+#[command(async, desktop)]
 pub fn speech_preview(
     core: CoreState,
     voice: VoiceState,
@@ -3930,7 +4010,7 @@ pub fn speech_preview(
 
 /// « ▶ Écouter » on line (ESC-132): a sentence read by `service` with `model` and `voice_id` in `lang`, at the
 /// settings' pace and volume. Returns once it is heard; a voice the service refuses is said at once, with its answer.
-#[tauri::command(async)]
+#[command(async, desktop)]
 pub fn speech_preview_online(
     core: CoreState,
     voice: VoiceState,
@@ -3978,7 +4058,7 @@ fn preview_text(lang: &str) -> &'static str {
 
 /// The spec's tree by subject, with what the project already has that could be imported when the
 /// spec is empty, and where the docs live (`branch`: current, or the fixed branch).
-#[tauri::command]
+#[command]
 pub async fn docs_spec_tree(core: CoreState<'_>, id: String) -> Res<Value> {
     let project = core.project(&id).map_err(err)?;
     let space = core.docs_space(&id, None).await.map_err(err)?;
@@ -3995,7 +4075,7 @@ pub async fn docs_spec_tree(core: CoreState<'_>, id: String) -> Res<Value> {
 }
 
 /// « Comparer au code » (ESC-263): `pages`, or the whole spec when None. Ends with them compared.
-#[tauri::command]
+#[command]
 pub async fn docs_compare(
     core: CoreState<'_>,
     id: String,
@@ -4005,12 +4085,12 @@ pub async fn docs_compare(
 }
 
 /// The spec already in the project (`SPEC.md`, a `docs/` folder…), offered for import.
-#[tauri::command]
+#[command]
 pub async fn docs_detect_spec(core: CoreState<'_>, id: String) -> Res<Vec<crate::docs::Candidate>> {
     Ok(core.docs_space(&id, None).await.map_err(err)?.detect())
 }
 
-#[tauri::command]
+#[command]
 pub async fn docs_spec_page(
     core: CoreState<'_>,
     id: String,
@@ -4023,7 +4103,7 @@ pub async fn docs_spec_page(
 }
 
 /// A page written from the window: the fields left out stay as they are.
-#[tauri::command]
+#[command]
 pub async fn docs_spec_write(
     core: CoreState<'_>,
     id: String,
@@ -4058,7 +4138,7 @@ pub async fn docs_spec_write(
     written
 }
 
-#[tauri::command]
+#[command]
 pub async fn docs_spec_search(
     core: CoreState<'_>,
     id: String,
@@ -4071,13 +4151,13 @@ pub async fn docs_spec_search(
         .spec_search(&query, 50))
 }
 
-#[tauri::command]
+#[command]
 pub async fn docs_decisions(core: CoreState<'_>, id: String) -> Res<Vec<crate::docs::Decision>> {
     Ok(core.docs_space(&id, None).await.map_err(err)?.decisions())
 }
 
 /// A decision proposed from the window, or a proposal still open revised (`reference`: its id).
-#[tauri::command]
+#[command]
 pub async fn docs_decision_propose(
     core: CoreState<'_>,
     id: String,
@@ -4097,7 +4177,7 @@ pub async fn docs_decision_propose(
 }
 
 /// A proposal that replaces the accepted decision `number`.
-#[tauri::command]
+#[command]
 pub async fn docs_decision_replace(
     core: CoreState<'_>,
     id: String,
@@ -4118,7 +4198,7 @@ pub async fn docs_decision_replace(
 
 /// « Accepter »: a human accepts a proposed decision (`reference`: its id). The only way to: no
 /// MCP tool does.
-#[tauri::command]
+#[command]
 pub async fn docs_decision_accept(
     core: CoreState<'_>,
     id: String,
@@ -4132,7 +4212,7 @@ pub async fn docs_decision_accept(
     out
 }
 
-#[tauri::command]
+#[command]
 pub async fn docs_documents(
     core: CoreState<'_>,
     id: String,
@@ -4144,7 +4224,7 @@ pub async fn docs_documents(
         .map_err(err)
 }
 
-#[tauri::command]
+#[command]
 pub async fn docs_document_text(
     core: CoreState<'_>,
     id: String,
@@ -4160,7 +4240,7 @@ pub async fn docs_document_text(
 /// A file dropped or chosen (`source`, a file of this machine), put in the drive: in `folder` when
 /// one is given, else filed by itself (`docsdrive::place`). Over 50 MB without an LFS rule that
 /// takes it, it asks to be `confirmed`.
-#[tauri::command]
+#[command]
 pub async fn docs_document_add(
     core: CoreState<'_>,
     id: String,
@@ -4180,7 +4260,7 @@ pub async fn docs_document_add(
 
 /// The drive: its folders, its files with who added them, how many times the agents read them and
 /// how many pages and decisions cite them.
-#[tauri::command]
+#[command]
 pub async fn docs_drive(core: CoreState<'_>, id: String) -> Res<crate::docsdrive::Drive> {
     core.docs_drive(&id).await.map_err(err)
 }
@@ -4192,7 +4272,7 @@ pub struct NamedSize {
 }
 
 /// What the window must know of files before it drops them: LFS takes them, or they are large.
-#[tauri::command]
+#[command]
 pub async fn docs_document_check(
     core: CoreState<'_>,
     id: String,
@@ -4209,7 +4289,7 @@ pub async fn docs_document_check(
 }
 
 /// A document moved to another folder (the root when empty).
-#[tauri::command]
+#[command]
 pub async fn docs_document_move(
     core: CoreState<'_>,
     id: String,
@@ -4220,13 +4300,13 @@ pub async fn docs_document_move(
 }
 
 /// « Nouveau dossier ».
-#[tauri::command]
+#[command]
 pub async fn docs_folder_add(core: CoreState<'_>, id: String, folder: String) -> Res<String> {
     core.docs_folder_add(&id, &folder).await.map_err(err)
 }
 
 /// « Rechercher dans les documents ».
-#[tauri::command]
+#[command]
 pub async fn docs_documents_search(
     core: CoreState<'_>,
     id: String,
@@ -4240,14 +4320,14 @@ pub async fn docs_documents_search(
 }
 
 /// What the project's docs have to share: the files, their number, the conflict being handled.
-#[tauri::command]
+#[command]
 pub async fn docs_pending(core: CoreState<'_>, id: String) -> Res<crate::docsshare::Pending> {
     core.docs_pending(&id).await.map_err(err)
 }
 
 /// « Partager »: fetches, commits the changes of the docs and only them, pushes. Stops on a
 /// conflict, which is kept for `docs_share_resolve` / `docs_share_cancel`.
-#[tauri::command]
+#[command]
 pub async fn docs_share(
     core: CoreState<'_>,
     id: String,
@@ -4260,7 +4340,7 @@ pub async fn docs_share(
 }
 
 /// « L'agent résout » a conflict of the docs.
-#[tauri::command]
+#[command]
 pub async fn docs_share_resolve(
     core: CoreState<'_>,
     id: String,
@@ -4269,13 +4349,13 @@ pub async fn docs_share_resolve(
 }
 
 /// « Annuler » a conflict of the docs.
-#[tauri::command]
+#[command]
 pub async fn docs_share_cancel(core: CoreState<'_>, id: String) -> Res<()> {
     core.docs_share_cancel(&id).await.map_err(err)
 }
 
 /// How the spec found at `path` (one of `docs_detect_spec`'s) would be cut into pages: nothing written.
-#[tauri::command]
+#[command]
 pub async fn docs_import_plan(
     core: CoreState<'_>,
     id: String,
@@ -4288,7 +4368,7 @@ pub async fn docs_import_plan(
 }
 
 /// « Importer », once the user agreed to the cut: the pages of `only` (all when left out), none overwritten.
-#[tauri::command]
+#[command]
 pub async fn docs_import(
     core: CoreState<'_>,
     id: String,
@@ -4305,7 +4385,7 @@ pub async fn docs_import(
 }
 
 /// « Ce qui a bougé »: the last committed changes of the spec.
-#[tauri::command]
+#[command]
 pub async fn docs_recent(core: CoreState<'_>, id: String) -> Res<Vec<crate::docsshare::Moved>> {
     core.docs_recent(&id).await.map_err(err)
 }
@@ -4326,7 +4406,7 @@ mod tests {
         // A command that is written and not listed there is never reachable from the window.
         let lib = include_str!("lib.rs");
         let handler = lib
-            .split_once("generate_handler![")
+            .split_once("handlers![")
             .and_then(|(_, rest)| rest.split_once(']'))
             .map(|(list, _)| list)
             .expect("the handler list");
@@ -4399,19 +4479,19 @@ mod tests {
 }
 
 /// The project's shared memory (ESC-255), as « Mémoire partagée » of its settings lists it.
-#[tauri::command(async)]
+#[command(async)]
 pub fn memory_list(core: CoreState, project_id: String) -> Res<Vec<crate::memory::Memory>> {
     core.memories(&project_id).map_err(err)
 }
 
 /// « Oublier » of a memory, in the project's settings.
-#[tauri::command(async)]
+#[command(async)]
 pub fn memory_forget(core: CoreState, project_id: String, name: String) -> Res<()> {
     core.forget_memory(&project_id, &name).map_err(err)
 }
 
 /// What Claude Code remembers of the project, offered once: none once offered.
-#[tauri::command(async)]
+#[command(async)]
 pub fn claude_memory_offer(
     core: CoreState,
     project_id: String,
@@ -4420,14 +4500,14 @@ pub fn claude_memory_offer(
 }
 
 /// « Reprendre » the memories ticked (none: « Pas maintenant »); the offer is not made again.
-#[tauri::command(async)]
+#[command(async)]
 pub fn claude_memory_take(core: CoreState, project_id: String, names: Vec<String>) -> Res<Project> {
     core.claude_memory_take(&project_id, &names).map_err(err)
 }
 
 /// « Commencer » of « Nouvelle discussion » (ESC-261): a discussion or a brainstorm of the Docs
 /// tab, its agent in the folder of the docs branch, sent its subject.
-#[tauri::command]
+#[command]
 pub async fn discussion_start(
     core: CoreState<'_>,
     id: String,
@@ -4440,14 +4520,14 @@ pub async fn discussion_start(
 }
 
 /// « Verser dans la spec »: what the discussion `agent` proposes, written on the docs branch.
-#[tauri::command]
+#[command]
 pub async fn discussion_pour(core: CoreState<'_>, agent: String) -> Res<crate::discussion::Poured> {
     core.discussion_pour(&agent).await.map_err(err)
 }
 
 /// « Planifier » (ESC-262): the changes of the discussion `agent` poured, or every change of the
 /// spec without tickets when None, made into tickets « À faire » by the planner.
-#[tauri::command]
+#[command]
 pub async fn docs_plan(
     core: CoreState<'_>,
     id: String,
@@ -4460,7 +4540,7 @@ pub async fn docs_plan(
 }
 
 /// « Annuler » of a planning: its tickets not started yet removed, its changes to plan again.
-#[tauri::command]
+#[command]
 pub async fn docs_plan_cancel(
     core: CoreState<'_>,
     id: String,
@@ -4470,7 +4550,7 @@ pub async fn docs_plan_cancel(
 }
 
 /// Takes a proposal out of « Ce qui ira dans la spec »: a page, or a decision (from 1).
-#[tauri::command]
+#[command]
 pub fn discussion_drop(
     core: CoreState,
     agent: String,
@@ -4482,7 +4562,7 @@ pub fn discussion_drop(
 }
 
 /// The links `escouade://` not yet taken (STORE-11): what they ask, for the window, once.
-#[tauri::command]
+#[command(desktop)]
 pub fn deep_links_take(inbox: State<'_, crate::deeplink::Inbox>) -> Vec<crate::deeplink::DeepLink> {
     inbox.take()
 }
@@ -4512,7 +4592,7 @@ fn tell_of(core: &Arc<Core>) -> crate::devpage::Tell {
 
 /// Opens the page of agent `agent_id`'s launch at `url` (or loads it in the page already open):
 /// in the agent's view at `bounds`, or in its project's « Pages » window (`detached`).
-#[tauri::command]
+#[command(desktop)]
 #[allow(clippy::too_many_arguments)]
 pub fn devpage_open(
     app: tauri::AppHandle,
@@ -4552,7 +4632,7 @@ pub fn devpage_open(
 }
 
 /// The page of agent `agent_id` in its view: placed at `bounds`, or hidden (none).
-#[tauri::command]
+#[command(desktop)]
 pub fn devpage_place(
     app: tauri::AppHandle,
     pages: State<Arc<crate::devpage::Pages>>,
@@ -4563,7 +4643,7 @@ pub fn devpage_place(
 }
 
 /// Back, forward, reload, or `to` (an address typed in its bar).
-#[tauri::command]
+#[command(desktop)]
 pub fn devpage_go(
     app: tauri::AppHandle,
     agent_id: String,
@@ -4574,13 +4654,13 @@ pub fn devpage_go(
 }
 
 /// The devtools of the page of agent `agent_id`.
-#[tauri::command]
+#[command(desktop)]
 pub fn devpage_devtools(app: tauri::AppHandle, agent_id: String) -> Res<()> {
     crate::devpage::devtools(&app, &agent_id)
 }
 
 /// Moves the page to its project's « Pages » window, or back to the agent's view.
-#[tauri::command]
+#[command(desktop)]
 pub fn devpage_detach(
     app: tauri::AppHandle,
     pages: State<Arc<crate::devpage::Pages>>,
@@ -4591,7 +4671,7 @@ pub fn devpage_detach(
 }
 
 /// Shows the page of agent `agent_id` at a width: `full`, `tablet` or `mobile`.
-#[tauri::command]
+#[command(desktop)]
 pub fn devpage_mode(
     app: tauri::AppHandle,
     pages: State<Arc<crate::devpage::Pages>>,
@@ -4602,7 +4682,7 @@ pub fn devpage_mode(
 }
 
 /// The « Pages » window shows the page of agent `agent_id` (its tab clicked).
-#[tauri::command]
+#[command(desktop)]
 pub fn devpage_show(
     app: tauri::AppHandle,
     pages: State<Arc<crate::devpage::Pages>>,
@@ -4613,7 +4693,7 @@ pub fn devpage_show(
 }
 
 /// Closes the page of agent `agent_id`.
-#[tauri::command]
+#[command(desktop)]
 pub fn devpage_close(
     app: tauri::AppHandle,
     pages: State<Arc<crate::devpage::Pages>>,
@@ -4623,7 +4703,7 @@ pub fn devpage_close(
 }
 
 /// The pages open: all of them, or those of project `project_id` (a « Pages » window's bar).
-#[tauri::command]
+#[command(desktop)]
 pub fn devpage_list(
     pages: State<Arc<crate::devpage::Pages>>,
     project_id: Option<String>,

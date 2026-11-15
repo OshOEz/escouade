@@ -2,6 +2,8 @@
 
 use crate::fileorigin::FileOrigins;
 use crate::i18n::{self, Lang};
+use crate::integrations::secrets::SecretStore;
+use crate::model::Settings;
 use crate::{menus, notify};
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -24,6 +26,10 @@ pub trait Host: Send + Sync + 'static {
     fn waiting(&self, n: usize);
     fn relabel(&self, lang: Lang, waiting: usize);
     fn stop_voice(&self);
+    /// The dictation under way, if any, called off: a page that loads again has none.
+    fn cancel_dictation(&self);
+    /// A conversation under way takes the voice, language, pace and volume of `settings`.
+    fn tune_conversation(&self, settings: &Settings, secrets: &dyn SecretStore);
 }
 
 pub struct Desktop<R: Runtime>(pub AppHandle<R>);
@@ -75,6 +81,18 @@ impl<R: Runtime> Host for Desktop<R> {
     fn stop_voice(&self) {
         if let Some(v) = self.0.try_state::<Arc<crate::voice::Voice>>() {
             v.shutdown();
+        }
+    }
+
+    fn cancel_dictation(&self) {
+        if let Some(v) = self.0.try_state::<Arc<crate::voice::Voice>>() {
+            v.cancel();
+        }
+    }
+
+    fn tune_conversation(&self, settings: &Settings, secrets: &dyn SecretStore) {
+        if let Some(v) = self.0.try_state::<Arc<crate::voice::Voice>>() {
+            v.conversation_tune(&crate::commands::conv_choice(settings, secrets, &v.catalog).0);
         }
     }
 }
@@ -134,5 +152,9 @@ mod fake {
         }
 
         fn stop_voice(&self) {}
+
+        fn cancel_dictation(&self) {}
+
+        fn tune_conversation(&self, _: &Settings, _: &dyn SecretStore) {}
     }
 }

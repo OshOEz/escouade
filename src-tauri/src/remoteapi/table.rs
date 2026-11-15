@@ -36,8 +36,13 @@ pub enum CallError {
     DesktopOnly,
     /// An argument is missing or does not read: Tauri's text, which names it.
     Args(String),
-    /// The command failed, or panicked: the text Tauri gives the window.
-    Failed(String),
+    /// The command failed, or panicked: the value Tauri gives the window (its error as JSON, a text for a panic).
+    Failed(Value),
+}
+
+/// Every command of the window, from the list `lib.rs` gives Tauri.
+pub fn entries() -> &'static [Entry] {
+    crate::commands().1
 }
 
 /// The command `name` of `entries`, called with `args`; on the app's runtime, as Tauri runs one.
@@ -54,7 +59,7 @@ pub async fn call(
     let call = entry.call.ok_or(CallError::DesktopOnly)?;
     rt::spawn(call(ctx, args))
         .await
-        .map_err(|e| CallError::Failed(e.to_string()))?
+        .map_err(|e| CallError::Failed(e.to_string().into()))?
 }
 
 /// A synchronous command, on the runtime's threads for what blocks.
@@ -63,7 +68,7 @@ pub async fn blocking<T: Send + 'static>(
 ) -> Result<T, CallError> {
     rt::spawn_blocking(f)
         .await
-        .map_err(|e| CallError::Failed(e.to_string()))
+        .map_err(|e| CallError::Failed(e.to_string().into()))
 }
 
 /// The argument `key` of `command`, read as Tauri reads it: an absent key is `None` for an `Option`, an error otherwise.
@@ -149,24 +154,21 @@ impl<T: Serialize, E: Serialize> ReplyResult for Result<T, E> {}
 
 impl ValueTag {
     pub fn reply<T: Serialize>(self, value: T) -> Result<Value, CallError> {
-        serde_json::to_value(value).map_err(|e| CallError::Failed(e.to_string()))
+        serde_json::to_value(value).map_err(|e| CallError::Failed(e.to_string().into()))
     }
 }
 
 impl ResultTag {
-    /// The error is what Tauri rejects with: `E` as JSON, here its text when it is a string, and that JSON written
-    /// out otherwise.
+    /// The error is what Tauri rejects with: `E` as JSON.
     pub fn reply<T: Serialize, E: Serialize>(
         self,
         result: Result<T, E>,
     ) -> Result<Value, CallError> {
         match result {
             Ok(value) => ValueTag.reply(value),
-            Err(e) => Err(CallError::Failed(match serde_json::to_value(e) {
-                Ok(Value::String(text)) => text,
-                Ok(other) => other.to_string(),
-                Err(e) => e.to_string(),
-            })),
+            Err(e) => Err(CallError::Failed(
+                serde_json::to_value(e).unwrap_or_else(|e| e.to_string().into()),
+            )),
         }
     }
 }
@@ -297,15 +299,108 @@ mod tests {
         assert!(by_tauri.contains("nope"), "{by_tauri}");
         assert_eq!(
             run(&core, "account_status", json!({ "id": "nope" })),
+            Err(CallError::Failed(by_tauri.into()))
+        );
+    }
+
+    #[test]
+    fn a_command_that_fails_with_a_structured_error_gives_that_structure() {
+        let core = load("remote-table-structured");
+        let path = "/no/such/plugin/folder";
+        let by_tauri = commands::plugin_inspect_folder(CoreState::from(&core.0), path.into())
+            .expect_err("no plugin there");
+        let by_tauri = serde_json::to_value(by_tauri).unwrap();
+        assert!(by_tauri.is_object(), "{by_tauri}");
+        let ctx = Ctx {
+            core: core.0.clone(),
+        };
+        let args = json!({ "path": path });
+        assert_eq!(
+            rt::block_on(call(entries(), ctx, "plugin_inspect_folder", args)),
             Err(CallError::Failed(by_tauri))
         );
     }
 
     #[test]
+    fn every_command_of_the_window_is_in_the_table() {
+        let names: Vec<&str> = entries().iter().map(|e| e.name).collect();
+        // The names of `lib.rs`' list before it became `handlers!`.
+        assert_eq!(names.len(), 348);
+        let unique: std::collections::BTreeSet<&str> = names.iter().copied().collect();
+        assert_eq!(unique.len(), names.len(), "a command listed twice");
+        assert!(names.contains(&"subscribe") && names.contains(&"file_origin"));
+    }
+
+    #[test]
+    fn the_commands_of_the_desktop_alone_are_these() {
+        let mut want = vec![
+            // An `AppHandle`: the window, the tray, the updater, the launches' pages.
+            "clipboard_image",
+            "devpage_close",
+            "devpage_detach",
+            "devpage_devtools",
+            "devpage_go",
+            "devpage_mode",
+            "devpage_open",
+            "devpage_place",
+            "devpage_show",
+            "file_origin",
+            "quit_app",
+            "save_image",
+            "update_check",
+            "update_postpone",
+            "update_restart",
+            // A state of the desktop app: its updates, its deep links, its launches' pages.
+            "deep_links_take",
+            "devpage_list",
+            "update_close",
+            "update_download",
+            "update_presence",
+            // The voice, on this machine's microphone and speakers.
+            "conversation_hold",
+            "conversation_listen",
+            "conversation_say",
+            "conversation_start",
+            "conversation_stop",
+            "speech_delete",
+            "speech_download",
+            "speech_download_cancel",
+            "speech_info",
+            "speech_preview",
+            "speech_preview_online",
+            "voice_cancel",
+            "voice_delete_model",
+            "voice_download",
+            "voice_download_cancel",
+            "voice_info",
+            "voice_online_catalog",
+            "voice_start",
+            "voice_stop",
+            // A stream: the server serves them itself, through their `…_to` function.
+            "account_login",
+            "agent_terminal",
+            "run_start",
+            "subscribe",
+            "term_spawn",
+            "test_run_start",
+            // Tauri's raw request: the bytes of an attachment, sent without JSON.
+            "attach_chunk",
+        ];
+        want.sort_unstable();
+        let mut got: Vec<&str> = entries()
+            .iter()
+            .filter(|e| e.call.is_none())
+            .map(|e| e.name)
+            .collect();
+        got.sort_unstable();
+        assert_eq!(got, want);
+    }
+
+    #[test]
     fn a_command_that_panics_gives_an_error() {
         let core = load("remote-table-panics");
-        let Err(CallError::Failed(text)) = run(&core, "breaks", json!({})) else {
-            panic!("a panic is a failure");
+        let Err(CallError::Failed(Value::String(text))) = run(&core, "breaks", json!({})) else {
+            panic!("a panic is a failure, told as a text");
         };
         assert!(text.contains("boom"), "{text}");
     }
