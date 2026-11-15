@@ -22,7 +22,6 @@ use crate::plan::{PlanState, TaskStatus};
 use anyhow::{anyhow, bail, Result};
 use serde_json::{json, Value};
 use std::sync::Arc;
-use tauri::Runtime;
 
 /// The mode an agent in `current` runs in on a harness that offers `offered` (`modes::closest`):
 /// the same when it is there, else the closest one that never allows more; None when every mode
@@ -549,7 +548,7 @@ fn separator(from: EngineId, to: EngineId, limited: bool, until: Option<i64>) ->
     })
 }
 
-impl<R: Runtime> Core<R> {
+impl Core {
     /// How the account `id` stands for an agent now: out when it may not take one (not signed in,
     /// an agent of it waiting for its reset, a pause after a usage limit, out for its quota:
     /// `pace`, as `account_to_switch_to` has it), else how its quota stands (`accounts::standing`

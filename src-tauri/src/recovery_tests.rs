@@ -5,12 +5,9 @@ use crate::core::Core;
 use crate::model::{Column, PersistedState, Project, Ticket};
 use crate::paths::{test_dir, DataDir};
 use escouade_model::backups::{self, Damage};
-use tauri::test::mock_app;
 
-fn load(data: &DataDir) -> std::sync::Arc<Core<tauri::test::MockRuntime>> {
-    let app = mock_app();
-    let (core, _rx) = Core::load(app.handle().clone(), data.clone());
-    std::mem::forget(app);
+fn load(data: &DataDir) -> std::sync::Arc<Core> {
+    let (core, _rx) = Core::load(crate::host::Fake::new(), data.clone());
     core
 }
 

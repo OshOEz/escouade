@@ -508,7 +508,7 @@ async fn the_core_takes_its_paths_from_the_table_the_app_manages_and_the_command
     let dir = test_dir("af-origin-command");
     let path = write(&dir.join("docs").join("rapport.xlsx"), b"12345");
     let (core, _rx) = Core::load(
-        app.handle().clone(),
+        std::sync::Arc::new(crate::host::Desktop(app.handle().clone())),
         crate::paths::DataDir::new(dir.join("data")),
     );
     // What the host's listener read: not yet asked for, so not a path to join a file by.
@@ -1133,8 +1133,7 @@ async fn the_purge_runs_at_the_start_and_leaves_what_a_window_is_still_copying()
     let root = h.core.data.attachments();
     let old = old_copy(&root, &id, "99999999", "old.bin", 3, 0);
     let load = |h: &Harness| {
-        let app = tauri::test::mock_app();
-        let (core, _rx) = Core::load(app.handle().clone(), h.core.data.clone());
+        let (core, _rx) = Core::load(crate::host::Fake::new(), h.core.data.clone());
         core.stop_for_good();
     };
     // The settings say they stay: they do.

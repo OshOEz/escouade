@@ -14,7 +14,6 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::time::Duration;
-use tauri::test::{mock_app, MockRuntime};
 
 const COLOR: &str = "oklch(0.6 0.1 20)";
 
@@ -80,16 +79,12 @@ fn setup_log_of(h: &Harness, agent_id: &str) -> PathBuf {
 }
 
 /// What the window that adds a project is told of the history of the folder `path`.
-async fn history_of(core: &Arc<Core<MockRuntime>>, path: &str) -> Option<ClosedProjectInfo> {
+async fn history_of(core: &Arc<Core>, path: &str) -> Option<ClosedProjectInfo> {
     core.closed_project_info_for(path, None).await
 }
 
 /// `history_of`, the history `id` preferred if it is of that folder.
-async fn history_with(
-    core: &Arc<Core<MockRuntime>>,
-    path: &str,
-    id: &str,
-) -> Option<ClosedProjectInfo> {
+async fn history_with(core: &Arc<Core>, path: &str, id: &str) -> Option<ClosedProjectInfo> {
     core.closed_project_info_for(path, Some(id)).await
 }
 
@@ -962,10 +957,8 @@ async fn an_erased_history_is_erased_by_one_function_whichever_way_it_goes() {
 }
 
 /// The app started again on the data of the harness: what it finds is what was last saved.
-fn restarted(h: &Harness) -> (Arc<Core<MockRuntime>>, tauri::App<MockRuntime>) {
-    let app = mock_app();
-    let (core, _rx) = Core::load(app.handle().clone(), h.core.data.clone());
-    (core, app)
+fn restarted(h: &Harness) -> Arc<Core> {
+    Core::load(crate::host::Fake::new(), h.core.data.clone()).0
 }
 
 /// The ticket at work on the agent.
@@ -1081,7 +1074,7 @@ async fn a_state_that_cannot_be_saved_leaves_the_file_of_the_project_that_came_b
     // Saved at last, and the app started again: the project and its agent are there, the file is not.
     std::fs::remove_dir(&tmp).unwrap();
     h.core.save_now();
-    let (re, _app) = restarted(&h);
+    let re = restarted(&h);
     assert!(re.project(&p.id).is_ok() && re.agent(&a).is_ok());
     assert!(closed_files(&h).is_empty());
 }
@@ -1127,7 +1120,7 @@ async fn a_stop_in_the_middle_of_a_closing_gives_back_the_agents_and_tickets_the
     close(&h, &p.id).await;
     assert_eq!(closed_files(&h).len(), 2);
 
-    let (re, _app) = restarted(&h);
+    let re = restarted(&h);
 
     assert!(re.project(&p.id).is_ok());
     assert!(re.agent(&a1).is_ok() && re.agent(&a2).is_ok());
@@ -1478,7 +1471,7 @@ async fn a_closed_project_on_an_unreachable_share_neither_slows_nor_misleads_the
     let link = h.dir.join("link");
     let linked = crate::paths::make_dir_link(&r, &link);
     // The histories are read when the app starts.
-    let (re, _app) = restarted(&h);
+    let re = restarted(&h);
 
     let started = std::time::Instant::now();
     assert!(history_of(&re, &elsewhere.to_string_lossy())
@@ -1511,7 +1504,7 @@ fn write_history_by_hand(h: &Harness, closed: &ClosedProject) {
 }
 
 /// The ids of the closed projects, in the order listed.
-fn listed_ids(core: &Arc<Core<MockRuntime>>) -> Vec<String> {
+fn listed_ids(core: &Arc<Core>) -> Vec<String> {
     core.closed_projects().into_iter().map(|c| c.id).collect()
 }
 
@@ -1552,7 +1545,7 @@ async fn the_list_the_search_by_folder_and_the_ports_read_the_index_not_the_fold
     h.core.unreserve_ports(Some(first));
 
     // At the next start the app reads the folder: the history is listed, found, and keeps its ports.
-    let (re, _app) = restarted(&h);
+    let re = restarted(&h);
     assert_eq!(listed_ids(&re), ["late".to_string(), p.id.clone()]);
     assert_eq!(
         history_of(&re, &other.to_string_lossy()).await.unwrap().id,
@@ -1581,7 +1574,7 @@ async fn the_size_of_a_closed_project_is_counted_when_it_is_written_not_each_tim
     drop(log);
     assert_eq!(h.core.closed_projects()[0].size, size);
 
-    let (re, _app) = restarted(&h);
+    let re = restarted(&h);
     assert_eq!(re.closed_projects()[0].size, size + 1000);
 }
 
@@ -1604,7 +1597,7 @@ async fn the_size_of_a_closed_project_counts_the_copies_of_the_files_joined_to_i
     assert!(size >= 1_000_000, "{size}");
     assert!(size < 2_000_000, "{size}");
     // Read again at the next start, the same.
-    let (re, _app) = restarted(&h);
+    let re = restarted(&h);
     assert_eq!(re.closed_projects()[0].size, size);
 }
 
@@ -1733,7 +1726,7 @@ async fn a_file_that_cannot_be_read_is_listed_as_unreadable_and_erased_alone() {
         std::fs::write(dir.join(left_out), "{").unwrap();
     }
 
-    let (re, _app) = restarted(&h);
+    let re = restarted(&h);
 
     let mut ids = listed_ids(&re);
     ids.sort();
@@ -1961,7 +1954,7 @@ async fn a_history_whose_file_could_not_be_removed_does_not_bring_back_what_was_
     h.core.save_now();
 
     // The app starts while the file is still held: the open project is not given them again.
-    let (re, _app) = restarted(&h);
+    let re = restarted(&h);
     assert!(re.agent(&a1).is_ok() && re.ticket(&t1.id).is_ok());
     assert!(re.agent(&a2).is_err(), "the agent deleted came back");
     assert!(re.ticket(&t2.id).is_err(), "the ticket deleted came back");
@@ -1971,7 +1964,7 @@ async fn a_history_whose_file_could_not_be_removed_does_not_bring_back_what_was_
 
     // Let go of the file: the next start removes it, and the list forgets it.
     drop(stuck);
-    let (again, _app) = restarted(&h);
+    let again = restarted(&h);
     assert!(!file.exists());
     assert!(again.agent(&a2).is_err() && again.ticket(&t2.id).is_err());
     assert!(again.agent(&a1).is_ok() && again.ticket(&t1.id).is_ok());
@@ -1998,7 +1991,7 @@ async fn closing_again_a_project_whose_file_stayed_keeps_its_new_history() {
     assert!(saved_leftovers(&h).is_empty());
 
     // The next start does not take the new history for a leftover.
-    let (re, _app) = restarted(&h);
+    let re = restarted(&h);
 
     assert!(re.project(&p.id).is_err());
     assert_eq!(listed_ids(&re), [p.id.as_str()]);
@@ -2022,13 +2015,13 @@ async fn a_history_erased_by_the_closing_whose_file_cannot_go_is_not_listed_agai
 
     assert!(file.exists());
     assert!(h.core.closed_projects().is_empty());
-    let (re, _app) = restarted(&h);
+    let re = restarted(&h);
     assert!(
         re.closed_projects().is_empty(),
         "an erased history is listed again"
     );
     drop(stuck);
-    let (again, _app) = restarted(&h);
+    let again = restarted(&h);
     assert!(!file.exists());
     assert!(again.closed_projects().is_empty());
 }
@@ -2054,18 +2047,18 @@ async fn a_history_recovered_at_the_start_whose_file_cannot_be_removed_is_not_re
     let stuck = stick(&file);
 
     // The start gives the agent back, and cannot remove the file.
-    let (re, _app) = restarted(&h);
+    let re = restarted(&h);
     assert!(re.agent(&a1).is_ok() && re.agent(&a2).is_ok());
     assert!(file.exists());
     // It is deleted afterwards; the app is stopped and started again with the file still there.
     re.delete_agent(&a2, false).await.unwrap();
     re.save_now();
-    let (again, _app) = restarted(&h);
+    let again = restarted(&h);
     assert!(again.agent(&a1).is_ok());
     assert!(again.agent(&a2).is_err(), "the agent deleted came back");
 
     drop(stuck);
-    let (last, _app) = restarted(&h);
+    let last = restarted(&h);
     assert!(!file.exists());
     assert!(last.agent(&a2).is_err());
 }

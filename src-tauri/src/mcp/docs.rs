@@ -24,7 +24,6 @@ use crate::docs::{self, Change, Decision, Space, State};
 use crate::model::Project;
 use serde::Deserialize;
 use serde_json::json;
-use tauri::Runtime;
 
 use rmcp::schemars;
 
@@ -225,11 +224,7 @@ fn failed(e: anyhow::Error) -> ToolError {
 }
 
 /// The project asked for and its docs as the caller sees them.
-async fn open<R: Runtime>(
-    core: &Core<R>,
-    caller: &Caller,
-    project: &str,
-) -> Result<(Project, Space), ToolError> {
+async fn open(core: &Core, caller: &Caller, project: &str) -> Result<(Project, Space), ToolError> {
     let p = resolve::project(core, caller, project)?;
     let agent = match caller {
         Caller::Agent(id) => Some(id.as_str()),
@@ -248,11 +243,7 @@ fn branch_of(p: &Project) -> String {
     }
 }
 
-pub(super) async fn tree<R: Runtime>(
-    core: &Core<R>,
-    caller: &Caller,
-    project: &str,
-) -> Result<String, ToolError> {
+pub(super) async fn tree(core: &Core, caller: &Caller, project: &str) -> Result<String, ToolError> {
     let (p, space) = open(core, caller, project).await?;
     let subjects = space.spec_tree();
     let pages: usize = subjects.iter().map(|s| s.pages.len()).sum();
@@ -273,8 +264,8 @@ pub(super) async fn tree<R: Runtime>(
 }
 
 /// The discussion the caller is (ESC-261), when it is one of the project `project`.
-fn discussion_of<R: Runtime>(
-    core: &Core<R>,
+fn discussion_of(
+    core: &Core,
     caller: &Caller,
     project: &Project,
 ) -> Option<(String, crate::discussion::Discussion)> {
@@ -295,8 +286,8 @@ fn proposed_note() -> String {
     )
 }
 
-pub(super) async fn page<R: Runtime>(
-    core: &Core<R>,
+pub(super) async fn page(
+    core: &Core,
     caller: &Caller,
     args: SpecPageArgs,
 ) -> Result<String, ToolError> {
@@ -313,8 +304,8 @@ pub(super) async fn page<R: Runtime>(
     json(&space.spec_read(&args.path).map_err(failed)?)
 }
 
-pub(super) async fn write<R: Runtime>(
-    core: &Core<R>,
+pub(super) async fn write(
+    core: &Core,
     caller: &Caller,
     args: WriteSpecArgs,
 ) -> Result<String, ToolError> {
@@ -412,8 +403,8 @@ pub(super) async fn write<R: Runtime>(
     }))
 }
 
-pub(super) async fn search<R: Runtime>(
-    core: &Core<R>,
+pub(super) async fn search(
+    core: &Core,
     caller: &Caller,
     args: SearchSpecArgs,
 ) -> Result<String, ToolError> {
@@ -422,8 +413,8 @@ pub(super) async fn search<R: Runtime>(
     json(&json!({ "hits": space.spec_search(&args.query, limit) }))
 }
 
-pub(super) async fn decisions<R: Runtime>(
-    core: &Core<R>,
+pub(super) async fn decisions(
+    core: &Core,
     caller: &Caller,
     args: ListDecisionsArgs,
 ) -> Result<String, ToolError> {
@@ -476,8 +467,8 @@ pub(super) async fn decisions<R: Runtime>(
     json(&json!({ "decisions": rows }))
 }
 
-pub(super) async fn decision<R: Runtime>(
-    core: &Core<R>,
+pub(super) async fn decision(
+    core: &Core,
     caller: &Caller,
     args: ReadDecisionArgs,
 ) -> Result<String, ToolError> {
@@ -523,12 +514,7 @@ fn patch_of(f: DecisionFields) -> docs::DecisionPatch {
 
 /// The decision a ticket's agent leaves comes from its ticket, in this project: its validation
 /// accepts it (`docs_accept_ticket_decisions`).
-fn from_ticket<R: Runtime>(
-    core: &Core<R>,
-    caller: &Caller,
-    project: &Project,
-    d: &mut docs::DecisionPatch,
-) {
+fn from_ticket(core: &Core, caller: &Caller, project: &Project, d: &mut docs::DecisionPatch) {
     let Caller::Agent(id) = caller else { return };
     let key = core.ticket_key_of_agent(&project.id, id);
     if let Some(key) = key {
@@ -537,8 +523,8 @@ fn from_ticket<R: Runtime>(
     }
 }
 
-pub(super) async fn propose<R: Runtime>(
-    core: &Core<R>,
+pub(super) async fn propose(
+    core: &Core,
     caller: &Caller,
     args: ProposeDecisionArgs,
 ) -> Result<String, ToolError> {
@@ -608,11 +594,7 @@ fn numbered_note() -> String {
 }
 
 /// A discussion's decision, kept on it until poured.
-fn keep_proposal<R: Runtime>(
-    core: &Core<R>,
-    id: &str,
-    p: docs::DecisionPatch,
-) -> Result<String, ToolError> {
+fn keep_proposal(core: &Core, id: &str, p: docs::DecisionPatch) -> Result<String, ToolError> {
     if p.title.as_deref().unwrap_or_default().trim().is_empty() {
         return Err(failed(anyhow::anyhow!(tr!(
             "Une décision a un titre.",
@@ -640,8 +622,8 @@ fn keep_proposal<R: Runtime>(
     json(&out)
 }
 
-pub(super) async fn replace<R: Runtime>(
-    core: &Core<R>,
+pub(super) async fn replace(
+    core: &Core,
     caller: &Caller,
     args: ReplaceDecisionArgs,
 ) -> Result<String, ToolError> {
@@ -678,8 +660,8 @@ pub(super) async fn replace<R: Runtime>(
     }))
 }
 
-pub(super) async fn documents<R: Runtime>(
-    core: &Core<R>,
+pub(super) async fn documents(
+    core: &Core,
     caller: &Caller,
     args: ListDocumentsArgs,
 ) -> Result<String, ToolError> {
@@ -702,8 +684,8 @@ pub(super) async fn documents<R: Runtime>(
     json(&json!({ "folders": drive.folders, "documents": files }))
 }
 
-pub(super) async fn read_document<R: Runtime>(
-    core: &Core<R>,
+pub(super) async fn read_document(
+    core: &Core,
     caller: &Caller,
     args: ReadDocumentArgs,
 ) -> Result<String, ToolError> {
@@ -725,8 +707,8 @@ pub(super) async fn read_document<R: Runtime>(
     json(&text)
 }
 
-pub(super) async fn add_document<R: Runtime>(
-    core: &Core<R>,
+pub(super) async fn add_document(
+    core: &Core,
     caller: &Caller,
     args: AddDocumentArgs,
 ) -> Result<String, ToolError> {
@@ -771,8 +753,8 @@ pub struct SearchDocumentsArgs {
 
 /// `search_documents`: the documents that answer a query, by the meaning too when the vectors'
 /// model is there.
-pub(super) async fn search_documents<R: Runtime>(
-    core: &Core<R>,
+pub(super) async fn search_documents(
+    core: &Core,
     caller: &Caller,
     args: SearchDocumentsArgs,
 ) -> Result<String, ToolError> {
@@ -791,8 +773,8 @@ pub(super) async fn search_documents<R: Runtime>(
 
 /// `get_docs_to_share`: the changes of the docs not shared yet (the files and their number), and
 /// the conflict a sharing stopped on.
-pub(super) async fn to_share<R: Runtime>(
-    core: &Core<R>,
+pub(super) async fn to_share(
+    core: &Core,
     caller: &Caller,
     project: &str,
 ) -> Result<String, ToolError> {
@@ -822,8 +804,8 @@ pub struct ShareDocsArgs {
 
 /// `share_docs`: the window's « Partager ». It is the user's gesture: an agent of Escouade is
 /// refused unless it says the user told it to.
-pub(super) async fn share<R: Runtime>(
-    core: &Core<R>,
+pub(super) async fn share(
+    core: &Core,
     caller: &Caller,
     args: ShareDocsArgs,
 ) -> Result<String, ToolError> {

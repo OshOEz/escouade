@@ -18,7 +18,6 @@ use crate::engine::Engine;
 use crate::i18n::Lang;
 use anyhow::{bail, Result};
 use std::sync::Arc;
-use tauri::Runtime;
 
 /// Escouade's modes, from the one that allows the least to the one that allows the most.
 pub const ORDER: [&str; 5] = ["plan", "default", "acceptEdits", "auto", BYPASS];
@@ -199,7 +198,7 @@ pub fn no_discussion(lang: Lang, name: &str) -> String {
     )
 }
 
-impl<R: Runtime> Core<R> {
+impl Core {
     /// The agent `id` in the mode its harness runs it in (`runs_in`), judged: what every start goes through, and a
     /// change of harness. When its harness runs it in another mode than its own, that one becomes its mode (shown on
     /// it) and its conversation says so; refused, with why and what to do, when no mode of its harness allows as

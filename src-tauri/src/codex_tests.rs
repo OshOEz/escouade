@@ -520,7 +520,7 @@ fn sent(h: &Harness) -> Vec<String> {
 }
 
 /// The menu the account `id` keeps (`Core::account_models`): its models' ids.
-fn menu_of(core: &crate::core::Core<tauri::test::MockRuntime>, id: &str) -> Vec<String> {
+fn menu_of(core: &crate::core::Core, id: &str) -> Vec<String> {
     core.account_models
         .read()
         .get(id)
@@ -568,8 +568,7 @@ async fn the_models_of_a_codex_account_are_read_on_every_page_without_an_agent_a
     assert_eq!(launches(&h).len(), 2);
     // Kept by account through a restart.
     h.core.save_now();
-    let app = tauri::test::mock_app();
-    let (reloaded, _rx) = crate::core::Core::load(app.handle().clone(), h.core.data.clone());
+    let (reloaded, _rx) = crate::core::Core::load(crate::host::Fake::new(), h.core.data.clone());
     assert_eq!(menu_of(&reloaded, "work"), ["gpt-6-luna", "gpt-5.6-terra"]);
     assert!(menu_of(&reloaded, "principal-codex").is_empty());
     h.core.stop_for_good();

@@ -884,7 +884,7 @@ async fn a_copilot_agent_gets_its_worktree_at_its_first_message_under_the_name_c
 }
 
 /// The menu the account `id` keeps (`Core::account_models`): its models' ids.
-fn menu_of(core: &crate::core::Core<tauri::test::MockRuntime>, id: &str) -> Vec<String> {
+fn menu_of(core: &crate::core::Core, id: &str) -> Vec<String> {
     core.account_models
         .read()
         .get(id)
@@ -929,8 +929,7 @@ async fn the_models_of_a_copilot_account_are_read_without_an_agent_and_kept_afte
     assert_eq!(noted(&work, "launches.jsonl").len(), 1);
     // Kept by account through a restart.
     h.core.save_now();
-    let app = tauri::test::mock_app();
-    let (reloaded, _rx) = crate::core::Core::load(app.handle().clone(), h.core.data.clone());
+    let (reloaded, _rx) = crate::core::Core::load(crate::host::Fake::new(), h.core.data.clone());
     assert_eq!(
         menu_of(&reloaded, "work"),
         ["gpt-6-luna", "claude-sonnet-4.5", "gpt-5-mini"]
