@@ -146,7 +146,7 @@ impl<R: Runtime> Core<R> {
     /// `switch_if_over`, in the background: a reading of the quota of the agent's account just came.
     pub(crate) fn switch_soon(self: &Arc<Self>, id: &str) {
         let (c, id) = (self.clone(), id.to_string());
-        tauri::async_runtime::spawn(async move {
+        escouade_base::rt::spawn(async move {
             c.switch_if_over(&id).await;
         });
     }

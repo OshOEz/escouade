@@ -314,7 +314,7 @@ impl<R: Runtime> Core<R> {
             .collect();
         for id in idle {
             let c = self.clone();
-            tauri::async_runtime::spawn(async move { c.settle_locked_mode(&id).await });
+            escouade_base::rt::spawn(async move { c.settle_locked_mode(&id).await });
         }
     }
 

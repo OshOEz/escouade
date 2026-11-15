@@ -305,7 +305,7 @@ impl<R: Runtime> Core<R> {
     /// alone would tell it up to 20 seconds later.
     pub(crate) fn inbox_summary_soon(self: &Arc<Self>) {
         let me = self.clone();
-        tauri::async_runtime::spawn(async move {
+        escouade_base::rt::spawn(async move {
             let wait = group_ms().max(0) as u64 + 50;
             tokio::time::sleep(std::time::Duration::from_millis(wait)).await;
             me.inbox_summary_tick();

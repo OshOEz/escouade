@@ -1470,7 +1470,7 @@ impl<R: Runtime> Core<R> {
         self.inbox_told(&kept.project_id);
         let delay = kept.answer.as_ref().and_then(|x| x.send_at).unwrap_or(now) - now;
         let core = self.clone();
-        tauri::async_runtime::spawn(async move {
+        escouade_base::rt::spawn(async move {
             tokio::time::sleep(std::time::Duration::from_millis(delay.max(0) as u64)).await;
             core.deliver_answers().await;
         });

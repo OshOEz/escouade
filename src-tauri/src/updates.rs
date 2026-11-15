@@ -1435,7 +1435,7 @@ fn window_of(visible: bool, minimized: bool, focused: bool, macos: bool) -> Wind
 /// « Redémarrer maintenant », or the automatic restart, off the async runtime (the stop and the
 /// install block).
 pub async fn restart_now<R: Runtime>(app: AppHandle<R>) -> Result<()> {
-    tauri::async_runtime::spawn_blocking(move || {
+    escouade_base::rt::spawn_blocking(move || {
         let core = app.state::<Arc<Core<R>>>().inner().clone();
         let env = app.env();
         let window = window_now(&app);
@@ -1599,7 +1599,7 @@ pub fn watch<R: Runtime>(app: AppHandle<R>) {
     if crate::paths::sandbox_dir().is_some() {
         return;
     }
-    tauri::async_runtime::spawn(async move {
+    escouade_base::rt::spawn(async move {
         loop {
             tokio::time::sleep(TICK).await;
             tick(&app).await;

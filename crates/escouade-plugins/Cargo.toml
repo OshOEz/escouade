@@ -26,8 +26,6 @@ escouade-plugin-cli = { path = "../escouade-plugin-cli" }
 escouade-plugin-kit = { path = "../escouade-plugin-kit" }
 # Whether a plugin's file is inside its folder, and the protected parts of a repository (`files/*`).
 escouade-acp = { path = "../escouade-acp" }
-# The runtime the host starts its plugins on: Tauri's (`tauri::async_runtime`), as the app's.
-tauri = { version = "2", features = ["tray-icon", "image-png", "devtools", "unstable"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["raw_value"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "process", "io-util", "sync", "time", "fs", "net"] }

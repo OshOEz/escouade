@@ -211,7 +211,7 @@ impl<R: Runtime> Core<R> {
         });
         self.emit_agent(h);
         let (c, agent, term) = (self.clone(), id.to_string(), info.id.clone());
-        tauri::async_runtime::spawn(async move { c.watch_attached(agent, term).await });
+        escouade_base::rt::spawn(async move { c.watch_attached(agent, term).await });
         Ok(info)
     }
 

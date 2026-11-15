@@ -1254,7 +1254,7 @@ impl<R: Runtime> Core<R> {
         #[cfg(test)]
         self.passes_queued.fetch_add(1, Ordering::SeqCst);
         let c = self.clone();
-        tauri::async_runtime::spawn(async move {
+        escouade_base::rt::spawn(async move {
             c.schedule_now().await;
             #[cfg(test)]
             c.passes_queued.fetch_sub(1, Ordering::SeqCst);
@@ -2307,7 +2307,7 @@ impl<R: Runtime> Core<R> {
     /// Called by `apply` when an agent's turn ended: its recipe is kept, its ticket moves on.
     pub(crate) fn on_turn_end(self: &Arc<Self>, agent_id: &str, end: TurnEnd) {
         let (c, id) = (self.clone(), agent_id.to_string());
-        tauri::async_runtime::spawn(async move { c.turn_ended(&id, end).await });
+        escouade_base::rt::spawn(async move { c.turn_ended(&id, end).await });
     }
 
     pub(crate) async fn turn_ended(self: &Arc<Self>, agent_id: &str, end: TurnEnd) {
@@ -2704,7 +2704,7 @@ impl<R: Runtime> Core<R> {
             match (board::recovery(agent.as_ref(), cut_off), agent) {
                 (board::Recovery::GoOn, Some(agent)) => {
                     let c = self.clone();
-                    tauri::async_runtime::spawn(async move {
+                    escouade_base::rt::spawn(async move {
                         let _ = c
                             .send_or_block(
                                 &ticket_id,
@@ -2763,7 +2763,7 @@ impl<R: Runtime> Core<R> {
             .collect();
         for a in made {
             let c = self.clone();
-            tauri::async_runtime::spawn(async move {
+            escouade_base::rt::spawn(async move {
                 if let Err(e) = c.archive_agent(&a, true).await {
                     log::warn!(
                         "agent {a}: made for a ticket that never started, not archived: {e:#}"
@@ -2959,7 +2959,7 @@ impl<R: Runtime> Core<R> {
         let working = self.working_owned();
         let t = self.approve_begin(id)?;
         let (core, id) = (self.clone(), id.to_string());
-        tauri::async_runtime::spawn(async move {
+        escouade_base::rt::spawn(async move {
             let _working = working;
             core.approve_run(&id, t).await;
         });

@@ -110,7 +110,7 @@ fn judge(request: Request, url: &Url, dev: Option<&Url>, open: impl FnOnce(&Url)
 /// take its time to answer).
 fn open_outside(url: &Url) {
     let (address, shown) = (url.to_string(), shown(url));
-    tauri::async_runtime::spawn_blocking(move || {
+    escouade_base::rt::spawn_blocking(move || {
         if let Err(e) = crate::outside::open_url(&address) {
             log::error!("{shown} not opened outside: {e}");
         }

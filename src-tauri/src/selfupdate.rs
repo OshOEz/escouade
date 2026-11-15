@@ -384,7 +384,7 @@ async fn update(program: &Program, settings: &Settings, data: &Path) -> Status {
 /// At Escouade's start, then once a day while it is open (and at once when the switch is turned
 /// on): `run_once`.
 pub fn watch(core: Arc<crate::core::Core>) {
-    tauri::async_runtime::spawn(async move {
+    escouade_base::rt::spawn(async move {
         tokio::time::sleep(AFTER_START).await;
         loop {
             let due = RAN_AT.lock().is_none_or(|at| at.elapsed() >= EVERY);

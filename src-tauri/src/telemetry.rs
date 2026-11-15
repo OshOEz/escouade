@@ -597,7 +597,7 @@ impl Telemetry {
     /// The events leave every minute; a day of the app open counts as a day used.
     pub fn spawn(self: &Arc<Self>) {
         let t = self.clone();
-        tauri::async_runtime::spawn(async move {
+        escouade_base::rt::spawn(async move {
             // Made at the first event to send: never while the user said no.
             let mut http = None;
             let mut active = tokio::time::Instant::now();
@@ -623,7 +623,7 @@ impl Telemetry {
         let http = self.client();
         std::thread::scope(|s| {
             s.spawn(|| {
-                tauri::async_runtime::block_on(async {
+                escouade_base::rt::block_on(async {
                     let _ = tokio::time::timeout(LAST_FLUSH, self.flush(&http)).await;
                 })
             });

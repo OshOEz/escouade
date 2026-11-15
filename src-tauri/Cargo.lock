@@ -1841,6 +1841,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "escouade-plugin-cli",
+ "tokio",
 ]
 
 [[package]]
@@ -2021,7 +2022,6 @@ dependencies = [
  "serde_json",
  "sha2 0.11.1",
  "tar",
- "tauri",
  "tokio",
  "tokio-rustls",
  "tokio-tungstenite",

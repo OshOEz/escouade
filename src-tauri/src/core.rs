@@ -787,7 +787,7 @@ const SETUP_SEND_EVERY: Duration = Duration::from_millis(50);
 struct Setup {
     /// True once it is over, whichever way (its sender dropped: stopped).
     done: tokio::sync::watch::Receiver<bool>,
-    task: tauri::async_runtime::JoinHandle<()>,
+    task: escouade_base::rt::JoinHandle<()>,
 }
 
 /// After the usage limit resets, before sending "continue" (or starting a ticket again): clocks
@@ -1998,7 +1998,7 @@ impl<R: Runtime> Core<R> {
             return;
         }
         if let Some(c) = self.me.upgrade() {
-            tauri::async_runtime::spawn(async move { c.send_seed_counts().await });
+            escouade_base::rt::spawn(async move { c.send_seed_counts().await });
         }
     }
 
@@ -2644,7 +2644,7 @@ impl<R: Runtime> Core<R> {
         self.sync_all_shared();
         if self.settings.read().user_id.is_empty() {
             let c = self.clone();
-            tauri::async_runtime::spawn(async move {
+            escouade_base::rt::spawn(async move {
                 c.ensure_identity().await;
                 c.sync_all_shared();
             });
@@ -2658,11 +2658,11 @@ impl<R: Runtime> Core<R> {
         if !cfg!(test) {
             let plugins = self.plugins.clone();
             if crate::offline::allows(crate::offline::Flow::Updates) {
-                tauri::async_runtime::spawn(async move { plugins.check_updates().await });
+                escouade_base::rt::spawn(async move { plugins.check_updates().await });
             }
             // The store's catalogue and revocation list (STORE-9): at the start, then every 6 hours.
             let c = self.clone();
-            tauri::async_runtime::spawn(async move {
+            escouade_base::rt::spawn(async move {
                 loop {
                     c.refresh_store().await;
                     tokio::time::sleep(crate::plugins::store::EVERY).await;
@@ -2671,10 +2671,10 @@ impl<R: Runtime> Core<R> {
         }
         // The copies of the files that are not made again (ESC-469): now, then every 10 minutes, of those that changed.
         let root = self.data.root().to_path_buf();
-        tauri::async_runtime::spawn(async move {
+        escouade_base::rt::spawn(async move {
             loop {
                 let r = root.clone();
-                let _ = tauri::async_runtime::spawn_blocking(move || {
+                let _ = escouade_base::rt::spawn_blocking(move || {
                     escouade_model::backups::back_up_all(&r, chrono::Utc::now())
                 })
                 .await;
@@ -2682,10 +2682,10 @@ impl<R: Runtime> Core<R> {
             }
         });
         let c = self.clone();
-        tauri::async_runtime::spawn(async move { c.git_loop(git_rx).await });
-        tauri::async_runtime::spawn(self.clone().conv_flusher());
+        escouade_base::rt::spawn(async move { c.git_loop(git_rx).await });
+        escouade_base::rt::spawn(self.clone().conv_flusher());
         let c = self.clone();
-        tauri::async_runtime::spawn(async move {
+        escouade_base::rt::spawn(async move {
             loop {
                 tokio::time::sleep(Duration::from_millis(400)).await;
                 if c.dirty.swap(false, Ordering::AcqRel) {
@@ -2696,7 +2696,7 @@ impl<R: Runtime> Core<R> {
             }
         });
         let c = self.clone();
-        tauri::async_runtime::spawn(async move {
+        escouade_base::rt::spawn(async move {
             tokio::time::sleep(Duration::from_secs(2)).await;
             loop {
                 c.read_accounts(true).await;
@@ -2704,7 +2704,7 @@ impl<R: Runtime> Core<R> {
             }
         });
         let c = self.clone();
-        tauri::async_runtime::spawn(async move {
+        escouade_base::rt::spawn(async move {
             loop {
                 tokio::time::sleep(idle_check_every()).await;
                 c.stop_idle_processes();
@@ -2713,16 +2713,16 @@ impl<R: Runtime> Core<R> {
         // The copies of joined files that are old enough to go (`attachKeepDays`), and the ones
         // lost half written: at the start (`load`), then every hour.
         let c = self.clone();
-        tauri::async_runtime::spawn(async move {
+        escouade_base::rt::spawn(async move {
             loop {
                 tokio::time::sleep(Duration::from_secs(3600)).await;
                 let core = c.clone();
                 let _ =
-                    tauri::async_runtime::spawn_blocking(move || core.maintain_attachments()).await;
+                    escouade_base::rt::spawn_blocking(move || core.maintain_attachments()).await;
             }
         });
         let c = self.clone();
-        tauri::async_runtime::spawn(async move {
+        escouade_base::rt::spawn(async move {
             loop {
                 tokio::time::sleep(Duration::from_secs(20)).await;
                 c.resume_due().await;
@@ -2743,7 +2743,7 @@ impl<R: Runtime> Core<R> {
         // The pull requests of the tickets « En revue » (ESC-59), without a webhook.
         self.clone().follow_ticket_prs();
         let c = self.clone();
-        tauri::async_runtime::spawn(async move {
+        escouade_base::rt::spawn(async move {
             let mut shown = false;
             loop {
                 tokio::time::sleep(Duration::from_secs(2)).await;
@@ -2756,7 +2756,7 @@ impl<R: Runtime> Core<R> {
             }
         });
         let c = self.clone();
-        tauri::async_runtime::spawn(async move {
+        escouade_base::rt::spawn(async move {
             // Shortly after startup, then regularly: the commits to pull show up by themselves.
             tokio::time::sleep(Duration::from_secs(15)).await;
             loop {
@@ -2765,7 +2765,7 @@ impl<R: Runtime> Core<R> {
             }
         });
         let c = self.clone();
-        tauri::async_runtime::spawn(async move {
+        escouade_base::rt::spawn(async move {
             // The automatic import, once on: shortly after, then every so many minutes.
             let mut last: Option<std::time::Instant> = None;
             loop {
@@ -3466,7 +3466,7 @@ impl<R: Runtime> Core<R> {
             project_id.to_string(),
             name.to_string(),
         );
-        tauri::async_runtime::spawn(async move {
+        escouade_base::rt::spawn(async move {
             let mut left = false;
             for a in asked {
                 let arg: String = a.arg.chars().take(200).collect();
@@ -3592,7 +3592,7 @@ impl<R: Runtime> Core<R> {
             return;
         }
         let (core, id) = (self.clone(), id.to_string());
-        tauri::async_runtime::spawn(async move { core.plan_scan_loop(&id).await });
+        escouade_base::rt::spawn(async move { core.plan_scan_loop(&id).await });
     }
 
     async fn plan_scan_loop(self: Arc<Self>, id: &str) {
@@ -4510,7 +4510,7 @@ impl<R: Runtime> Core<R> {
             .collect();
         for id in ids {
             let c = self.clone();
-            tauri::async_runtime::spawn(async move { c.read_account_models(&id).await });
+            escouade_base::rt::spawn(async move { c.read_account_models(&id).await });
         }
     }
 
@@ -4729,7 +4729,7 @@ impl<R: Runtime> Core<R> {
             }
         };
         let (c, id) = (self.clone(), id.to_string());
-        tauri::async_runtime::spawn(async move {
+        escouade_base::rt::spawn(async move {
             if interface {
                 if let Err(e) = c.start_interface(&id).await {
                     c.remote_unavailable(&id, &e, false);
@@ -5343,9 +5343,9 @@ impl<R: Runtime> Core<R> {
     pub(crate) fn apply_remote_soon(
         self: &Arc<Self>,
         id: &str,
-    ) -> tauri::async_runtime::JoinHandle<()> {
+    ) -> escouade_base::rt::JoinHandle<()> {
         let (c, id) = (self.clone(), id.to_string());
-        tauri::async_runtime::spawn(async move { c.apply_remote(&id).await })
+        escouade_base::rt::spawn(async move { c.apply_remote(&id).await })
     }
 
     /// `apply_remote` on every agent of the project (every agent, with none), each on its own
@@ -5353,7 +5353,7 @@ impl<R: Runtime> Core<R> {
     pub(crate) fn apply_remote_to(
         self: &Arc<Self>,
         project: Option<&str>,
-    ) -> Vec<tauri::async_runtime::JoinHandle<()>> {
+    ) -> Vec<escouade_base::rt::JoinHandle<()>> {
         let ids: Vec<String> = self
             .agents
             .read()
@@ -5370,7 +5370,7 @@ impl<R: Runtime> Core<R> {
 
     /// With the app: the settings are applied to every agent (`start_remote`).
     /// The tasks are for whoever waits for them (tests).
-    pub fn start_remote_agents(self: &Arc<Self>) -> Vec<tauri::async_runtime::JoinHandle<()>> {
+    pub fn start_remote_agents(self: &Arc<Self>) -> Vec<escouade_base::rt::JoinHandle<()>> {
         let ids: Vec<String> = self.agents.read().keys().cloned().collect();
         self.start_remote(ids)
     }
@@ -5434,7 +5434,7 @@ impl<R: Runtime> Core<R> {
     pub(crate) fn start_remote(
         self: &Arc<Self>,
         ids: Vec<String>,
-    ) -> Vec<tauri::async_runtime::JoinHandle<()>> {
+    ) -> Vec<escouade_base::rt::JoinHandle<()>> {
         let mut held: Vec<(String, bool, i64)> = ids
             .into_iter()
             .filter_map(|id| {
@@ -5451,7 +5451,7 @@ impl<R: Runtime> Core<R> {
         let mut tasks = Vec::new();
         for ((id, held, _), mut turn) in held.into_iter().zip(turns) {
             let c = self.clone();
-            tasks.push(tauri::async_runtime::spawn(async move {
+            tasks.push(escouade_base::rt::spawn(async move {
                 // One that comes in starts its process on its own, in its turn.
                 c.apply_remote_in(&id, &mut turn).await;
                 if !held {
@@ -6027,7 +6027,7 @@ impl<R: Runtime> Core<R> {
         self.apply(id, &pid, &name, fx, Some(view));
         if let Some(naming) = name_from {
             let (c, id) = (self.clone(), id.to_string());
-            tauri::async_runtime::spawn(async move { c.auto_name(&id, &naming).await });
+            escouade_base::rt::spawn(async move { c.auto_name(&id, &naming).await });
         }
         Ok(true)
     }
@@ -6080,7 +6080,7 @@ impl<R: Runtime> Core<R> {
         self.apply(id, &pid, &agent_name, fx, Some(view));
         // Copilot answers once it is over: the composer does not wait for it.
         let (core, id, instructions) = (self.clone(), id.to_string(), instructions.to_string());
-        tauri::async_runtime::spawn(async move {
+        escouade_base::rt::spawn(async move {
             let over = proc.compact(&instructions).await;
             core.compacted(&id, name, over);
         });
@@ -6431,7 +6431,7 @@ impl<R: Runtime> Core<R> {
         };
         let settings = self.settings.read().clone();
         let (task, account) = (task.to_string(), account.to_string());
-        tauri::async_runtime::spawn_blocking(move || {
+        escouade_base::rt::spawn_blocking(move || {
             // A `claude` of WSL tells its files by their Linux path: our own conversion of a path
             // already accepted, to a share of ours (`\\wsl.localhost\…`), which `from_file` is
             // given as it is.
@@ -6584,10 +6584,9 @@ impl<R: Runtime> Core<R> {
             return Ok(kept);
         }
         let (core, id, call) = (self.clone(), id.to_string(), call.to_string());
-        let read =
-            tauri::async_runtime::spawn_blocking(move || core.read_sidechain(&id, &call, None))
-                .await
-                .map_err(|e| anyhow!("{e}"))??;
+        let read = escouade_base::rt::spawn_blocking(move || core.read_sidechain(&id, &call, None))
+            .await
+            .map_err(|e| anyhow!("{e}"))??;
         Ok(read.and_then(|r| handed_back(&r.items)))
     }
 
@@ -7434,7 +7433,7 @@ impl<R: Runtime> Core<R> {
             (self.clone(), id.clone(), project.path.clone(), wt.clone());
         // Held while it starts: its end, however soon, finds it in the map.
         let mut setups = self.setups.lock();
-        let task = tauri::async_runtime::spawn(async move {
+        let task = escouade_base::rt::spawn(async move {
             c.run_setup(&task_id, &project_dir, &wt, ports, &steps)
                 .await;
             let _ = tx.send(true);
@@ -7647,8 +7646,7 @@ impl<R: Runtime> Core<R> {
         if let Some(text) = ask {
             self.show_step(id, tr!("Nom de l’agent", "Naming the agent"));
             let (c, agent) = (self.clone(), id.to_string());
-            let named =
-                tauri::async_runtime::spawn(async move { c.auto_name(&agent, &text).await });
+            let named = escouade_base::rt::spawn(async move { c.auto_name(&agent, &text).await });
             // Not waited for longer: it goes on, and renames the branch once it comes.
             if tokio::time::timeout(self.naming_limit(), named)
                 .await
@@ -7792,7 +7790,7 @@ impl<R: Runtime> Core<R> {
     /// rename (Codex's thread, OpenCode's and Copilot's sessions come with the first message).
     fn retitle_soon(self: &Arc<Self>, id: &str, proc: Process) {
         let (c, id) = (self.clone(), id.to_string());
-        tauri::async_runtime::spawn(async move {
+        escouade_base::rt::spawn(async move {
             for _ in 0..50 {
                 let title = {
                     let Ok(h) = c.agent(&id) else { return };
@@ -9643,7 +9641,7 @@ impl<R: Runtime> Core<R> {
         if renames.is_empty() {
             return;
         }
-        tauri::async_runtime::spawn(async move {
+        escouade_base::rt::spawn(async move {
             for (proc, title) in renames {
                 if let Err(e) = proc.rename(&title).await {
                     log::warn!("session not renamed on claude.ai: {e:#}");
@@ -9800,9 +9798,9 @@ impl<R: Runtime> Core<R> {
             .into_iter()
             .map(|(t, key)| {
                 let pty = self.pty.clone();
-                tauri::async_runtime::spawn(async move {
-                    crate::tui::quit_interface(&pty, &t, key).await
-                })
+                escouade_base::rt::spawn(
+                    async move { crate::tui::quit_interface(&pty, &t, key).await },
+                )
             })
             .collect();
         for quit in quits {
@@ -9889,7 +9887,7 @@ impl<R: Runtime> Core<R> {
                         last.insert(pid.clone(), now + wait);
                         self.git.take_flag(&pid);
                         let c = self.clone();
-                        tauri::async_runtime::spawn(async move {
+                        escouade_base::rt::spawn(async move {
                             c.compute_git(&pid).await;
                             c.git_inflight.lock().remove(&pid);
                         });
