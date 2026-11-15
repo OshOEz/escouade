@@ -173,7 +173,7 @@ impl Bench {
         let replayed: Arc<Mutex<String>> = Arc::default();
         let (sink, of) = (sent.clone(), replayed.clone());
         // As the window gets them: serialized by Tauri's channel, its JSON told here.
-        h.core.hub.set_channel(Channel::new(move |body| {
+        let channel = Channel::<crate::model::UiEvent>::new(move |body| {
             let at = Instant::now();
             let mine = match &body {
                 InvokeResponseBody::Json(s) => s.contains(of.lock().as_str()),
@@ -181,7 +181,8 @@ impl Bench {
             };
             sink.lock().push((at, mine));
             Ok(())
-        }));
+        });
+        h.core.hub.set_sink(channel.into());
         tokio::spawn(h.core.clone().conv_flusher());
         let (p, _) = h.project(false).await;
         Bench {

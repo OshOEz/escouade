@@ -13,7 +13,6 @@ use std::process::Command;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
-use tauri::ipc::{Channel, InvokeResponseBody};
 
 /// One sample of `Harness::sample_rest`: what stops an automatic restart, the mark, then again.
 pub(crate) type RestSample<T> = (
@@ -124,10 +123,8 @@ pub(crate) fn harness(name: &str) -> Harness {
     let (core, _rx) = Core::load(host.clone(), data);
     let events = Arc::new(parking_lot::Mutex::new(Vec::new()));
     let sink = events.clone();
-    core.hub.set_channel(Channel::new(move |body| {
-        if let InvokeResponseBody::Json(s) = body {
-            sink.lock().push(serde_json::from_str(&s).unwrap());
-        }
+    core.hub.set_sink(crate::sink::Sink::new(move |event| {
+        sink.lock().push(serde_json::to_value(&event).unwrap());
         Ok(())
     }));
     Harness {
