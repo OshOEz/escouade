@@ -2124,7 +2124,7 @@ impl<R: tauri::Runtime> crate::core::Core<R> {
         let (root, repos) = (PathBuf::from(&project.path), project.repos.clone());
         // « Relire quand les fichiers changent » off (ESC-195): only « Relire » reads again.
         let auto = project.workflows_auto_read;
-        let (scan, changed) = tauri::async_runtime::spawn_blocking(move || {
+        let (scan, changed) = escouade_base::rt::spawn_blocking(move || {
             let roots = Roots::of_user();
             match stored {
                 Some(s) if !force && (!auto || !is_stale(&s, &root, &repos, &roots)) => (s, false),
@@ -2347,7 +2347,7 @@ impl<R: tauri::Runtime> crate::core::Core<R> {
             .map(|p| p.id.clone())
             .collect();
         let core = self.clone();
-        tauri::async_runtime::spawn(async move {
+        escouade_base::rt::spawn(async move {
             let _one = ALL_RUNNING.lock().await;
             for id in ids {
                 if let Err(e) = core.refresh_workflows(&id, false).await {

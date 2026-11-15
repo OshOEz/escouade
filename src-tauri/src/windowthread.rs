@@ -128,7 +128,7 @@ impl Lanes {
             l.running = true;
         }
         let (me, lane) = (self.clone(), lane.to_string());
-        tauri::async_runtime::spawn_blocking(move || me.drain(&lane));
+        escouade_base::rt::spawn_blocking(move || me.drain(&lane));
     }
 
     fn drain(&self, lane: &str) {

@@ -345,7 +345,7 @@ impl<R: Runtime> Core<R> {
         let Some(core) = self.weak().upgrade() else {
             return;
         };
-        tauri::async_runtime::spawn(async move { core.declare_now().await });
+        escouade_base::rt::spawn(async move { core.declare_now().await });
     }
 
     /// The window got the focus back: a harness installed meanwhile (in a terminal) is declared, by
@@ -384,7 +384,7 @@ impl<R: Runtime> Core<R> {
         let Some(core) = self.weak().upgrade() else {
             return;
         };
-        tauri::async_runtime::spawn(async move {
+        escouade_base::rt::spawn(async move {
             {
                 let _one = core.mcp.declaring.lock().await;
                 let settings = core.settings.read().clone();

@@ -86,7 +86,7 @@ Quatre crates du workspace de `src-tauri`, dans `crates/` à côté de celles de
 
 | Crate | Ce qu'elle contient | Ce que l'app réexporte | Lignes (dont tests) |
 |---|---|---|---|
-| `escouade-base` | `i18n` : les langues du moment (`ui`, `claude`, les statiques, `store`) ; `paths` : `contained`, `outside`, `relative_slash`, `strip_base`, `safe_origin` ; `text` : `visible_line` ; `testing` (feature) : `test_dir`, `make_dir_link`, `make_file_link` pour les tests des crates | `i18n::{ui, claude}`, `paths::{contained, outside, relative_slash, strip_base}`, `taskout::safe_origin`, `mcp::act::visible_line` | 476 |
+| `escouade-base` | `i18n` : les langues du moment (`ui`, `claude`, les statiques, `store`) ; `paths` : `contained`, `outside`, `relative_slash`, `strip_base`, `safe_origin` ; `text` : `visible_line` ; `rt` : le runtime des tâches de l'app (`spawn`, `spawn_blocking`, `block_on`), donné à Tauri au démarrage ; `testing` (feature) : `test_dir`, `make_dir_link`, `make_file_link` pour les tests des crates | `i18n::{ui, claude}`, `paths::{contained, outside, relative_slash, strip_base}`, `taskout::safe_origin`, `mcp::act::visible_line` | 476 |
 | `escouade-voice-local` | `audio`, `source` (cpal), `transcribe` (whisper.cpp), `vad`, `speech` (Piper, eSpeak NG, ONNX Runtime, `voices.json`), `models` (téléchargement vérifié), `VoiceError` | `voice::{audio, source, speech, transcribe, vad, VoiceError}`, `voice::models::*` (plus `models::client`, qui lit les réglages, resté dans l'app) | 3 532 |
 | `escouade-vectors` | `chunk`, `embed` (ONNX), `index` (SQLite), `model` (téléchargement), `eval`, leurs tests | `vectors::{chunk, embed, index, model}` ; `vectors::wiring` (le cœur) et deux tests qui lisent `DataDir` et un `core` restent dans l'app | 1 902 (610) |
 | `escouade-plan` | `plan` (le réducteur de l'avancée d'un agent), `planfiles` (les plans et registres de superpowers), leurs tests | `crate::plan`, `crate::planfiles` (`use escouade_plan::{plan, planfiles}` à la racine) | 7 836 (4 894) |
@@ -296,7 +296,7 @@ Les liens coupés d'abord :
 - `pty::ShellInfo` et `facts::NAMES` vont dans la crate (`events::ShellInfo`, `facts::NAMES`).
 - `harness::{harnesses_of, described_lines}` vont dans `escouade_plugins::described` ; la liste des plugins des harness du cœur (`harness::BUILTIN_HARNESSES`, qui porte des fonctions du cœur) a ses ids dans `builtin::HARNESSES`, qu'un test de l'app garde égaux.
 - Deux appels de l'hôte vers l'app deviennent des inscriptions : `view::forget` à l'arrêt d'un plugin (`stops::on_stop`, que `view` fait quand il crée le fil des vues d'un plugin ; un plugin sans vue n'avait rien à oublier) ; les ports des processus partagés que `local:shared` atteint (`shared_ports::note`, fait par `shared` quand il garde un processus, retiré quand il le lâche).
-- `tauri::async_runtime::spawn` (le démarrage d'un plugin) reste : la crate prend `tauri` en dépendance, avec les mêmes fonctionnalités que l'app (déjà compilé, rien ne se recompile), pour démarrer ses plugins sur le même runtime qu'avant.
+- Le démarrage d'un plugin passe par `escouade_base::rt::spawn` (d'abord `tauri::async_runtime::spawn`) : le runtime de l'app, que l'app donne à Tauri au démarrage (`tauri::async_runtime::set`) ; la crate ne prend pas `tauri`.
 - `env!("CARGO_PKG_VERSION")` aurait donné la version de la crate : son script de build lit celle de l'app dans `src-tauri/Cargo.toml` (`ESCOUADE_APP_VERSION`, `escouade_plugins::APP_VERSION`) ; l'agent des requêtes (`escouade/<version>`), le banc et les manifestes du workspace disent toujours celle de l'app.
 
 wasmtime et wasmtime-wasi passent dans la crate ; leurs `opt-level` du profil de développement restent dans `src-tauri/Cargo.toml`, un profil n'étant que celui du workspace. L'app les garde en dev-dependency (avec `flate2` et `tar`) pour les tests restés qui fabriquent des modules et des archives à la main.
@@ -446,7 +446,7 @@ Les outils, leurs schémas et leurs textes sont les mêmes octet pour octet : la
 Ce qui a dû bouger ou s'ouvrir :
 
 - `Gate::new` prend le routeur et de quoi faire le gestionnaire de chaque requête (`Tools::<R>::router()`, `Tools::<R>::new`) : c'est le seul appelant qui change (`McpServer::launch`).
-- `serve` lance chaque connexion par `tokio::spawn` au lieu de `tauri::async_runtime::spawn` : il tourne déjà sur le runtime de l'app (`McpServer::launch` le lance par `tauri::async_runtime::spawn`), où `tokio::spawn` les met aussi ; la crate n'a pas besoin de `tauri`.
+- `serve` lance chaque connexion par `tokio::spawn` au lieu de `tauri::async_runtime::spawn` : il tourne déjà sur le runtime de l'app (`McpServer::launch` le lance par `escouade_base::rt::spawn`), où `tokio::spawn` les met aussi ; la crate n'a pas besoin de `tauri`.
 - `STOP_WAIT` (30 s dans les tests, 2 s sinon) passe par la feature `testing`, que l'app prend en dev-dependency.
 - Les champs de `Tokens`, `ColumnArg::name`, `Kind::{as_str, parse}`, `install::run` et `mask_secrets` deviennent `pub` ; `port::held_port` (une aide des tests) est sous `testing`.
 - `subtle` sort des dépendances de l'app (seule la crate compare les jetons).

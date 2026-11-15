@@ -3620,7 +3620,7 @@ async fn a_process_started_in_the_background_stops_with_the_harness_that_owns_it
     let id = h.core.create_agent(&p.id, None).await.unwrap().meta.id;
     let core = h.core.clone();
     let started = id.clone();
-    tauri::async_runtime::spawn(async move { core.ensure_process(&started).await.map(|_| ()) })
+    escouade_base::rt::spawn(async move { core.ensure_process(&started).await.map(|_| ()) })
         .await
         .unwrap()
         .unwrap();

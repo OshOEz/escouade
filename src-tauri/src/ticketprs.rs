@@ -807,7 +807,7 @@ impl<R: tauri::Runtime> Core<R> {
     /// The pull requests of the tickets « En revue », read by themselves for as long as the app
     /// runs (`IN_FRONT_EVERY`, `BEHIND_EVERY`), and at once when woken (`wake_ticket_prs`).
     pub(crate) fn follow_ticket_prs(self: Arc<Self>) {
-        tauri::async_runtime::spawn(async move {
+        escouade_base::rt::spawn(async move {
             tokio::time::sleep(Duration::from_secs(10)).await;
             loop {
                 if let Err(e) = self.ticket_prs_refresh(None).await {

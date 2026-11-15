@@ -2043,7 +2043,7 @@ impl<R: Runtime> Core<R> {
             engine_order,
         });
         let (c, id) = (self.clone(), made.id.clone());
-        tauri::async_runtime::spawn(async move { c.read_account_models(&id).await });
+        escouade_base::rt::spawn(async move { c.read_account_models(&id).await });
     }
 
     /// What « Ajouter un compte… » says of the machine's account of `engine`: whether its harness
@@ -2689,7 +2689,7 @@ impl<R: Runtime> Core<R> {
                     core.hub
                         .emit(crate::model::UiEvent::TerminalExit { id: term, code });
                     // Signed in: the models of its account (ESC-124, ESC-186).
-                    tauri::async_runtime::spawn(
+                    escouade_base::rt::spawn(
                         async move { core.read_account_models(&signed).await },
                     );
                 }

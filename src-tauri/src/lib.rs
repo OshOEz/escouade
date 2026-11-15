@@ -448,7 +448,13 @@ fn context() -> tauri::Context {
 /// `devpage_probe` (examples): a launch's page in a real webview of this system (ESC-311), what it
 /// could reach of Escouade, its storage, its devtools and its widths. Gives the exit code.
 pub fn devpage_probe_cli(args: Vec<String>) -> i32 {
+    give_tauri_our_runtime();
     devpage_probe::cli(args, context())
+}
+
+/// Tauri's tasks on the app's runtime: before Tauri makes its own, which `set` cannot replace.
+fn give_tauri_our_runtime() {
+    tauri::async_runtime::set(escouade_base::rt::handle());
 }
 
 pub fn run() {
@@ -472,6 +478,7 @@ pub fn run() {
     let lanes = windowthread::Lanes::new(running.clone());
     let watched = running.clone();
     let focused = running.clone();
+    give_tauri_our_runtime();
     let mut builder = tauri::Builder::default();
     // Sandboxed runs (end-to-end tests, demos) must not hand over to an instance the user
     // already has open.
@@ -556,11 +563,11 @@ pub fn run() {
             core.start(git_rx);
             // The Principals of settings saved before 1.8.1 kept or dropped, once (ESC-128).
             let migrating = core.clone();
-            tauri::async_runtime::spawn(async move { migrating.migrate_accounts().await });
+            escouade_base::rt::spawn(async move { migrating.migrate_accounts().await });
             // Finding a `claude` of WSL may start its distribution: done now and off the main
             // thread, which neither the window nor the board then waits for (`wsl::find` keeps it).
             let warm = core.clone();
-            tauri::async_runtime::spawn_blocking(move || warm.warm_claude());
+            escouade_base::rt::spawn_blocking(move || warm.warm_claude());
             // What the harness of each account lists of its models, without a turn (ESC-124, ESC-186).
             core.read_all_account_models();
             // Claude Code updated by Escouade, apart from its agents (ESC-133).

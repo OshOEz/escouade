@@ -921,7 +921,7 @@ impl<R: Runtime> Core<R> {
         let p = listener.local_addr()?.port();
         listener.set_nonblocking(true)?;
         let me = Arc::downgrade(self);
-        tauri::async_runtime::spawn(serve(listener, me, p));
+        escouade_base::rt::spawn(serve(listener, me, p));
         *port = Some(p);
         Ok(p)
     }
@@ -1356,13 +1356,13 @@ impl<R: Runtime> Core<R> {
         id: &str,
         term: &str,
         key: &'static [u8],
-    ) -> tauri::async_runtime::JoinHandle<()> {
+    ) -> escouade_base::rt::JoinHandle<()> {
         let lock = self.quit_lock(id);
         // Marked now when no other quit of the agent is under way (it is, in the rare case of two
         // in a row: the task then waits its turn).
         let held = lock.clone().try_lock_owned().ok();
         let (pty, term) = (self.pty.clone(), term.to_string());
-        tauri::async_runtime::spawn(async move {
+        escouade_base::rt::spawn(async move {
             let _held = match held {
                 Some(held) => held,
                 None => lock.lock_owned().await,
@@ -1860,7 +1860,7 @@ impl<R: Runtime> Core<R> {
         self.emit_agent(h);
         self.request_save();
         let (c, agent) = (self.clone(), id.to_string());
-        tauri::async_runtime::spawn(async move { c.read_loop(&agent, gen).await });
+        escouade_base::rt::spawn(async move { c.read_loop(&agent, gen).await });
         Ok(info)
     }
 
@@ -2207,7 +2207,7 @@ impl<R: Runtime> Core<R> {
         self.stop_interface_when_idle(id);
         if let Some(text) = naming {
             let (c, id) = (self.clone(), id.to_string());
-            tauri::async_runtime::spawn(async move { c.auto_name(&id, &text).await });
+            escouade_base::rt::spawn(async move { c.auto_name(&id, &text).await });
         }
     }
 
@@ -2260,7 +2260,7 @@ impl<R: Runtime> Core<R> {
             // after a moment (a version that does not write it), the turn ends here: that turn, not
             // the next message's, which may have started meanwhile.
             let (c, id) = (self.clone(), id.to_string());
-            tauri::async_runtime::spawn(async move {
+            escouade_base::rt::spawn(async move {
                 for wait in [300, 1500] {
                     tokio::time::sleep(Duration::from_millis(wait)).await;
                     c.read_transcript(&id);
@@ -2327,7 +2327,7 @@ impl<R: Runtime> Core<R> {
         // the window does): an interface that quits quickly is never started again twice.
         if failed {
             let (c, id) = (self.clone(), id.to_string());
-            tauri::async_runtime::spawn(async move {
+            escouade_base::rt::spawn(async move {
                 if let Err(e) = c.start_interface(&id).await {
                     log::warn!("agent {id}: interface not started again: {e:#}");
                 }
@@ -2816,7 +2816,7 @@ async fn serve<R: Runtime>(listener: TcpListener, core: Weak<Core<R>>, port: u16
             return;
         }
         let core = core.clone();
-        tauri::async_runtime::spawn(async move {
+        escouade_base::rt::spawn(async move {
             let service = service_fn(move |req| {
                 let core = core.clone();
                 async move { Ok::<_, Infallible>(answer(req, &core, port).await) }
@@ -2886,7 +2886,7 @@ async fn answer<R: Runtime>(
         map.insert(EVENT_KEY.into(), Value::String(event));
     }
     // Off the connection: the interface does not wait for what Escouade makes of it.
-    tauri::async_runtime::spawn_blocking(move || core.on_tui_hook(&agent, hook));
+    escouade_base::rt::spawn_blocking(move || core.on_tui_hook(&agent, hook));
     reply(StatusCode::OK, "{}")
 }
 

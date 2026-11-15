@@ -231,7 +231,7 @@ impl Env {
     /// `down`, in the background; a failure is only logged. Not in a job of the app's: the services outlive it on
     /// purpose.
     pub fn down_later(self, dir: String) {
-        tauri::async_runtime::spawn(async move {
+        escouade_base::rt::spawn(async move {
             if let Err(e) = self.down(&dir).await {
                 log::warn!("{dir}: {e:#}");
             }

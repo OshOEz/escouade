@@ -88,7 +88,7 @@ fn listen<R: Runtime>(webview: tauri::webview::PlatformWebview, app: tauri::AppH
                 _ => "ended",
             };
             let app = app.clone();
-            tauri::async_runtime::spawn(async move { crashed(&app, reason) });
+            escouade_base::rt::spawn(async move { crashed(&app, reason) });
         });
 }
 
@@ -109,7 +109,7 @@ fn listen<R: Runtime>(webview: tauri::webview::PlatformWebview, app: tauri::AppH
             _ => return Ok(()),
         };
         let app = app.clone();
-        tauri::async_runtime::spawn(async move { crashed(&app, reason) });
+        escouade_base::rt::spawn(async move { crashed(&app, reason) });
         Ok(())
     }));
     // SAFETY: the controller is the live one of this WebView, used on its thread (`with_webview`).

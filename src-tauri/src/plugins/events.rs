@@ -126,7 +126,7 @@ impl Dispatch {
             let (Some(me), id) = (self.me.upgrade(), id.to_string()) else {
                 return;
             };
-            tauri::async_runtime::spawn(async move { me.drain(&id, queue).await });
+            escouade_base::rt::spawn(async move { me.drain(&id, queue).await });
         }
     }
 
