@@ -461,7 +461,7 @@ impl<R: Runtime> Core<R> {
     ) {
         let me = self.clone();
         let (id, key) = (project_id.to_string(), key.to_string());
-        tauri::async_runtime::spawn(async move {
+        escouade_base::rt::spawn(async move {
             let Ok(project) = me.project(&id) else { return };
             let Ok(space) = me.docs_space(&id, None).await else {
                 return;

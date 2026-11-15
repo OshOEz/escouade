@@ -639,7 +639,7 @@ impl<R: Runtime> Core<R> {
         let working = self.working_owned();
         let at = review.at;
         let id = project_id.to_string();
-        tauri::async_runtime::spawn(async move {
+        escouade_base::rt::spawn(async move {
             let _working = working;
             let read = me.pr_review_read(&id, &source).await;
             // Dropped meanwhile, or replaced: its answer goes nowhere.

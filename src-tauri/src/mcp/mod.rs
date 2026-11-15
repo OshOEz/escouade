@@ -210,7 +210,7 @@ impl<R: Runtime> McpServer<R> {
         let limits = self.limits.lock().clone();
         // On the app's own runtime: never the single-threaded one of a caller, which a stop's
         // wait would block (`wait_closed`).
-        tauri::async_runtime::spawn(async move {
+        escouade_base::rt::spawn(async move {
             http::serve(listener, gate, stopped, limits).await;
             let _ = closed_tx.send(());
         });

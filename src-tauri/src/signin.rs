@@ -246,7 +246,7 @@ impl<R: Runtime> Core<R> {
     /// could not be refreshed.
     pub(crate) fn sign_in_lost_soon(self: &Arc<Self>, id: &str) {
         let (c, id) = (self.clone(), id.to_string());
-        tauri::async_runtime::spawn(async move {
+        escouade_base::rt::spawn(async move {
             c.sign_in_lost(&id).await;
         });
     }

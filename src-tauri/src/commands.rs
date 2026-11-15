@@ -352,7 +352,7 @@ pub async fn store_suggestions(
         .filter(|p| p.categories.iter().any(|c| c == "harness"))
         .flat_map(|p| p.keywords.clone())
         .collect();
-    let programs = tauri::async_runtime::spawn_blocking(move || {
+    let programs = escouade_base::rt::spawn_blocking(move || {
         names.into_iter().filter(|n| store::on_path(n)).collect()
     })
     .await
@@ -504,7 +504,7 @@ pub fn plugin_install(
         let settings = core.settings.read().clone();
         let (store, id, version) = (core.store.clone(), view.id.clone(), view.version.clone());
         let update = staged.is_some_and(|(_, update)| update);
-        tauri::async_runtime::spawn(async move {
+        escouade_base::rt::spawn(async move {
             if let Ok(http) = crate::plugins::store::client(&settings) {
                 store.count(&http, &id, &version, update).await;
             }
@@ -891,7 +891,7 @@ pub fn account_remove(core: CoreState, id: String) -> Res<Vec<ClaudeAccount>> {
 #[tauri::command]
 pub fn account_models_refresh(core: CoreState, id: String) {
     let core = core.inner().clone();
-    tauri::async_runtime::spawn(async move { core.refresh_account_models(&id).await });
+    escouade_base::rt::spawn(async move { core.refresh_account_models(&id).await });
 }
 
 /// Whether the account is signed in, with which email, and its folder.
@@ -1503,7 +1503,7 @@ pub async fn search_conversations(
     archived: bool,
 ) -> Res<crate::convsearch::Found> {
     let core = core.inner().clone();
-    tauri::async_runtime::spawn_blocking(move || {
+    escouade_base::rt::spawn_blocking(move || {
         core.search_conversations(&query, project_id.as_deref(), archived)
     })
     .await
@@ -1638,7 +1638,7 @@ pub async fn subagent_transcript(
     cursor: Option<crate::agent::sidechain::Cursor>,
 ) -> Res<Option<crate::agent::sidechain::SidechainRead>> {
     let core = core.inner().clone();
-    tauri::async_runtime::spawn_blocking(move || core.subagent_transcript(&id, &call, cursor))
+    escouade_base::rt::spawn_blocking(move || core.subagent_transcript(&id, &call, cursor))
         .await
         .map_err(|e| e.to_string())?
         .map_err(err)
@@ -2551,7 +2551,7 @@ pub async fn agent_local_open(
 pub async fn save_image(app: tauri::AppHandle, data_url: String, name: String) -> Res<bool> {
     use tauri_plugin_dialog::DialogExt;
     let (bytes, name) = crate::sentfiles::image_to_save(&data_url, &name).map_err(err)?;
-    tauri::async_runtime::spawn_blocking(move || -> anyhow::Result<bool> {
+    escouade_base::rt::spawn_blocking(move || -> anyhow::Result<bool> {
         let Some(path) = app
             .dialog()
             .file()
@@ -2837,7 +2837,7 @@ pub fn term_resize(core: CoreState, id: String, cols: u16, rows: u16) -> Res<()>
 #[tauri::command]
 pub async fn term_kill(core: CoreState<'_>, id: String) -> Res<()> {
     let core = core.inner().clone();
-    tauri::async_runtime::spawn_blocking(move || core.kill_terminal(&id))
+    escouade_base::rt::spawn_blocking(move || core.kill_terminal(&id))
         .await
         .map_err(|e| err(e.into()))
 }
@@ -3596,7 +3596,7 @@ pub async fn voice_stop(
     target: String,
 ) -> Res<String> {
     let v = voice.inner().clone();
-    let text = tauri::async_runtime::spawn_blocking(move || v.stop(session))
+    let text = escouade_base::rt::spawn_blocking(move || v.stop(session))
         .await
         .map_err(|e| e.to_string())?
         .map_err(voice_err)?;

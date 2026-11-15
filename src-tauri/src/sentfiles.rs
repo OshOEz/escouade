@@ -646,7 +646,7 @@ impl<R: tauri::Runtime> crate::core::Core<R> {
         };
         let (folder, fence) = (self.data.agent_files(id), self.agent_fence(id));
         let (core, id) = (self.clone(), id.to_string());
-        tauri::async_runtime::spawn(async move {
+        escouade_base::rt::spawn(async move {
             let call = item.clone();
             let sent =
                 tokio::task::spawn_blocking(move || deliver(&folder, &call, &cwd, &input, &fence))

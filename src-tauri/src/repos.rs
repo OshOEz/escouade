@@ -277,7 +277,7 @@ impl<R: tauri::Runtime> crate::core::Core<R> {
         }
         let ids: Vec<String> = self.projects.read().iter().map(|p| p.id.clone()).collect();
         let core = self.clone();
-        tauri::async_runtime::spawn(async move {
+        escouade_base::rt::spawn(async move {
             let _one = ALL_RUNNING.lock().await;
             for id in ids {
                 let _ = core.refresh_repos(&id, false).await;

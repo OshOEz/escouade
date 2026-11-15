@@ -1279,7 +1279,7 @@ impl<R: Runtime> Core<R> {
             let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<SyncJob>();
             // The worker does not keep the core alive: it ends with it.
             let me = self.weak();
-            tauri::async_runtime::spawn(async move {
+            escouade_base::rt::spawn(async move {
                 while let Some(job) = rx.recv().await {
                     let Some(c) = me.upgrade() else { break };
                     c.run_sync_job(job).await;

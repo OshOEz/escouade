@@ -476,7 +476,7 @@ impl<R: tauri::Runtime> crate::core::Core<R> {
             list.clone(),
             scan.sources.clone(),
         );
-        let files = tauri::async_runtime::spawn_blocking(move || {
+        let files = escouade_base::rt::spawn_blocking(move || {
             crate::workflow::files_in_cause(&root, &shown, &sources, &Roots::of_user())
         })
         .await?;
