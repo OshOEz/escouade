@@ -143,8 +143,6 @@ mod paths;
 mod recovery_tests;
 #[cfg(test)]
 mod remote_tests;
-// Called by its tests alone until a server serves it.
-#[allow(dead_code)]
 mod remoteapi;
 // What an agent is getting through, and the plan files it follows: the crate `escouade-plan`.
 use escouade_plan::{plan, planfiles};
@@ -466,6 +464,9 @@ fn give_tauri_our_runtime() {
 }
 
 pub fn run() {
+    // First, before any thread: no child process may inherit the remote API's token. Debug builds only.
+    #[cfg(debug_assertions)]
+    let remote = remoteapi::server::take_from_env();
     // Before GTK starts: the window's app_id and WM_CLASS, which find its icon (ESC-239).
     #[cfg(target_os = "linux")]
     desktop::name_the_program();
@@ -569,6 +570,25 @@ pub fn run() {
                 log::error!("app menu not set: {e}");
             }
             core.start(git_rx);
+            // Off unless both variables are set; a remote `subscribe` or `agent_terminal` takes the window's events or that terminal's output.
+            #[cfg(debug_assertions)]
+            match remote {
+                Ok(None) => {}
+                Err(why) => log::warn!("remote API off: {why}"),
+                Ok(Some(config)) => {
+                    match remoteapi::server::start(
+                        core.clone(),
+                        remoteapi::table::entries(),
+                        config,
+                    ) {
+                        Ok(running) => {
+                            log::info!("remote API listening on {}", running.addr);
+                            app.manage(running);
+                        }
+                        Err(e) => log::error!("remote API not started: {e}"),
+                    }
+                }
+            }
             // The Principals of settings saved before 1.8.1 kept or dropped, once (ESC-128).
             let migrating = core.clone();
             escouade_base::rt::spawn(async move { migrating.migrate_accounts().await });
@@ -665,6 +685,10 @@ pub fn run() {
         .expect("error while building the application")
         .run(|app, event| match event {
             tauri::RunEvent::Exit => {
+                #[cfg(debug_assertions)]
+                if let Some(remote) = app.try_state::<remoteapi::server::Running>() {
+                    remote.stop();
+                }
                 if let Some(core) = app.try_state::<Arc<Core>>() {
                     if !core.quitting.load(Ordering::Acquire) {
                         // macOS: Cmd+Q, the app menu's « Quitter Escouade » (`menus::app_menu`)

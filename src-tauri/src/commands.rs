@@ -166,7 +166,8 @@ pub fn subscribe(
     state
 }
 
-/// `subscribe` with its flow to `sink`: the window's channel, or a remote client's.
+/// `subscribe` with its flow to `sink`: the window's channel, or a remote client's. The update fields stay empty: the
+/// Tauri command fills them from the desktop app's updates, which a remote client does not get.
 pub(crate) fn subscribe_to(core: &Arc<Core>, sink: Sink<UiEvent>) -> InitialState {
     core.hub.set_sink(sink);
     // A page that loads again has no dictation under way: the one of the page before stops.
