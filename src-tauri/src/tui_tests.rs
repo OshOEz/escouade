@@ -1919,8 +1919,7 @@ async fn the_images_pasted_go_with_their_agent_and_old_ones_at_the_next_start() 
     assert!(other.exists());
 
     // Nobody pastes any more: the next start clears what is older than a day.
-    let app = tauri::test::mock_app();
-    let (_reloaded, _rx) = crate::core::Core::load(app.handle().clone(), h.core.data.clone());
+    let (_reloaded, _rx) = crate::core::Core::load(crate::host::Fake::new(), h.core.data.clone());
     assert!(!old.exists());
     assert!(other.exists());
 }

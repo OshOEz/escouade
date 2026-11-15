@@ -435,7 +435,7 @@ Ligne 4 du § 5. Le serveur MCP ne sort pas en entier sans réécrire ses tests 
 |---|---|---|
 | racine | `Caller`, `McpStatus`, `PORTS`, `PATH`, `Tokens` (la comparaison en temps constant), `new_token` | `mcp::*` |
 | `port` | `bind`, `bind_within`, `worth_waiting_for`, `wait_closed`, `STOP_WAIT` et leurs tests | importés par `mcp/mod.rs` |
-| `http` | les gardes (`Host`, `Origin`, jeton, chemin, outil inconnu, taille), `Limits`, `Reply`, `serve` ; `Gate` est générique sur un trait `Host` (qui est un jeton, une requête refusée notée, ce que reçoit un outil) et sur le gestionnaire de rmcp | `mcp::http::*` ; `impl Host for Core<R>` reste dans `mcp/http.rs` |
+| `http` | les gardes (`Host`, `Origin`, jeton, chemin, outil inconnu, taille), `Limits`, `Reply`, `serve` ; `Gate` est générique sur un trait `Host` (qui est un jeton, une requête refusée notée, ce que reçoit un outil) et sur le gestionnaire de rmcp | `mcp::http::*` ; `impl Host for Core` reste dans `mcp/http.rs` |
 | `activity` | `Activity`, `ActivityEntry`, `Outcome`, `KEPT`, `clip`, `entry` (une entrée du journal, le nom de l'appelant donné) et son test | `mcp::activity::*` ; `record` et `caller_name` (ils lisent le cœur et ses agents) restent |
 | `args` | les arguments des 59 outils et ce que le modèle en lit (`#[schemars(description)]`), `SPLIT_MAX`, `ColumnArg` → `Column` | `mcp::tools::*` |
 | `memory` | `Kind`, ce dont parle un souvenir (l'argument `type` de `write_memory`) | `memory::Kind` |
@@ -445,7 +445,7 @@ Les outils, leurs schémas et leurs textes sont les mêmes octet pour octet : la
 
 Ce qui a dû bouger ou s'ouvrir :
 
-- `Gate::new` prend le routeur et de quoi faire le gestionnaire de chaque requête (`Tools::<R>::router()`, `Tools::<R>::new`) : c'est le seul appelant qui change (`McpServer::launch`).
+- `Gate::new` prend le routeur et de quoi faire le gestionnaire de chaque requête (`Tools::router()`, `Tools::new`) : c'est le seul appelant qui change (`McpServer::launch`).
 - `serve` lance chaque connexion par `tokio::spawn` au lieu de `tauri::async_runtime::spawn` : il tourne déjà sur le runtime de l'app (`McpServer::launch` le lance par `escouade_base::rt::spawn`), où `tokio::spawn` les met aussi ; la crate n'a pas besoin de `tauri`.
 - `STOP_WAIT` (30 s dans les tests, 2 s sinon) passe par la feature `testing`, que l'app prend en dev-dependency.
 - Les champs de `Tokens`, `ColumnArg::name`, `Kind::{as_str, parse}`, `install::run` et `mask_secrets` deviennent `pub` ; `port::held_port` (une aide des tests) est sous `testing`.
@@ -457,7 +457,7 @@ En tout, 1 832 lignes sortent de l'app (290 638 → 288 806 lignes de Rust dans 
 
 ### Pourquoi le reste ne sort pas
 
-- **Les outils agissent sur le cœur, pas sur une interface.** Les 11 fichiers des outils (`act`, `read`, `wait`, `files`, `images`, `docs`, `memory`, `prs`, `workflow`, `background`, `resolve` : ≈ 11 000 lignes) prennent `&Core<R>` et en lisent 79 méthodes et champs différents (`core.data`, `core.settings`, `core.agents` et le verrou de chaque `AgentRt`, `core.tickets`, `core.hub`…), et appellent 30 modules de l'app (`tickets`, `board`, `git`, `folders`, `sharing`, `agent`, `engine`, `forge`, `prview`, `docs`, `discussion`, `ticketfiles`, `workflow`, `facts`, `vectors`, `usage`…). Un trait de l'hôte devrait porter tout cela : ce n'est plus un trait, c'est l'app.
+- **Les outils agissent sur le cœur, pas sur une interface.** Les 11 fichiers des outils (`act`, `read`, `wait`, `files`, `images`, `docs`, `memory`, `prs`, `workflow`, `background`, `resolve` : ≈ 11 000 lignes) prennent `&Core` et en lisent 79 méthodes et champs différents (`core.data`, `core.settings`, `core.agents` et le verrou de chaque `AgentRt`, `core.tickets`, `core.hub`…), et appellent 30 modules de l'app (`tickets`, `board`, `git`, `folders`, `sharing`, `agent`, `engine`, `forge`, `prview`, `docs`, `discussion`, `ticketfiles`, `workflow`, `facts`, `vectors`, `usage`…). Un trait de l'hôte devrait porter tout cela : ce n'est plus un trait, c'est l'app.
 - **Les 19 fichiers de tests démarrent un vrai cœur** (`core_tests::harness`, 22 100 lignes) et lisent ses internes (`h.core.settings.write()`, les tickets, les agents, `h.core.mcp`). Une crate de soutien des tests qui démarrerait un cœur hors de l'app devrait contenir `Core`, donc l'app. Un faux cœur derrière un trait obligerait à réécrire ces tests, qui vérifient justement que les outils font ce que font les boutons de la fenêtre, par les mêmes fonctions du cœur : on y perdrait ce qu'ils prouvent.
 
 L'ordre qui le permettrait, un ticket chacun : (1) un trait de l'hôte par famille d'outils (lire les projets et tickets ; agir sur le tableau ; les agents et leurs demandes ; les documents, la spec, la mémoire), dont les arguments et les réponses sont des données de `escouade-model` ; (2) les outils sur ces traits dans la crate, avec des tests unitaires sur un faux hôte pour ce qui est du protocole (refus, résolution des noms, textes), les 19 fichiers de tests actuels restant dans l'app comme tests d'intégration sur le vrai cœur. Le gain en compilation ne viendrait que de (2), et les tests restés gardent ≈ 22 000 lignes dans « lib (test) ».

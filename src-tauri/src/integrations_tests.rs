@@ -13,7 +13,6 @@ use serde_json::{json, Value};
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::atomic::Ordering;
-use tauri::test::mock_app;
 
 fn state(id: &str, name: &str) -> ExternalState {
     ExternalState {
@@ -673,8 +672,7 @@ async fn accounts_are_checked_saved_apart_and_forgotten() {
     let state = std::fs::read_to_string(h.core.data.state_file()).unwrap();
     let settings = std::fs::read_to_string(h.core.data.settings_file()).unwrap();
     assert!(!state.contains("@ada") && !settings.contains("@ada"));
-    let app = mock_app();
-    let (reloaded, _rx) = Core::load(app.handle().clone(), h.core.data.clone());
+    let (reloaded, _rx) = Core::load(crate::host::Fake::new(), h.core.data.clone());
     assert!(reloaded.integration_accounts()[2].connected);
     let views = h.core.integration_disconnect(Service::GITHUB, "").unwrap();
     assert!(!views[2].connected);
@@ -724,8 +722,7 @@ async fn an_accounts_secrets_go_to_the_keychain_never_to_the_file_and_leave_with
         (Some("trello-key".into()), Some("trello-secret".into()))
     );
     // The next start finds them in the keychain.
-    let app = mock_app();
-    let (again, _rx) = Core::load(app.handle().clone(), h.core.data.clone());
+    let (again, _rx) = Core::load(crate::host::Fake::new(), h.core.data.clone());
     let trello = again.accounts.read().trello.clone().unwrap();
     assert_eq!(
         (trello.key.as_str(), trello.token.as_str()),
@@ -825,8 +822,7 @@ async fn a_keychain_unreadable_at_a_start_loses_nothing_and_no_call_goes_without
     let kept = entries();
     // The next start finds the keychain out of reach.
     keychain.refuse.store(true, Ordering::SeqCst);
-    let app = mock_app();
-    let (again, _rx) = Core::load(app.handle().clone(), h.core.data.clone());
+    let (again, _rx) = Core::load(crate::host::Fake::new(), h.core.data.clone());
     *again.bases.write() = h.core.bases.read().clone();
     // The CLI would answer for whoever it is logged in as: never asked in the account's place.
     *again.gh_on_path.write() = Some(fake_gh());
@@ -870,8 +866,7 @@ async fn a_keychain_unreadable_at_a_start_loses_nothing_and_no_call_goes_without
     assert_eq!(entries(), kept);
     // Back at the start after: everything is there.
     keychain.refuse.store(false, Ordering::SeqCst);
-    let app = mock_app();
-    let (third, _rx) = Core::load(app.handle().clone(), h.core.data.clone());
+    let (third, _rx) = Core::load(crate::host::Fake::new(), h.core.data.clone());
     let a = third.accounts.read().clone();
     assert_eq!(a.trello.unwrap().token, "trello-secret");
     assert_eq!(a.github.unwrap().token, "ghp-work");
@@ -950,8 +945,7 @@ async fn a_secret_the_keychain_cannot_forget_is_said_and_forgotten_at_the_next_s
         serde_json::from_str(&std::fs::read_to_string(&file).unwrap()).unwrap();
     assert_eq!(listed.to_forget, [Service::TRELLO]);
     // The next start forgets Trello's only.
-    let app = mock_app();
-    let (_again, _rx) = Core::load(app.handle().clone(), h.core.data.clone());
+    let (_again, _rx) = Core::load(crate::host::Fake::new(), h.core.data.clone());
     assert_eq!(keychain.entry("trello"), None);
     assert_eq!(
         keychain.entry("github").as_deref(),
@@ -1004,8 +998,7 @@ async fn a_broken_file_then_another_account_never_costs_the_others_their_tokens(
     // The file breaks; the next start knows no account, and GitHub is connected.
     let file = h.core.data.integrations_file();
     std::fs::write(&file, r#"{ "jira": "#).unwrap();
-    let app = mock_app();
-    let (again, _rx) = Core::load(app.handle().clone(), h.core.data.clone());
+    let (again, _rx) = Core::load(crate::host::Fake::new(), h.core.data.clone());
     *again.bases.write() = h.core.bases.read().clone();
     *again.gh_on_path.write() = Some(fake_gh());
     server.on("GET", "/user", 200, json!({ "login": "ada" }));
@@ -1017,8 +1010,7 @@ async fn a_broken_file_then_another_account_never_costs_the_others_their_tokens(
         serde_json::from_str(&std::fs::read_to_string(&file).unwrap()).unwrap();
     assert!(listed.jira.is_none() && listed.trello.is_none());
     // The start after lists GitHub only: the others' tokens stay where they are.
-    let app = mock_app();
-    let (_third, _rx) = Core::load(app.handle().clone(), h.core.data.clone());
+    let (_third, _rx) = Core::load(crate::host::Fake::new(), h.core.data.clone());
     assert_eq!(entries(), kept);
 }
 
@@ -1053,8 +1045,7 @@ async fn the_token_a_switch_to_the_cli_could_not_delete_goes_at_the_next_start()
         serde_json::from_str(&std::fs::read_to_string(&file).unwrap()).unwrap();
     assert_eq!(listed.to_forget, [Service::GITHUB]);
     keychain.refuse.store(false, Ordering::SeqCst);
-    let app = mock_app();
-    let (again, _rx) = Core::load(app.handle().clone(), h.core.data.clone());
+    let (again, _rx) = Core::load(crate::host::Fake::new(), h.core.data.clone());
     assert_eq!(keychain.entry("github"), None);
     let github = again.accounts.read().github.clone().unwrap();
     assert_eq!((github.token.as_str(), github.unread), ("", false));
@@ -1483,8 +1474,7 @@ async fn the_syncs_left_waiting_are_tried_again_when_the_app_starts() {
     // The app stops, the service comes back, the app starts again.
     server.on("PUT", "/cards/c1", 200, json!({}));
     server.on("POST", "/cards/c1/actions/comments", 200, json!({}));
-    let app = mock_app();
-    let (again, _rx) = Core::load(app.handle().clone(), h.core.data.clone());
+    let (again, _rx) = Core::load(crate::host::Fake::new(), h.core.data.clone());
     *again.bases.write() = h.core.bases.read().clone();
     assert_eq!(again.pending_syncs.lock().ops.len(), 2);
     assert!(again
@@ -1528,8 +1518,7 @@ async fn a_kind_of_sync_a_later_version_left_waiting_does_not_cost_the_others_th
   { "ticketId": "t1", "external": { "service": "trello", "id": "c1" }, "op": { "kind": "comment", "text": "pris" } }
 ]"#;
     std::fs::write(&file, text).unwrap();
-    let app = mock_app();
-    let (again, _rx) = Core::load(app.handle().clone(), h.core.data.clone());
+    let (again, _rx) = Core::load(crate::host::Fake::new(), h.core.data.clone());
     let ops = again.pending_syncs.lock().ops.clone();
     assert_eq!(ops.len(), 1, "{ops:?}");
     assert_eq!(
@@ -1594,8 +1583,7 @@ async fn the_syncs_of_a_closed_projects_tickets_are_not_forgotten_when_the_app_s
 
     // The app stops and starts: the histories are read again, and every operation left waiting
     // goes again, but the closed project's ticket is on no board.
-    let app = mock_app();
-    let (again, _rx) = Core::load(app.handle().clone(), h.core.data.clone());
+    let (again, _rx) = Core::load(crate::host::Fake::new(), h.core.data.clone());
     *again.bases.write() = h.core.bases.read().clone();
     assert_eq!(again.pending_syncs.lock().ops.len(), 1);
     again.retry_all_syncs();

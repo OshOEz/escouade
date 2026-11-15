@@ -20,7 +20,6 @@ use serde_json::{json, Value};
 use std::net::Ipv4Addr;
 use std::sync::Arc;
 use std::time::Duration;
-use tauri::test::{mock_app, MockRuntime};
 
 /// The tools the server offers, sorted: those that read (`READING`, M2), those that act
 /// (`ACTING`, M4) and those only an agent of Escouade may call (`AGENTS_ONLY`, M4). A tool is added
@@ -362,7 +361,7 @@ async fn claude_outside_escouade_initializes_and_lists_the_tools_with_its_token(
 #[tokio::test]
 async fn the_server_offers_exactly_its_tools_and_only_three_are_named_for_approving_or_deleting() {
     // The router the app ships, without the test's tool.
-    let shipped = names(&Tools::<MockRuntime>::tool_router().list_all());
+    let shipped = names(&Tools::tool_router().list_all());
     assert_eq!(shipped, EXPOSED);
     let h = harness("mcp-tools");
     let (port, token) = started(&h);
@@ -961,8 +960,7 @@ async fn the_external_token_renewed_replaces_the_old_one_everywhere() {
         .unwrap()
         .contains(&newer));
     store.refuse.store(false, Ordering::SeqCst);
-    let app = mock_app();
-    let (again, _rx) = Core::load(app.handle().clone(), h.core.data.clone());
+    let (again, _rx) = Core::load(crate::host::Fake::new(), h.core.data.clone());
     assert_eq!(again.mcp.external_token().unwrap(), newer);
 }
 
@@ -1168,8 +1166,7 @@ async fn settings_and_projects_saved_before_the_mcp_server_leave_it_off() {
         ] }"#,
     )
     .unwrap();
-    let app = mock_app();
-    let (core, _rx) = Core::load(app.handle().clone(), data);
+    let (core, _rx) = Core::load(crate::host::Fake::new(), data);
     assert_eq!(core.projects.read().len(), 2);
     assert!(!core.mcp_wanted());
     core.sync_mcp();
@@ -1314,8 +1311,7 @@ async fn the_external_token_is_kept_in_the_keychain_and_the_same_after_a_restart
         Some(token.clone())
     );
     // Another core on the same data folder (the app started again): the same token.
-    let app = mock_app();
-    let (again, _rx) = Core::load(app.handle().clone(), h.core.data.clone());
+    let (again, _rx) = Core::load(crate::host::Fake::new(), h.core.data.clone());
     assert_eq!(again.mcp.external_token().unwrap(), token);
 }
 

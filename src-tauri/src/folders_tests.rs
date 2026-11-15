@@ -164,7 +164,6 @@ fn shown_follows_the_shared_cases() {
 mod core_hooks {
     use crate::core::{AgentOptions, Core};
     use crate::core_tests::{harness, Harness};
-    use tauri::test::mock_app;
 
     async fn agent(h: &Harness, pid: &str, folder: Option<&str>) -> String {
         h.core
@@ -358,8 +357,7 @@ mod core_hooks {
             .unwrap();
         h.core.folder_fold(&p.id, &f.id, true).unwrap();
         h.core.save_now();
-        let app = mock_app();
-        let (re, _rx) = Core::load(app.handle().clone(), h.core.data.clone());
+        let (re, _rx) = Core::load(crate::host::Fake::new(), h.core.data.clone());
         let rp = re.project(&p.id).unwrap();
         assert_eq!(rp.agent_folders.len(), 1);
         assert_eq!(rp.agent_folders[0].name, "Docs");
@@ -378,8 +376,7 @@ mod core_hooks {
         // As a state saved before this version: no order.
         h.core.projects.write()[0].agent_order.clear();
         h.core.save_now();
-        let app = mock_app();
-        let (re, _rx) = Core::load(app.handle().clone(), h.core.data.clone());
+        let (re, _rx) = Core::load(crate::host::Fake::new(), h.core.data.clone());
         let mut got = re.project(&p.id).unwrap().agent_order;
         got.sort();
         let mut want = vec![a, b];
@@ -535,8 +532,7 @@ mod core_hooks {
             ps[0].agent_folders[0].agents.push("ghost2".into());
         }
         h.core.save_now();
-        let app = mock_app();
-        let (re, _rx) = Core::load(app.handle().clone(), h.core.data.clone());
+        let (re, _rx) = Core::load(crate::host::Fake::new(), h.core.data.clone());
         let rp = re.project(&p.id).unwrap();
         assert_eq!(rp.agent_folders[0].agents, vec![a]);
         // The archived agent stays; the unknown ids went; the folder is still there.
