@@ -27,6 +27,8 @@ Sur le compte rendu `docs/superpowers/specs/2026-11-14-mode-serveur-lot0-compte-
 - **Le job de CI Linux sans GTK arrive tôt**, à la fin du lot 2, avec la séparation par fonctionnalités.
 - La branche de travail est poussée sur le fork GitHub du demandeur ; rien n'est proposé à l'amont.
 
+Après le lot 1 (2026-11-15) : le code est sur la branche `feat/coeur-sans-apphandle` du fork, en deux commits (`23028b0c`, `adfbb516`) ; la suite de tests avec Node donne le même résultat que l'amont, plus cinq tests neufs. Le demandeur a choisi de ne rien proposer à l'amont avant d'avoir essayé l'app de bureau sur une vraie machine, et de continuer par le lot 2 (`docs/superpowers/plans/2026-11-15-mode-serveur-lot2-api-distante.md`).
+
 Là où la suite de ce document dit encore « à confirmer par le demandeur » ou présente deux options sur ces points, c'est cette section qui vaut.
 
 ## Buts
