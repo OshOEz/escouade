@@ -41,6 +41,7 @@ pub enum CallError {
 }
 
 /// Every command of the window, from the list `lib.rs` gives Tauri.
+#[cfg_attr(not(debug_assertions), allow(dead_code))] // Its one caller in the app is debug-only.
 pub fn entries() -> &'static [Entry] {
     crate::commands().1
 }

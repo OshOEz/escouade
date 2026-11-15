@@ -85,12 +85,14 @@ impl<R: Runtime> Host for Desktop<R> {
     }
 
     fn cancel_dictation(&self) {
+        // No voice managed: no dictation to cancel.
         if let Some(v) = self.0.try_state::<Arc<crate::voice::Voice>>() {
             v.cancel();
         }
     }
 
     fn tune_conversation(&self, settings: &Settings, secrets: &dyn SecretStore) {
+        // No voice managed: no conversation to tune.
         if let Some(v) = self.0.try_state::<Arc<crate::voice::Voice>>() {
             v.conversation_tune(&crate::commands::conv_choice(settings, secrets, &v.catalog).0);
         }
