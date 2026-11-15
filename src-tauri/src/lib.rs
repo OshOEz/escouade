@@ -230,6 +230,7 @@ mod shellenv;
 mod signin;
 #[cfg(test)]
 mod signin_tests;
+mod sink;
 mod stats;
 mod switching;
 #[cfg(test)]

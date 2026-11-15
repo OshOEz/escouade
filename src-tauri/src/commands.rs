@@ -13,6 +13,7 @@ use crate::model::Account as ClaudeAccount;
 use crate::model::*;
 use crate::pty::{self, ShellInfo, TermInfo, TermReport};
 use crate::search;
+use crate::sink::Sink;
 use crate::stats::StatsView;
 use crate::telemetry::{self, Event};
 use crate::tickets::TicketDraft;
@@ -125,7 +126,7 @@ pub fn subscribe(
     voice: VoiceState,
     channel: Channel<UiEvent>,
 ) -> InitialState {
-    core.hub.set_channel(channel);
+    core.hub.set_sink(channel.into());
     // A page that loads again has no dictation under way: the one of the page before stops.
     voice.cancel();
     core.reset_unsaved();
@@ -917,8 +918,9 @@ pub fn account_login(
     rows: u16,
     output: Channel<InvokeResponseBody>,
 ) -> Res<TermInfo> {
+    let output: Sink<Vec<u8>> = output.into();
     core.claude_login(&id, (cols, rows), move |bytes| {
-        let _ = output.send(InvokeResponseBody::Raw(bytes));
+        let _ = output.send(bytes);
     })
     .map_err(err)
 }
@@ -946,8 +948,9 @@ pub async fn agent_terminal(
     manual: Option<bool>,
     output: Channel<InvokeResponseBody>,
 ) -> Res<TermInfo> {
+    let output: Sink<Vec<u8>> = output.into();
     core.open_agent_terminal(&id, (cols, rows), manual.unwrap_or(false), move |bytes| {
-        let _ = output.send(InvokeResponseBody::Raw(bytes));
+        let _ = output.send(bytes);
     })
     .await
     .map_err(err)
@@ -2639,6 +2642,7 @@ pub async fn term_spawn(
     rows: u16,
     output: Channel<InvokeResponseBody>,
 ) -> Res<TermInfo> {
+    let output: Sink<Vec<u8>> = output.into();
     let cwd = core
         .term_cwd(&project_id, agent_id, subdir.as_deref())
         .await
@@ -2671,7 +2675,7 @@ pub async fn term_spawn(
             (cols, rows),
             env,
             move |bytes| {
-                let _ = output.send(InvokeResponseBody::Raw(bytes));
+                let _ = output.send(bytes);
             },
             move |code| {
                 if let Some(c) = hub_core.upgrade() {
@@ -2752,7 +2756,7 @@ pub fn run_start(
         launch,
         (cols, rows),
         cursor_row,
-        output,
+        output.into(),
     );
     if let (Some(a), Ok(info)) = (&agent_id, &r) {
         core.track_test_run(a, &info.id, &info.name).map_err(err)?;
@@ -2779,7 +2783,7 @@ fn spawn_launch(
     launch: Launch,
     size: (u16, u16),
     cursor_row: Option<u16>,
-    output: Channel<InvokeResponseBody>,
+    output: Sink<Vec<u8>>,
 ) -> Res<TermInfo> {
     let mut env = if settings.proxy_terminals {
         settings.proxy_env()
@@ -2800,7 +2804,7 @@ fn spawn_launch(
             cursor_row.unwrap_or(1),
             launch.command,
             move |bytes| {
-                let _ = output.send(InvokeResponseBody::Raw(bytes));
+                let _ = output.send(bytes);
             },
             move |code| {
                 if let Some(c) = hub_core.upgrade() {
@@ -3181,7 +3185,7 @@ pub fn test_run_start(
         launch,
         (cols, rows),
         cursor_row,
-        output,
+        output.into(),
     )?;
     core.track_test_run(&agent_id, &info.id, &info.name)
         .map_err(err)?;

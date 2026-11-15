@@ -1,11 +1,11 @@
-//! Single event channel towards the webview.
+//! Single event flow towards the webview, or a remote client.
 
 use crate::model::UiEvent;
+use crate::sink::Sink;
 use parking_lot::{Mutex, RwLock};
 use std::collections::HashMap;
 use std::mem::Discriminant;
 use std::time::{Duration, Instant};
-use tauri::ipc::Channel;
 
 /// Past this many events sent to the page in one second, the second is written in the log
 /// (ESC-290): an avalanche keeps the page drawing, and the window answering nothing.
@@ -15,7 +15,7 @@ const LOUD_EVERY: Duration = Duration::from_secs(30);
 
 #[derive(Default)]
 pub struct Hub {
-    channel: RwLock<Option<Channel<UiEvent>>>,
+    sink: RwLock<Option<Sink<UiEvent>>>,
     meter: Mutex<Meter>,
 }
 
@@ -86,18 +86,17 @@ fn kind_of(event: &UiEvent) -> String {
 }
 
 impl Hub {
-    pub fn set_channel(&self, channel: Channel<UiEvent>) {
-        *self.channel.write() = Some(channel);
+    pub fn set_sink(&self, sink: Sink<UiEvent>) {
+        *self.sink.write() = Some(sink);
     }
 
     pub fn emit(&self, event: UiEvent) {
         if let Some(line) = self.meter.lock().count(&event, Instant::now()) {
             log::warn!("{line}");
         }
-        if let Some(ch) = &*self.channel.read() {
-            if let Err(e) = ch.send(event) {
-                log::debug!("event channel send failed: {e}");
-            }
+        if let Some(sink) = &*self.sink.read() {
+            // The window's sink logs why it failed (`Sink::from`).
+            let _ = sink.send(event);
         }
     }
 }
@@ -132,6 +131,19 @@ mod tests {
             m.count(&git(), t0 + Duration::from_secs(32));
         }
         assert!(m.count(&git(), t0 + Duration::from_secs(34)).is_some());
+    }
+
+    #[test]
+    fn the_hub_emits_to_its_sink() {
+        let got = std::sync::Arc::new(Mutex::new(Vec::new()));
+        let to = got.clone();
+        let hub = Hub::default();
+        hub.set_sink(Sink::new(move |e: UiEvent| {
+            to.lock().push(serde_json::to_value(&e).unwrap());
+            Ok(())
+        }));
+        hub.emit(git());
+        assert_eq!(*got.lock(), [serde_json::to_value(git()).unwrap()]);
     }
 
     #[test]
