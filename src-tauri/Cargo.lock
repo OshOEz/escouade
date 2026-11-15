@@ -1756,6 +1756,7 @@ dependencies = [
  "escouade-base",
  "escouade-engines",
  "escouade-forge",
+ "escouade-macros",
  "escouade-mcp",
  "escouade-model",
  "escouade-plan",
@@ -1887,6 +1888,15 @@ dependencies = [
  "tokio-rustls",
  "uuid",
  "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "escouade-macros"
+version = "0.1.0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.119",
 ]
 
 [[package]]

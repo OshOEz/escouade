@@ -163,6 +163,9 @@ mod paths;
 mod recovery_tests;
 #[cfg(test)]
 mod remote_tests;
+// Called by its tests alone until a server serves it.
+#[allow(dead_code)]
+mod remoteapi;
 #[cfg(test)]
 mod save_tests;
 // What an agent is getting through, and the plan files it follows: the crate `escouade-plan`.

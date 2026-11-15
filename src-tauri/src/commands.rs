@@ -17,6 +17,7 @@ use crate::sink::Sink;
 use crate::stats::StatsView;
 use crate::telemetry::{self, Event};
 use crate::tickets::TicketDraft;
+use escouade_macros::command;
 use serde::Serialize;
 use serde_json::Value;
 use std::collections::{BTreeMap, HashMap};
@@ -42,7 +43,39 @@ fn project_added(core: &Core, r: Res<(Project, bool)>) -> Res<Project> {
         other => other.map(|(project, _)| project),
     }
 }
-type CoreState<'a> = State<'a, Arc<Core>>;
+/// The core, as a command takes it: Tauri's managed state in the window, the connection's core remotely
+/// (`remoteapi::table`), which cannot make a `State`.
+#[derive(Clone, Copy)]
+pub struct CoreState<'a>(&'a Arc<Core>);
+
+impl<'a> CoreState<'a> {
+    pub fn inner(&self) -> &'a Arc<Core> {
+        self.0
+    }
+}
+
+impl std::ops::Deref for CoreState<'_> {
+    type Target = Arc<Core>;
+
+    fn deref(&self) -> &Arc<Core> {
+        self.0
+    }
+}
+
+impl<'a> From<&'a Arc<Core>> for CoreState<'a> {
+    fn from(core: &'a Arc<Core>) -> Self {
+        CoreState(core)
+    }
+}
+
+impl<'r, 'de: 'r, R: tauri::Runtime> tauri::ipc::CommandArg<'de, R> for CoreState<'r> {
+    fn from_command(
+        command: tauri::ipc::CommandItem<'de, R>,
+    ) -> Result<Self, tauri::ipc::InvokeError> {
+        <State<'r, Arc<Core>> as tauri::ipc::CommandArg<'de, R>>::from_command(command)
+            .map(|state| CoreState(state.inner()))
+    }
+}
 
 /// What the window is told of a refusal. One for want of an account of a harness (ESC-128) comes
 /// as `no-account:<harness>|<text>`: the window shows the text with « Ajouter un compte… » on
@@ -241,7 +274,7 @@ pub(crate) fn open_path_in(core: &Core, path: &std::path::Path) -> anyhow::Resul
     allowed.open()
 }
 
-#[tauri::command]
+#[command]
 pub fn set_ui(core: CoreState, ui: UiState) {
     *core.ui.write() = ui;
     core.request_save();
@@ -273,7 +306,7 @@ pub fn save_settings(
 /// Every harness with what is found of it here: its program, its version, its state (`registry`).
 /// Asked by the user: versions are read again, and a harness installed since gets Escouade's
 /// server (« Les agents peuvent piloter Escouade », `declare_in_harnesses`).
-#[tauri::command]
+#[command]
 pub async fn engines(core: CoreState<'_>) -> Res<Vec<crate::engine::registry::EngineInfo>> {
     // One installed since the app started is found (ESC-186).
     tokio::task::spawn_blocking(crate::syspath::refresh)
@@ -1043,7 +1076,7 @@ pub fn account_models_refresh(core: CoreState, id: String) {
 }
 
 /// Whether the account is signed in, with which email, and its folder.
-#[tauri::command]
+#[command]
 pub async fn account_status(core: CoreState<'_>, id: String) -> Res<AccountStatus> {
     core.claude_account_status(&id).await.map_err(err)
 }
@@ -2214,7 +2247,7 @@ pub async fn create_agent_on_branch(
 }
 
 /// The reviews written by an agent of a project (ESC-66).
-#[tauri::command]
+#[command]
 pub fn pr_reviews(core: CoreState<'_>, project_id: String) -> Vec<crate::prreview::PrReview> {
     core.pr_reviews_of(&project_id)
 }
@@ -3021,7 +3054,7 @@ pub fn play_chime() {
 }
 
 /// « Quitter »: with an update downloaded, it installs silently and the app stays closed.
-#[tauri::command]
+#[command(desktop)]
 pub fn quit_app(app: tauri::AppHandle) {
     crate::updates::quit(&app);
 }
