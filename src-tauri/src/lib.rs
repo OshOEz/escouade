@@ -163,8 +163,6 @@ mod paths;
 mod recovery_tests;
 #[cfg(test)]
 mod remote_tests;
-// Called by its tests alone until a server serves it.
-#[allow(dead_code)]
 mod remoteapi;
 #[cfg(test)]
 mod save_tests;
@@ -503,6 +501,9 @@ fn give_tauri_our_runtime() {
 }
 
 pub fn run() {
+    // First, before any thread: no child process may inherit the remote API's token. Debug builds only.
+    #[cfg(debug_assertions)]
+    let remote = remoteapi::server::take_from_env();
     // A debug build told `--sandbox-keychain …` takes back the keychain's entries of sandboxed runs, then stops: the
     // end-to-end fixture's, at its start and its end (ESC-584). Before anything, which would touch the user's folders.
     #[cfg(debug_assertions)]
@@ -615,6 +616,25 @@ pub fn run() {
                 log::error!("app menu not set: {e}");
             }
             core.start(git_rx);
+            // Off unless both variables are set; a remote `subscribe` or `agent_terminal` takes the window's events or that terminal's output.
+            #[cfg(debug_assertions)]
+            match remote {
+                Ok(None) => {}
+                Err(why) => log::warn!("remote API off: {why}"),
+                Ok(Some(config)) => {
+                    match remoteapi::server::start(
+                        core.clone(),
+                        remoteapi::table::entries(),
+                        config,
+                    ) {
+                        Ok(running) => {
+                            log::info!("remote API listening on {}", running.addr);
+                            app.manage(running);
+                        }
+                        Err(e) => log::error!("remote API not started: {e}"),
+                    }
+                }
+            }
             // The Principals of settings saved before 1.8.1 kept or dropped, once (ESC-128).
             let migrating = core.clone();
             escouade_base::rt::spawn(async move { migrating.migrate_accounts().await });
@@ -711,6 +731,10 @@ pub fn run() {
         .expect("error while building the application")
         .run(|app, event| match event {
             tauri::RunEvent::Exit => {
+                #[cfg(debug_assertions)]
+                if let Some(remote) = app.try_state::<remoteapi::server::Running>() {
+                    remote.stop();
+                }
                 if let Some(core) = app.try_state::<Arc<Core>>() {
                     if !core.quitting.load(Ordering::Acquire) {
                         // macOS: Cmd+Q, the app menu's « Quitter Escouade » (`menus::app_menu`)
