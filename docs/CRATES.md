@@ -483,3 +483,12 @@ Ce qu'elles disent :
 - **La mémoire baisse un peu, sans ambiguïté** : − 144 Mo au pic, à 20 Mo près entre les passes. Plus que la part des lignes (0,6 %) : les arguments des outils sont des types à `derive(Deserialize, JsonSchema)` (§ 9), dont le code généré pèse plus que leurs lignes. « lib (test) » reste au niveau des 7 Go d'un runner macOS arm64, et la lib en même temps bien au-delà.
 - **L'archive est plus lente de 9 s** : un binaire de test de plus à lier (celui de la crate, qui embarque rmcp, hyper et tokio ; 5 tests), comme au § 10 ; la seconde passe « après » (129 s) s'écarte de la première de 11 s, à confirmer sur la CI. Si elle le confirme, la piste est `test = false` sur la lib de la crate, ses 5 tests revenant à l'app.
 - Une recompilation après un changement de la crate recompile aussi l'app, comme au § 3 ; un changement dans l'app ne recompile pas la crate.
+
+## 14. `escouade-macros`
+
+Pas un morceau sorti de l'app : la crate de ses macros procédurales, qu'une crate ordinaire ne peut pas définir. Mêmes règles qu'au § 4 (`publish = false`, GPL-3.0-or-later, membre et `default-member`) ; elle ne prend que `syn`, `quote` et `proc-macro2`, déjà dans le verrou.
+
+- `#[command]` (avec `async` et `desktop`, comme `#[tauri::command]`) laisse la commande telle quelle sous `#[tauri::command]` et écrit à côté `__REMOTE_<NOM>`, son entrée de la table de l'API distante (`remoteapi::table` de l'app ; docs/REMOTE.md, « La fondation commune », point 2) : la commande appelée avec l'objet JSON qu'envoie la fenêtre, les arguments lus sous la clé de Tauri (en camelCase), le cœur donné pour `CoreState`, la réponse et l'erreur rendues comme Tauri les rend. Un paramètre que seule la fenêtre a (`AppHandle`, `State`, `Channel`…) est refusé à la compilation sans `desktop`, dont l'entrée dit que la commande n'est pas appelée à distance.
+- `handlers![…]` donne `tauri::generate_handler![…]` et la table des entrées d'une seule liste, pour que les deux ne divergent jamais. Chaque élément de la liste doit être un `#[command]` : un `#[tauri::command]` y échoue avec « cannot find value `__REMOTE_…` ».
+- `CoreState` est un type de l'app (`commands.rs`) et non plus un alias de `tauri::State` : Tauri le tire de son état comme avant, la table le fait du cœur de la connexion, ce qu'un `State` ne permet pas.
+- Ses tests sont ceux de la crate (le classement des paramètres, les clés, l'expansion) ; ceux de la table, qui chargent un cœur, restent dans l'app (`remoteapi/table.rs`).
