@@ -13,7 +13,6 @@ use anyhow::{anyhow, Result};
 use serde::Serialize;
 use std::sync::Arc;
 use std::time::Duration;
-use tauri::Runtime;
 
 /// The most deletions an agent may have asked for at once, still unanswered: past them, it is
 /// refused until the user answers some.
@@ -42,7 +41,7 @@ pub struct Loss {
     pub base: String,
 }
 
-impl<R: Runtime> Core<R> {
+impl Core {
     /// The agent `asker` asks the user to delete `id` (one it made: the caller checks it). Asked
     /// again before the user answers, the ask is the same, its worktree's choice the new one.
     /// Refused past `MAX_ASKS` unanswered.

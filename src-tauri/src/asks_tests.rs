@@ -11,7 +11,6 @@ use crate::model::*;
 use crate::paths::DataDir;
 use std::path::Path;
 use std::sync::Arc;
-use tauri::test::{mock_app, MockRuntime};
 
 const PNG: &[u8] = b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR";
 const PDF: &[u8] = b"%PDF-1.7\n%\xE2\xE3\xCF\xD3\n";
@@ -1026,9 +1025,8 @@ async fn the_requests_are_kept_across_a_restart() {
         )
         .unwrap();
     h.core.save_state().unwrap();
-    let app = mock_app();
     let data = DataDir::new(h.dir.join("data"));
-    let (again, _rx): (Arc<Core<MockRuntime>>, _) = Core::load(app.handle().clone(), data);
+    let (again, _rx): (Arc<Core>, _) = Core::load(crate::host::Fake::new(), data);
     let found = again.ask(&kept.id).unwrap();
     assert_eq!(found, kept);
     // The next one has a number of its own.

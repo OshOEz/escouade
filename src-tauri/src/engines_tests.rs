@@ -9,7 +9,6 @@ use crate::paths::{test_dir, DataDir};
 use crate::stats::{EngineShare, Labels};
 use crate::tickets_tests::draft;
 use serde_json::{json, Value};
-use tauri::test::mock_app;
 
 /// A state file as 1.7 wrote it: a project with its settings, an agent on a second account with
 /// its session, and a ticket done by it.
@@ -47,8 +46,7 @@ async fn a_state_saved_before_the_harnesses_loads_on_claude_code_and_loses_nothi
     data.ensure().unwrap();
     std::fs::write(data.settings_file(), r#"{"claudePath":"","sound":false}"#).unwrap();
     std::fs::write(data.state_file(), state_of_1_7(&dir).to_string()).unwrap();
-    let app = mock_app();
-    let (core, _rx) = Core::load(app.handle().clone(), data.clone());
+    let (core, _rx) = Core::load(crate::host::Fake::new(), data.clone());
     let a = core.agent("a1").unwrap().lock().meta.clone();
     assert_eq!(a.engine, EngineId::CLAUDE);
     assert_eq!(

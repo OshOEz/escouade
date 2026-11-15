@@ -16,7 +16,6 @@ use crate::i18n::{self, Lang};
 use crate::model::now_ms;
 use std::collections::{BTreeMap, HashSet};
 use std::sync::Arc;
-use tauri::Runtime;
 
 /// The wait after the first request of a calm, to gather what comes with it.
 pub const GROUP_MS: i64 = 2 * 60 * 1000;
@@ -224,7 +223,7 @@ pub fn bucket(n: usize) -> &'static str {
     }
 }
 
-impl<R: Runtime> Core<R> {
+impl Core {
     /// The summary, when requests came and its time did (the box's loop, and two minutes after a
     /// request is left). The MCP server off, or the system notifications off, nothing.
     pub fn inbox_summary_tick(self: &Arc<Self>) {
@@ -237,7 +236,7 @@ impl<R: Runtime> Core<R> {
         } else {
             Vec::new()
         };
-        let held = !cfg!(test) && crate::notify::window_attended(&self.app);
+        let held = !cfg!(test) && self.host.window_attended();
         let plan = self.inbox_summary.lock().plan(
             &keys,
             now_ms(),
@@ -290,15 +289,15 @@ impl<R: Runtime> Core<R> {
         if crate::paths::hidden_window() {
             return;
         }
-        let (app, weak) = (self.app.clone(), Arc::downgrade(self));
-        crate::notify::toast(&self.app, &title, &body, move || {
-            crate::notify::show_main(&app);
+        let weak = Arc::downgrade(self);
+        let on_click = move || {
             if let Some(c) = weak.upgrade() {
                 c.hub.emit(crate::model::UiEvent::InboxOpen {
                     project_id: project_id.clone(),
                 });
             }
-        });
+        };
+        self.host.toast(&title, &body, Box::new(on_click));
     }
 
     /// Two minutes (`GROUP_MS`) after a request is left, the summary looks again: the box's loop

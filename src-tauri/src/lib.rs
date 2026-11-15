@@ -125,6 +125,7 @@ mod handover;
 mod harness_scope;
 #[cfg(test)]
 mod harness_scope_tests;
+mod host;
 mod hub;
 mod inboxnotify;
 #[cfg(test)]
@@ -584,7 +585,7 @@ pub fn run() {
                     .join("agent-groups.json"),
             );
             let (core, git_rx) = Core::load(
-                app.handle().clone(),
+                Arc::new(host::Desktop(app.handle().clone())),
                 paths::DataDir::new(paths::default_data_dir()),
             );
             app.manage(core.clone());

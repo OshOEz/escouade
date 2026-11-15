@@ -23,7 +23,6 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::time::Duration;
-use tauri::test::mock_app;
 
 pub(crate) fn draft(title: &str, criteria: &[&str], max_loops: u32) -> TicketDraft {
     TicketDraft {
@@ -353,7 +352,7 @@ pub(crate) async fn wait_running(h: &Harness, ticket_id: &str) -> String {
 }
 
 /// The texts of the user messages in the agent's conversation.
-fn user_texts(core: &Core<tauri::test::MockRuntime>, agent_id: &str) -> Vec<String> {
+fn user_texts(core: &Core, agent_id: &str) -> Vec<String> {
     core.agent(agent_id)
         .unwrap()
         .lock()
@@ -2282,21 +2281,15 @@ async fn a_window_past_the_threshold_holds_nothing_back_once_it_ends() {
 }
 
 /// The app stopped and started again on the same data: what recovery and the first pass do.
-fn restart(
-    h: &Harness,
-) -> (
-    Arc<Core<tauri::test::MockRuntime>>,
-    tauri::App<tauri::test::MockRuntime>,
-) {
+fn restart(h: &Harness) -> Arc<Core> {
     h.core.save_now();
-    let app = mock_app();
-    let (re, _rx) = Core::load(app.handle().clone(), h.core.data.clone());
+    let (re, _rx) = Core::load(crate::host::Fake::new(), h.core.data.clone());
     re.recover_tickets();
-    (re, app)
+    re
 }
 
 /// No scheduling pass of `core` is queued or running.
-async fn passes_over(core: &Core<tauri::test::MockRuntime>) {
+async fn passes_over(core: &Core) {
     for _ in 0..750 {
         if core.passes_queued.load(Ordering::SeqCst) == 0 {
             return;
@@ -2306,7 +2299,7 @@ async fn passes_over(core: &Core<tauri::test::MockRuntime>) {
     panic!("timed out waiting for the passes to end");
 }
 
-async fn wait_started(core: &Core<tauri::test::MockRuntime>, id: &str) {
+async fn wait_started(core: &Core, id: &str) {
     for _ in 0..750 {
         if core.ticket(id).unwrap().column != Column::Todo {
             return;
@@ -2340,7 +2333,7 @@ async fn a_quota_window_read_before_a_restart_still_holds_the_tickets_back_until
         .unwrap();
     h.wait_board_idle().await;
     assert_eq!(h.ticket(&t.id).column, Column::Todo);
-    let (re, _app) = restart(&h);
+    let re = restart(&h);
     passes_over(&re).await;
     assert_eq!(re.ticket(&t.id).unwrap().column, Column::Todo);
     assert_eq!(
@@ -2364,7 +2357,7 @@ async fn the_pause_after_a_usage_limit_holds_across_a_restart_until_its_end() {
         .unwrap();
     h.wait_board_idle().await;
     assert_eq!(h.ticket(&t.id).column, Column::Todo);
-    let (re, _app) = restart(&h);
+    let re = restart(&h);
     passes_over(&re).await;
     assert_eq!(re.ticket(&t.id).unwrap().column, Column::Todo);
     assert_eq!(
@@ -2610,8 +2603,7 @@ async fn a_ticket_whose_turn_the_app_cut_asks_its_agent_to_go_on_at_the_next_sta
         ..Default::default()
     });
     h.core.shutdown();
-    let app = mock_app();
-    let (re, _rx) = Core::load(app.handle().clone(), h.core.data.clone());
+    let (re, _rx) = Core::load(crate::host::Fake::new(), h.core.data.clone());
     let v = re.ticket("t2").unwrap();
     assert_eq!(
         (v.column, v.step.clone(), v.blocked.as_deref(), v.conflict),
@@ -2619,7 +2611,7 @@ async fn a_ticket_whose_turn_the_app_cut_asks_its_agent_to_go_on_at_the_next_sta
     );
     assert_eq!(*re.cut_turns.lock(), std::slice::from_ref(&aid));
     re.recover_tickets();
-    let asked = |re: &Core<tauri::test::MockRuntime>| {
+    let asked = |re: &Core| {
         user_texts(re, &aid).iter().any(|text| {
             text.starts_with("L'app a redémarré pendant ton travail sur DEM-1 : reprends")
         })
@@ -2660,8 +2652,7 @@ async fn a_turn_the_apps_stop_cuts_is_no_error_of_the_agent_and_is_saved_running
     );
     // Saved again after that exit, it is still a cut turn.
     h.core.save_now();
-    let app = mock_app();
-    let (re, _rx) = Core::load(app.handle().clone(), h.core.data.clone());
+    let (re, _rx) = Core::load(crate::host::Fake::new(), h.core.data.clone());
     assert_eq!(*re.cut_turns.lock(), [aid]);
 }
 

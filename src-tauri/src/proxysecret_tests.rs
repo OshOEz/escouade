@@ -8,7 +8,6 @@ use crate::paths::{test_dir, DataDir};
 use crate::proxysecret::{on_load, on_save};
 use escouade_model::proxy::SECRET_ENTRY;
 use std::sync::atomic::Ordering;
-use tauri::test::mock_app;
 
 fn proxied(url: &str) -> Settings {
     Settings {
@@ -137,8 +136,7 @@ async fn the_core_migrates_the_proxys_password_and_keeps_it_out_of_the_file() {
         r#"{ "proxyUrl": "http://ada:s3cret@127.0.0.1:9000", "noProxy": "localhost" }"#,
     )
     .unwrap();
-    let app = mock_app();
-    let (core, _rx) = Core::load(app.handle().clone(), data.clone());
+    let (core, _rx) = Core::load(crate::host::Fake::new(), data.clone());
     let file = std::fs::read_to_string(data.settings_file()).unwrap();
     assert!(!file.contains("s3cret"), "{file}");
     assert!(file.contains("http://ada@127.0.0.1:9000"), "{file}");
@@ -165,7 +163,7 @@ async fn the_core_migrates_the_proxys_password_and_keeps_it_out_of_the_file() {
     let file = std::fs::read_to_string(data.settings_file()).unwrap();
     assert!(!file.contains("s3cret"), "{file}");
     drop(core);
-    let (again, _rx) = Core::load(mock_app().handle().clone(), data.clone());
+    let (again, _rx) = Core::load(crate::host::Fake::new(), data.clone());
     assert_eq!(
         again.settings.read().proxy_url,
         "http://ada:s3cret@127.0.0.1:9000"

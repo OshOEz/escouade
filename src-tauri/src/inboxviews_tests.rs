@@ -360,12 +360,8 @@ async fn put_off_a_view_leaves_its_source_and_comes_back_never_a_blocking_one() 
     );
     // Kept across a restart.
     h.core.save_state().unwrap();
-    let app = tauri::test::mock_app();
     let data = crate::paths::DataDir::new(h.dir.join("data"));
-    let (again, _rx): (
-        std::sync::Arc<crate::core::Core<tauri::test::MockRuntime>>,
-        _,
-    ) = crate::core::Core::load(app.handle().clone(), data);
+    let (again, _rx) = crate::core::Core::load(crate::host::Fake::new(), data);
     assert_eq!(
         again.inbox_snoozes.lock().until.get(&key).copied(),
         Some(later)
@@ -531,12 +527,8 @@ async fn the_lead_takes_a_ticket_to_test_in_hand_it_no_longer_waits_and_falls_on
     assert_eq!(h.ticket(&t.id).column, Column::Review);
     // Kept across a restart.
     h.core.save_state().unwrap();
-    let app = tauri::test::mock_app();
     let data = crate::paths::DataDir::new(h.dir.join("data"));
-    let (again, _rx): (
-        std::sync::Arc<crate::core::Core<tauri::test::MockRuntime>>,
-        _,
-    ) = crate::core::Core::load(app.handle().clone(), data);
+    let (again, _rx) = crate::core::Core::load(crate::host::Fake::new(), data);
     assert_eq!(
         again
             .inbox_snoozes

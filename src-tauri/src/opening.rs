@@ -200,7 +200,7 @@ fn shown(path: &Path) -> String {
     unverbatim(path).display().to_string()
 }
 
-impl<R: tauri::Runtime> crate::core::Core<R> {
+impl crate::core::Core {
     /// The folders the system may open in (`allow`): Escouade's data folder, and of every project its folder, the folder
     /// of its new worktrees, and the folder and worktree of each of its agents (a worktree made before the « Dossier
     /// des worktrees » changed stays where it is).

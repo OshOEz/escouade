@@ -18,7 +18,6 @@ use crate::engine::Engine;
 use crate::i18n::Lang;
 use anyhow::{bail, Result};
 use std::sync::Arc;
-use tauri::Runtime;
 
 /// Escouade's modes, from the one that allows the least to the one that allows the most.
 pub const ORDER: [&str; 5] = ["plan", "default", "acceptEdits", "auto", BYPASS];
@@ -222,7 +221,7 @@ pub fn stopped(lang: Lang, why: &str) -> String {
     )
 }
 
-impl<R: Runtime> Core<R> {
+impl Core {
     /// Why the agent `id`, as it runs now, may not run on (a third party's harness in a private project, `refusal_of`):
     /// what a change of « Autoriser le mode Bypass » or of « Projet privé » looks at, what the end of a turn judges
     /// again, and what a start does not take a live process over with.

@@ -137,7 +137,7 @@ pub fn refusal_in(lang: crate::i18n::Lang, e: &anyhow::Error, secret: &str) -> S
     )
 }
 
-impl<R: tauri::Runtime> Core<R> {
+impl Core {
     /// The secrets `keys` of the plugin `id`: kept or not, and where; of those on several lines (`multiline`), their
     /// lines and bytes.
     pub fn plugin_secret_states(

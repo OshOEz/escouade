@@ -433,7 +433,7 @@ async fn real_cursor_writes_a_text() {
 }
 
 /// The menu the account `id` keeps (`Core::account_models`): its models' ids.
-fn menu_of(core: &crate::core::Core<tauri::test::MockRuntime>, id: &str) -> Vec<String> {
+fn menu_of(core: &crate::core::Core, id: &str) -> Vec<String> {
     core.account_models
         .read()
         .get(id)
@@ -464,8 +464,7 @@ async fn the_models_of_a_cursor_account_are_read_without_an_agent_and_kept_after
     // No agent, no session.
     assert!(h.core.agents.read().is_empty());
     h.core.save_now();
-    let app = tauri::test::mock_app();
-    let (reloaded, _rx) = crate::core::Core::load(app.handle().clone(), h.core.data.clone());
+    let (reloaded, _rx) = crate::core::Core::load(crate::host::Fake::new(), h.core.data.clone());
     assert_eq!(menu_of(&reloaded, "principal-cursor").len(), 4);
     h.core.stop_for_good();
 }

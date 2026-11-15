@@ -13,7 +13,6 @@ use crate::model::*;
 use crate::paths::{test_dir, DataDir};
 use crate::tickets_tests::draft;
 use serde_json::json;
-use tauri::test::mock_app;
 
 /// The harness of the fake `e`, with an account of it serving every project: what a new agent of it goes to.
 pub(crate) fn with_account(h: &Harness, e: &dyn Engine) -> EngineId {
@@ -389,8 +388,7 @@ async fn an_agent_resumed_after_a_restart_is_judged_in_the_mode_its_harness_runs
         .to_string(),
     )
     .unwrap();
-    let app = mock_app();
-    let (core, _rx) = Core::load(app.handle().clone(), data);
+    let (core, _rx) = Core::load(crate::host::Fake::new(), data);
     assert!(!core.bypass_allowed());
     let refused = core
         .send_message("a1", "Tu es là ?".into(), Vec::new())
@@ -416,7 +414,6 @@ async fn an_agent_resumed_after_a_restart_is_judged_in_the_mode_its_harness_runs
         .await
         .unwrap();
     assert_eq!(core.agent("a2").unwrap().lock().meta.mode, "acceptEdits");
-    std::mem::forget(app);
 }
 
 /// A change of mode: only one of its harness's, judged; on a harness whose one mode is Bypass, « Demander » is refused

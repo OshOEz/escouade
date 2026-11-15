@@ -20,7 +20,6 @@ use std::collections::HashSet;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use tauri::Runtime;
 
 // ---------- the bounds (§ 3.3, § 4.2, § 12) ----------
 
@@ -922,7 +921,7 @@ fn not_found(lang: Lang, id: &str) -> anyhow::Error {
     ))
 }
 
-impl<R: Runtime> Core<R> {
+impl Core {
     /// The box is open: the MCP server is wanted (« Les agents peuvent piloter Escouade »).
     pub fn inbox_enabled(&self) -> bool {
         self.settings.read().mcp_enabled
@@ -1969,7 +1968,7 @@ pub struct InboxClosing {
 /// The most a part of a file weighs.
 pub(crate) const CHUNK_MAX: u64 = 4 * MB;
 
-impl<R: Runtime> Core<R> {
+impl Core {
     fn window_ask(&self, a: Ask) -> WindowAsk {
         let project = self.project(&a.project_id).ok();
         let ticket_key = a

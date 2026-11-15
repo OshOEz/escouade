@@ -26,7 +26,7 @@ use tauri::State;
 type Res<T> = Result<T, String>;
 
 /// A command's result, counted in the usage statistics when it went well (`telemetry`).
-fn counted<T, R: tauri::Runtime>(core: &Core<R>, event: Event, r: Res<T>) -> Res<T> {
+fn counted<T>(core: &Core, event: Event, r: Res<T>) -> Res<T> {
     if r.is_ok() {
         core.telemetry.track(event);
     }
@@ -35,7 +35,7 @@ fn counted<T, R: tauri::Runtime>(core: &Core<R>, event: Event, r: Res<T>) -> Res
 
 /// The project a folder was added as, counted as created unless a closed project's history came
 /// back with it (`Core::add_project`): that one is not new.
-fn project_added<R: tauri::Runtime>(core: &Core<R>, r: Res<(Project, bool)>) -> Res<Project> {
+fn project_added(core: &Core, r: Res<(Project, bool)>) -> Res<Project> {
     match r {
         Ok((project, false)) => counted(core, Event::ProjectCreated, Ok(project)),
         other => other.map(|(project, _)| project),
@@ -155,7 +155,7 @@ pub fn subscribe(
     let autopilot_pause = core.autopilot_pause();
     let project_pauses = core.project_pauses();
     let accounts = core.integration_accounts();
-    let version = core.app.package_info().version.to_string();
+    let version = core.host.version();
     let lang = core.lang();
     let claude_path_found = crate::engine::default()
         .locate(&settings.claude_path, &settings.wsl_distro)
@@ -224,10 +224,7 @@ pub fn open_path(core: CoreState, path: String) -> Res<()> {
 }
 
 /// `open_path`.
-pub(crate) fn open_path_in<R: tauri::Runtime>(
-    core: &Core<R>,
-    path: &std::path::Path,
-) -> anyhow::Result<()> {
+pub(crate) fn open_path_in(core: &Core, path: &std::path::Path) -> anyhow::Result<()> {
     let allowed = core.allow_open(path, false)?;
     if !allowed.real().is_dir() {
         let why = crate::sentfiles::runnable_path_why(path)

@@ -1,6 +1,6 @@
 //! Integration tests of the application core: real git repositories, the fake `claude` CLI
-//! (tests/fixtures/fake-claude.cmd, or the `fake-claude` shell script outside Windows) and Tauri's
-//! mock runtime.
+//! (tests/fixtures/fake-claude.cmd, or the `fake-claude` shell script outside Windows) and a fake
+//! host (`host::Fake`).
 
 use crate::agent::{AgentHandle, NotifyKind};
 use crate::core::{AgentOptions, Attachment, Core, NotOnBase, SyncOp};
@@ -14,7 +14,6 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 use tauri::ipc::{Channel, InvokeResponseBody};
-use tauri::test::{mock_app, MockRuntime};
 
 /// One sample of `Harness::sample_rest`: what stops an automatic restart, the mark, then again.
 pub(crate) type RestSample<T> = (
@@ -24,10 +23,10 @@ pub(crate) type RestSample<T> = (
 );
 
 pub(crate) struct Harness {
-    pub(crate) core: Arc<Core<MockRuntime>>,
+    pub(crate) core: Arc<Core>,
     pub(crate) events: Arc<parking_lot::Mutex<Vec<Value>>>,
     pub(crate) dir: PathBuf,
-    _app: tauri::App<MockRuntime>,
+    pub(crate) host: Arc<crate::host::Fake>,
 }
 
 /// The fake CLI's path. The tests that launch it read the environment it got from the app (its
@@ -121,8 +120,8 @@ pub(crate) fn harness(name: &str) -> Harness {
         ..Default::default()
     };
     std::fs::write(data.settings_file(), serde_json::to_vec(&settings).unwrap()).unwrap();
-    let app = mock_app();
-    let (core, _rx) = Core::load(app.handle().clone(), data);
+    let host = crate::host::Fake::new();
+    let (core, _rx) = Core::load(host.clone(), data);
     let events = Arc::new(parking_lot::Mutex::new(Vec::new()));
     let sink = events.clone();
     core.hub.set_channel(Channel::new(move |body| {
@@ -135,7 +134,7 @@ pub(crate) fn harness(name: &str) -> Harness {
         core,
         events,
         dir,
-        _app: app,
+        host,
     }
 }
 
@@ -180,7 +179,7 @@ impl Harness {
     /// says of that moment.
     pub(crate) fn sample_rest<T: Send + 'static>(
         &self,
-        mark: impl Fn(&Core<MockRuntime>) -> T + Send + 'static,
+        mark: impl Fn(&Core) -> T + Send + 'static,
     ) -> (Arc<AtomicBool>, std::thread::JoinHandle<Vec<RestSample<T>>>) {
         use crate::updates::{busy, snapshot, Updates};
         let stop = Arc::new(AtomicBool::new(false));
@@ -188,7 +187,7 @@ impl Harness {
         let sampler = std::thread::spawn(move || {
             // No window in tests: only what is under way counts.
             let u = Updates::default();
-            let rest = |c: &Core<MockRuntime>| busy(&snapshot(c, &u, now_ms()));
+            let rest = |c: &Core| busy(&snapshot(c, &u, now_ms()));
             let started = std::time::Instant::now();
             let mut seen = Vec::new();
             while !done.load(Ordering::Acquire) && started.elapsed() < Duration::from_secs(30) {
@@ -992,8 +991,7 @@ async fn files_saved_before_the_plan_load_and_a_plan_saved_while_running_comes_b
             .to_string(),
     )
     .unwrap();
-    let app = mock_app();
-    let (core, _rx) = Core::load(app.handle().clone(), data);
+    let (core, _rx) = Core::load(crate::host::Fake::new(), data);
     assert!(core.settings.read().todo_tools);
     assert!(core.agent("old").unwrap().lock().meta.plan.is_none());
     let busy = core.agent("busy").unwrap().lock().view();
@@ -1539,8 +1537,7 @@ async fn an_agent_saved_with_the_plan_of_a_file_gets_it_back() {
         .to_string(),
     )
     .unwrap();
-    let app = mock_app();
-    let (core, _rx) = Core::load(app.handle().clone(), data);
+    let (core, _rx) = Core::load(crate::host::Fake::new(), data);
     let plan = core
         .agent("from-file")
         .unwrap()
@@ -4103,6 +4100,70 @@ async fn a_planned_resume_skips_archived_or_busy_agents_and_stops_when_turned_of
 }
 
 #[tokio::test]
+async fn an_agent_that_waits_asks_its_host_for_a_toast_the_attention_and_the_tray() {
+    use crate::agent::{AgentAlert, Effects};
+    let h = harness("host-waiting");
+    h.core.settings.write().os_notifications = true;
+    let (p, _) = h.project(false).await;
+    let id = h.core.create_agent(&p.id, None).await.unwrap().meta.id;
+    let (name, view) = {
+        let a = h.core.agent(&id).unwrap();
+        let mut rt = a.lock();
+        rt.meta.status = AgentStatus::Waiting;
+        (rt.meta.name.clone(), rt.view())
+    };
+    let fx = Effects {
+        notify: Some(AgentAlert {
+            kind: NotifyKind::Question,
+            body: "Quelle base de données ?".into(),
+        }),
+        ..Default::default()
+    };
+    h.core.apply(&id, &p.id, &name, fx, Some(view));
+    let toasts = h.host.toasts.lock().clone();
+    assert_eq!(toasts.len(), 1);
+    let told: Vec<String> = toasts.iter().map(|(t, b)| format!("{t} | {b}")).collect();
+    assert_eq!(told, h.alerts());
+    assert_eq!(*h.host.attention.lock(), 1);
+    assert_eq!(h.host.waiting.lock().last(), Some(&1));
+    // A change of the interface's language writes the menus again, with the agents waiting.
+    let mut s = h.core.settings.read().clone();
+    s.language = "en".into();
+    h.core.save_settings(s).unwrap();
+    assert_eq!(*h.host.relabels.lock(), [(crate::i18n::Lang::En, 1)]);
+    // The tests beside this one still write French.
+    let mut s = h.core.settings.read().clone();
+    s.language = "system".into();
+    h.core.save_settings(s).unwrap();
+}
+
+#[tokio::test]
+async fn the_toasts_click_sends_the_window_to_the_agent() {
+    let h = harness("host-toast-click");
+    h.core.settings.write().os_notifications = true;
+    let alert = crate::agent::AgentAlert {
+        kind: NotifyKind::Question,
+        body: "?".into(),
+    };
+    h.core.notify_agent(alert, "p1", "a1", "Ada");
+    h.events.lock().clear();
+    let clicks = h.host.clicks.lock();
+    assert_eq!(clicks.len(), 1);
+    clicks[0]();
+    let focus: Vec<Value> = h
+        .events
+        .lock()
+        .iter()
+        .filter(|e| e["type"] == "focus")
+        .cloned()
+        .collect();
+    assert_eq!(
+        focus,
+        [json!({ "type": "focus", "projectId": "p1", "agentId": "a1" })]
+    );
+}
+
+#[tokio::test]
 async fn a_change_of_language_is_told_to_the_window_and_another_setting_is_not() {
     use crate::i18n::{Lang::*, LangInfo};
     let h = harness("settings-language-event");
@@ -5424,8 +5485,7 @@ async fn state_is_saved_and_reloaded_with_the_session() {
     let id = h.core.create_agent(&p.id, None).await.unwrap().meta.id;
     h.turn(&id, "Bonjour").await;
     h.core.save_now();
-    let app = mock_app();
-    let (reloaded, _rx) = Core::load(app.handle().clone(), h.core.data.clone());
+    let (reloaded, _rx) = Core::load(crate::host::Fake::new(), h.core.data.clone());
     let meta = reloaded.agent(&id).unwrap().lock().meta.clone();
     assert_eq!(meta.session_id, h.agent(&id).session_id);
     assert_eq!(meta.status, AgentStatus::Done);
@@ -5454,8 +5514,7 @@ async fn tickets_are_saved_with_the_app_and_projects_keep_their_board() {
         })
         .unwrap();
     h.core.save_now();
-    let app = mock_app();
-    let (reloaded, _rx) = Core::load(app.handle().clone(), h.core.data.clone());
+    let (reloaded, _rx) = Core::load(crate::host::Fake::new(), h.core.data.clone());
     assert_eq!(reloaded.tickets.read()[0].key, "DEM-1");
     let project = reloaded.project(&p.id).unwrap();
     assert_eq!(project.worktree_copy, copy);
@@ -5485,8 +5544,7 @@ async fn the_models_claude_code_runs_reach_the_ui_and_are_kept_for_the_next_laun
                 "supportedEffortLevels": ["low", "medium", "high", "xhigh", "max"] })
     );
     h.core.save_now();
-    let app = mock_app();
-    let (reloaded, _rx) = Core::load(app.handle().clone(), h.core.data.clone());
+    let (reloaded, _rx) = Core::load(crate::host::Fake::new(), h.core.data.clone());
     let models = reloaded.models.read().clone();
     assert_eq!(models.len(), 6);
     assert_eq!(models[3].value, "sonnet");
@@ -6188,8 +6246,7 @@ async fn an_agent_set_apart_by_hand_stays_without_remote_control_whatever_the_se
 
     // Nor does a restart of the app.
     h.core.save_now();
-    let app = mock_app();
-    let (reloaded, _rx) = Core::load(app.handle().clone(), h.core.data.clone());
+    let (reloaded, _rx) = Core::load(crate::host::Fake::new(), h.core.data.clone());
     for task in reloaded.apply_remote_to(None) {
         task.await.unwrap();
     }
@@ -6392,8 +6449,7 @@ async fn data_from_before_the_settings_has_its_remote_control_by_hand() {
         rt.meta.remote_source = None;
     }
     h.core.save_now();
-    let app = mock_app();
-    let (reloaded, _rx) = Core::load(app.handle().clone(), h.core.data.clone());
+    let (reloaded, _rx) = Core::load(crate::host::Fake::new(), h.core.data.clone());
     let m = reloaded.agent(&id).unwrap().lock().meta.clone();
     assert!(m.remote_control);
     assert_eq!(m.remote_source, Some(RemoteSource::Hand));
@@ -9008,8 +9064,7 @@ async fn settings_saved_before_the_languages_stay_in_french_and_a_new_install_fo
         if let Some(text) = settings {
             std::fs::write(data.settings_file(), text).unwrap();
         }
-        let app = mock_app();
-        let (core, _rx) = Core::load(app.handle().clone(), data);
+        let (core, _rx) = Core::load(crate::host::Fake::new(), data);
         let s = core.settings.read().clone();
         (s.language, s.claude_language)
     };
@@ -9047,11 +9102,7 @@ async fn settings_saved_before_the_languages_stay_in_french_and_a_new_install_fo
 
 /// A core on settings saved by 1.8.0 (`accounts_version` 0) and the state `state`, in the
 /// folder `dir` (`test_dir`), whose `DIR` they may name.
-fn core_saved_by_1_8_0(
-    name: &str,
-    settings: Value,
-    state: Value,
-) -> (Arc<Core<MockRuntime>>, PathBuf) {
+fn core_saved_by_1_8_0(name: &str, settings: Value, state: Value) -> (Arc<Core>, PathBuf) {
     let dir = test_dir(name);
     let shown = serde_json::to_string(&dir.to_string_lossy()).unwrap();
     let shown = &shown[1..shown.len() - 1];
@@ -9062,14 +9113,11 @@ fn core_saved_by_1_8_0(
     data.ensure().unwrap();
     std::fs::write(data.settings_file(), settings.to_string()).unwrap();
     std::fs::write(data.state_file(), state.to_string()).unwrap();
-    let app = mock_app();
-    let (core, _rx) = Core::load(app.handle().clone(), data);
-    // The app is not needed past the load: the core keeps its handle.
-    std::mem::forget(app);
+    let (core, _rx) = Core::load(crate::host::Fake::new(), data);
     (core, dir)
 }
 
-fn core_account_ids(core: &Core<MockRuntime>) -> Vec<String> {
+fn core_account_ids(core: &Core) -> Vec<String> {
     core.settings
         .read()
         .accounts
@@ -9537,8 +9585,7 @@ async fn the_cost_of_the_day_is_told_for_each_account_and_in_total_and_kept_acro
     assert!((told_of("principal") - of("principal")).abs() < 1e-9);
     // After the app's restart, the day goes on from the statistics.
     h.core.save_now();
-    let app = mock_app();
-    let (reloaded, _rx) = Core::load(app.handle().clone(), h.core.data.clone());
+    let (reloaded, _rx) = Core::load(crate::host::Fake::new(), h.core.data.clone());
     let r = reloaded.usage.lock().clone();
     assert!((r.account("pro").unwrap().today_cost - of("pro")).abs() < 1e-9);
     assert!((r.account("principal").unwrap().today_cost - of("principal")).abs() < 1e-9);
@@ -9964,9 +10011,8 @@ async fn quota_windows_saved_before_the_accounts_are_principals_and_each_account
         json!({ "projects": [], "pause": pause }).to_string(),
     )
     .unwrap();
-    let app = mock_app();
-    let (core, _rx) = Core::load(app.handle().clone(), data.clone());
-    let pct = |core: &Core<MockRuntime>, id: &str| {
+    let (core, _rx) = Core::load(crate::host::Fake::new(), data.clone());
+    let pct = |core: &Core, id: &str| {
         core.usage
             .lock()
             .account(id)
@@ -9993,7 +10039,7 @@ async fn quota_windows_saved_before_the_accounts_are_principals_and_each_account
         saved["pause"]["accounts"]["pro"]["fiveHour"]["pct"],
         json!(50.0)
     );
-    let (again, _rx) = Core::load(app.handle().clone(), data);
+    let (again, _rx) = Core::load(crate::host::Fake::new(), data);
     assert_eq!(pct(&again, "principal"), Some(96.0));
     assert_eq!(pct(&again, "pro"), Some(50.0));
 }
@@ -10028,8 +10074,7 @@ async fn an_agent_resumes_its_session_on_its_account_after_its_process_restarts(
     assert_eq!(copy.account, "pro");
     // And after the app's restart, the agent is still on it.
     h.core.save_now();
-    let app = mock_app();
-    let (reloaded, _rx) = Core::load(app.handle().clone(), h.core.data.clone());
+    let (reloaded, _rx) = Core::load(crate::host::Fake::new(), h.core.data.clone());
     assert_eq!(reloaded.agent(&id).unwrap().lock().meta.account, "pro");
     assert_eq!(reloaded.settings.read().accounts[1], pro);
 }

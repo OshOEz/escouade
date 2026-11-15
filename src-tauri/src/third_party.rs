@@ -19,7 +19,6 @@ use anyhow::{anyhow, bail, Result};
 use serde::Serialize;
 use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
-use tauri::Runtime;
 
 /// How many lines of a harness an agreement keeps (accounts whose program is found elsewhere each have their own).
 const KEPT: usize = 4;
@@ -46,7 +45,7 @@ pub struct LaunchAsk {
     pub held: Option<LaunchHeld>,
 }
 
-impl<R: Runtime> Core<R> {
+impl Core {
     /// « N'installer que des versions vérifiées » for what an inspection of a folder or a git repository set aside: kept
     /// as it is with the setting off; on, kept only when the store's version of the same id and the same version is
     /// verified and of the same files, else refused with why and the gesture that installs it anyway.

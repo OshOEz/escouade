@@ -875,7 +875,7 @@ pub(crate) async fn fetch_image_with(
     remote_data_url(lang, &buf)
 }
 
-impl<R: tauri::Runtime> crate::core::Core<R> {
+impl crate::core::Core {
     /// An image of the web a message shows, downloaded at the user's click (`fetch_image`).
     pub async fn remote_image(&self, src: &str) -> anyhow::Result<String> {
         let settings = self.settings.read().clone();

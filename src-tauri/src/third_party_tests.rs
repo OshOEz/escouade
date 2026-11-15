@@ -12,7 +12,6 @@ use crate::paths::{test_dir, DataDir};
 use crate::third_party::LaunchHeld;
 use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
-use tauri::test::mock_app;
 
 const OWNER: &str = "dev.example.fake-acp";
 
@@ -265,8 +264,7 @@ fn before_589(name: &str, third: Option<&Path>) -> DataDir {
 }
 
 fn verified_only_at_start(data: DataDir) -> (bool, bool) {
-    let app = mock_app();
-    let (core, _rx) = Core::<tauri::test::MockRuntime>::load(app.handle().clone(), data.clone());
+    let (core, _rx) = Core::load(crate::host::Fake::new(), data.clone());
     let s = core.settings.read().clone();
     let saved: Value =
         serde_json::from_slice(&std::fs::read(data.settings_file()).unwrap()).unwrap();

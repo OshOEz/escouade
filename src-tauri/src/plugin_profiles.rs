@@ -47,7 +47,7 @@ fn refused(message: String) -> SecretRefused {
     }
 }
 
-impl<R: tauri::Runtime> Core<R> {
+impl Core {
     fn plugin_manifest(&self, id: &str) -> Result<Manifest, String> {
         self.plugins
             .get(id, crate::i18n::ui())

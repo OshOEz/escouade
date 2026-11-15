@@ -18,7 +18,6 @@ use anyhow::{anyhow, bail, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::{Arc, Weak};
-use tauri::Runtime;
 
 /// Where a view comes from.
 #[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
@@ -350,7 +349,7 @@ fn ordered(views: &mut [InboxItem]) {
     });
 }
 
-impl<R: Runtime> Core<R> {
+impl Core {
     /// The views of every project, as the state has them now; their « Plus tard » applied, those
     /// whose time came back taken out of it.
     pub async fn inbox_view_items(self: &Arc<Self>) -> Vec<InboxItem> {
@@ -842,11 +841,11 @@ impl InboxItem {
 /// The facts that change a view's source tell the window to read the box again: a request asked
 /// or answered, an agent's status, a ticket's column or conflict, a decision proposed or accepted,
 /// the docs written. The board's and the conversation's own events still tell their places.
-pub struct ViewsSink<R: Runtime> {
-    pub core: Weak<Core<R>>,
+pub struct ViewsSink {
+    pub core: Weak<Core>,
 }
 
-impl<R: Runtime> crate::facts::Sink for ViewsSink<R> {
+impl crate::facts::Sink for ViewsSink {
     fn take(&self, fact: &Arc<crate::facts::Fact>) {
         use crate::facts::Body as B;
         let moves = matches!(

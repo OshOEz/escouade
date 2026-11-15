@@ -13,11 +13,10 @@ use crate::model::Project;
 use crate::vectors::embed::Embedder;
 use serde_json::json;
 use std::sync::Arc;
-use tauri::Runtime;
 
 /// The project the call names, or the calling agent's own when it names none.
-pub(super) fn project_of<R: Runtime>(
-    core: &Core<R>,
+pub(super) fn project_of(
+    core: &Core,
     caller: &Caller,
     asked: Option<&str>,
 ) -> Result<Project, ToolError> {
@@ -42,13 +41,13 @@ fn failed(e: anyhow::Error) -> ToolError {
 }
 
 /// The vectors' model, when it is downloaded: None otherwise (the search goes by the words).
-fn embedder<R: Runtime>(core: &Core<R>) -> Option<Arc<dyn Embedder>> {
+fn embedder(core: &Core) -> Option<Arc<dyn Embedder>> {
     core.vectors_embedder()
 }
 
 /// `search_memory`: the memories that fit `query`, by the meaning too when the vectors' model is there.
-pub(super) async fn search<R: Runtime>(
-    core: &Core<R>,
+pub(super) async fn search(
+    core: &Core,
     caller: &Caller,
     project: Option<&str>,
     query: &str,
@@ -74,8 +73,8 @@ pub(super) async fn search<R: Runtime>(
 }
 
 /// `read_memory`: a memory whole.
-pub(super) fn read<R: Runtime>(
-    core: &Core<R>,
+pub(super) fn read(
+    core: &Core,
     caller: &Caller,
     project: Option<&str>,
     name: &str,
@@ -86,8 +85,8 @@ pub(super) fn read<R: Runtime>(
 }
 
 /// `write_memory`: a memory written, made or replaced. Answers it, and for the log what changed.
-pub(crate) fn write<R: Runtime>(
-    core: &Core<R>,
+pub(crate) fn write(
+    core: &Core,
     caller: &Caller,
     project: Option<&str>,
     draft: Draft,
@@ -119,8 +118,8 @@ pub(crate) fn write<R: Runtime>(
 }
 
 /// `forget_memory`: a memory's file removed.
-pub(crate) fn forget<R: Runtime>(
-    core: &Core<R>,
+pub(crate) fn forget(
+    core: &Core,
     caller: &Caller,
     project: Option<&str>,
     name: &str,

@@ -1558,8 +1558,7 @@ async fn a_status_line_is_kept_with_the_agent_and_an_agent_saved_before_it_has_n
     h.core.mcp.stop();
     h.core.save_now();
     let data = crate::paths::DataDir::new(h.dir.join("data"));
-    let app = tauri::test::mock_app();
-    let (reloaded, _rx) = crate::core::Core::load(app.handle().clone(), data);
+    let (reloaded, _rx) = crate::core::Core::load(crate::host::Fake::new(), data);
     assert_eq!(
         reloaded
             .agent(&a.id)

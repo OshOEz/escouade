@@ -9,7 +9,6 @@ use crate::i18n::Lang::{En, Fr};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
-use tauri::test::{mock_app, MockRuntime};
 
 /// Two agents in worktrees of a project, the second made by the first (`create_agent`'s mark).
 async fn maker_and_made(h: &Harness) -> (String, String, PathBuf) {
@@ -37,10 +36,8 @@ async fn say(h: &Harness, id: &str, cwd: &Path, text: &str) -> String {
     last["message"]["content"].as_str().unwrap().to_string()
 }
 
-fn restarted(h: &Harness) -> (Arc<Core<MockRuntime>>, tauri::App<MockRuntime>) {
-    let app = mock_app();
-    let (core, _rx) = Core::load(app.handle().clone(), h.core.data.clone());
-    (core, app)
+fn restarted(h: &Harness) -> Arc<Core> {
+    Core::load(crate::host::Fake::new(), h.core.data.clone()).0
 }
 
 #[test]
@@ -75,7 +72,7 @@ async fn an_ask_is_kept_across_a_restart_and_goes_with_its_maker() {
 
     // Saved, and read back by the app started again.
     h.core.save_now();
-    let (core, _app) = restarted(&h);
+    let core = restarted(&h);
     let kept = core.agent(&made).unwrap().lock().meta.delete_ask.clone();
     assert_eq!(kept.map(|a| a.by), Some(maker.clone()));
 
@@ -92,7 +89,7 @@ async fn an_ask_whose_maker_is_gone_does_not_come_back_at_the_start() {
     // Its maker no longer among the agents saved (its project closed, say).
     h.core.agents.write().remove(&maker);
     h.core.save_now();
-    let (core, _app) = restarted(&h);
+    let core = restarted(&h);
     assert_eq!(core.agent(&made).unwrap().lock().meta.delete_ask, None);
 }
 

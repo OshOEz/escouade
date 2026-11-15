@@ -10,7 +10,6 @@ use crate::model::*;
 use crate::paths::{test_dir, DataDir};
 use crate::tickets_tests::draft;
 use serde_json::json;
-use tauri::test::mock_app;
 
 const CLAUDE_PLUGIN: &str = crate::plugins::builtin::CLAUDE;
 
@@ -270,11 +269,8 @@ fn state_before(dir: &std::path::Path) -> serde_json::Value {
     })
 }
 
-fn load(data: &DataDir) -> std::sync::Arc<Core<tauri::test::MockRuntime>> {
-    let app = mock_app();
-    let (core, _rx) = Core::load(app.handle().clone(), data.clone());
-    // The mock app lives as long as the test (its handle is the core's).
-    std::mem::forget(app);
+fn load(data: &DataDir) -> std::sync::Arc<Core> {
+    let (core, _rx) = Core::load(crate::host::Fake::new(), data.clone());
     core
 }
 

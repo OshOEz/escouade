@@ -14,7 +14,6 @@ use crate::hub::Hub;
 use crate::i18n::{self, LangInfo};
 use crate::integrations;
 use crate::job::JobUsage;
-use crate::menus;
 use crate::model::*;
 use crate::notify;
 use crate::paths::{self, DataDir};
@@ -38,7 +37,6 @@ use std::sync::atomic::AtomicU64;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use tauri::{AppHandle, Runtime, Wry};
 use tokio::sync::mpsc;
 
 /// The process of an agent (of the harness named) exited while starting; the exit handler recorded
@@ -992,18 +990,18 @@ impl Drop for Working<'_> {
 
 /// `Working`, for work a task of its own goes on with: it owns the core, so it can be taken before
 /// the task is spawned.
-pub(crate) struct WorkingOwned<R: Runtime>(Arc<Core<R>>);
+pub(crate) struct WorkingOwned(Arc<Core>);
 
-impl<R: Runtime> Drop for WorkingOwned<R> {
+impl Drop for WorkingOwned {
     fn drop(&mut self) {
         self.0.works.fetch_sub(1, Ordering::AcqRel);
     }
 }
 
-pub struct Core<R: Runtime = Wry> {
+pub struct Core {
     /// Itself, for what runs in the background from a method that only has `&self`.
     me: std::sync::Weak<Self>,
-    pub app: AppHandle<R>,
+    pub host: Arc<dyn crate::host::Host>,
     pub data: DataDir,
     pub hub: Hub,
     pub settings: RwLock<Settings>,
@@ -1188,7 +1186,7 @@ pub struct Core<R: Runtime = Wry> {
     /// The searches through the conversations the window started (Ctrl+K).
     searches: convsearch::Searches,
     /// The MCP server (« Claude et les agents peuvent piloter Escouade »), running while `sync_mcp` wants it.
-    pub(crate) mcp: crate::mcp::McpServer<R>,
+    pub(crate) mcp: crate::mcp::McpServer,
     /// The server the hooks of the agents' Claude Code interfaces call (`tui`).
     pub(crate) hooks: crate::tui::Hooks,
     /// The copies of the files joined to messages that are under way (`attachfiles`).
@@ -1925,7 +1923,7 @@ fn below_root(root: &str, path: &str) -> Option<String> {
     (!elsewhere && !rel.split('/').any(|p| p == "..")).then_some(rel)
 }
 
-impl<R: Runtime> Core<R> {
+impl Core {
     /// The voice services in line with the plugins that serve them (INT-13): each module starts at its first call.
     pub(crate) fn sync_voice_plugins(&self) {
         crate::voice::plugin_host::sync_builtin(&self.plugin_runtime, &self.plugins);
@@ -2002,7 +2000,10 @@ impl<R: Runtime> Core<R> {
         }
     }
 
-    pub fn load(app: AppHandle<R>, data: DataDir) -> (Arc<Self>, mpsc::UnboundedReceiver<String>) {
+    pub fn load(
+        host: Arc<dyn crate::host::Host>,
+        data: DataDir,
+    ) -> (Arc<Self>, mpsc::UnboundedReceiver<String>) {
         if let Err(e) = data.ensure() {
             log::error!("cannot create data dir: {e}");
         }
@@ -2167,25 +2168,14 @@ impl<R: Runtime> Core<R> {
         crate::offline::set_chosen(settings.offline);
         let telemetry = Arc::new(Telemetry::new(
             data.telemetry_id_file(),
-            app.package_info().version.to_string(),
+            host.version(),
             settings.telemetry,
             paths::sandbox_dir().is_none(),
         ));
-        // The table the window's listener fills, when the app made it (it does, before the core).
-        let file_origins = {
-            use tauri::Manager;
-            app.try_state::<crate::fileorigin::FileOrigins>()
-                .map(|s| s.inner().clone())
-                .unwrap_or_default()
-        };
+        let file_origins = host.file_origins();
         // The seed of the plugins of the first hand, in the installer (ESC-338): its list of revocations stands in for the
         // store's until one newer is read.
-        let seed = {
-            use tauri::Manager;
-            crate::plugins::seed::Seed::of_app(
-                app.path().resource_dir().ok().map(|d| d.join("seed")),
-            )
-        };
+        let seed = crate::plugins::seed::Seed::of_app(host.seed_dir());
         let seed_list = seed.revocations();
         let plugins =
             crate::plugins::Plugins::load_seeded(data.clone(), env!("CARGO_PKG_VERSION"), seed);
@@ -2246,7 +2236,7 @@ impl<R: Runtime> Core<R> {
             plugin_events,
             plugins,
             store,
-            app,
+            host,
             data,
             hub: Hub::default(),
             settings: RwLock::new(settings),
@@ -3733,18 +3723,18 @@ impl<R: Runtime> Core<R> {
         if wanted && settings.sound {
             notify::play_chime();
         }
-        if notify::window_attended(&self.app) {
+        if self.host.window_attended() {
             return;
         }
-        notify::flash(&self.app);
+        self.host.attention();
         if wanted && settings.os_notifications {
-            let (app, weak) = (self.app.clone(), Arc::downgrade(self));
-            notify::toast(&self.app, &title, &body, move || {
-                notify::show_main(&app);
+            let weak = Arc::downgrade(self);
+            let on_click = move || {
                 if let Some(c) = weak.upgrade() {
                     c.hub.emit(focus.clone());
                 }
-            });
+            };
+            self.host.toast(&title, &body, Box::new(on_click));
         }
     }
 
@@ -3777,10 +3767,7 @@ impl<R: Runtime> Core<R> {
         if self.waiting.swap(n, Ordering::AcqRel) == n {
             return;
         }
-        if let Some(tray) = self.app.tray_by_id(menus::TRAY_ID) {
-            let _ = tray.set_icon(notify::tray_icon(&self.app, n));
-            let _ = tray.set_tooltip(Some(menus::tray_tooltip(i18n::ui(), n)));
-        }
+        self.host.waiting(n);
     }
 
     /// The native menus and the tray icon's tooltip in `lang`, after a change of language.
@@ -3792,7 +3779,7 @@ impl<R: Runtime> Core<R> {
         };
         #[cfg(test)]
         self.relabels.lock().push(lang);
-        menus::relabel(&self.app, lang, waiting);
+        self.host.relabel(lang, waiting);
     }
 
     // ---------- claude processes ----------
@@ -5678,7 +5665,7 @@ impl<R: Runtime> Core<R> {
     }
 
     /// `working`, for a task spawned from here: counted from now, not from when the task begins.
-    pub(crate) fn working_owned(self: &Arc<Self>) -> WorkingOwned<R> {
+    pub(crate) fn working_owned(self: &Arc<Self>) -> WorkingOwned {
         self.works.fetch_add(1, Ordering::AcqRel);
         WorkingOwned(self.clone())
     }
@@ -5701,9 +5688,7 @@ impl<R: Runtime> Core<R> {
     pub fn shutdown(&self) {
         self.quitting.store(true, Ordering::Release);
         // The microphone is let go first.
-        if let Some(v) = tauri::Manager::try_state::<Arc<crate::voice::Voice>>(&self.app) {
-            v.shutdown();
-        }
+        self.host.stop_voice();
         self.mcp.stop();
         // Setups under way stop, with what they started.
         for (_, s) in self.setups.lock().drain() {
@@ -11612,7 +11597,7 @@ pub(crate) fn last_to_speak<P>(
 }
 
 /// Where the plugins' commands run (`plugins::events`): the user's shell, the project's folder.
-impl<R: Runtime> crate::plugins::events::Place for Core<R> {
+impl crate::plugins::events::Place for Core {
     fn shell(&self) -> Option<crate::pty::ShellInfo> {
         let settings = self.settings.read().clone();
         crate::pty::detect_shells(&settings).into_iter().next()
@@ -11641,7 +11626,7 @@ impl<R: Runtime> crate::plugins::events::Place for Core<R> {
 
 /// The names of what a fact is about, and whether its project is private (`facts`). Takes the
 /// agents, then the projects, then the tickets, one at a time: the bus holds no other lock.
-impl<R: Runtime> crate::facts::Resolve for Core<R> {
+impl crate::facts::Resolve for Core {
     fn resolve(&self, about: &mut crate::facts::About) -> Option<bool> {
         // The ticket an agent is made for, before the ticket links it.
         let mut own_ticket = None;

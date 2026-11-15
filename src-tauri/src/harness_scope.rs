@@ -15,7 +15,6 @@ use anyhow::{anyhow, Result};
 use serde::Serialize;
 use std::collections::BTreeMap;
 use std::sync::Arc;
-use tauri::Runtime;
 
 /// Where a harness stands in a project.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -62,7 +61,7 @@ pub fn third_party_refusal_in(lang: crate::i18n::Lang, name: &str) -> String {
 /// The file whose presence says the private projects had their harnesses turned on once (`migrate_private_harnesses`).
 const MIGRATED: &str = "harness-projects-migrated";
 
-impl<R: Runtime> Core<R> {
+impl Core {
     /// Where `engine` stands in the project `project_id` (`InProject`). A plugin not installed or off for the app is
     /// `engine_plugged`'s to say: here, the project's switch alone.
     pub fn harness_in(&self, engine: EngineId, project_id: &str) -> InProject {
