@@ -15,6 +15,7 @@ mod agentprs_tests;
 mod agy_tests;
 #[cfg(test)]
 mod agy_tui_tests;
+mod alerts;
 mod attach;
 mod attachfiles;
 #[cfg(test)]
@@ -121,6 +122,7 @@ mod integrations;
 #[cfg(test)]
 mod integrations_tests;
 mod isola;
+mod lanes;
 mod launchenv;
 mod leftovers;
 mod mcp;
@@ -875,7 +877,7 @@ fn commands() -> (
         commands::attach_cancel,
         commands::attach_discard,
         commands::attach_origin,
-        fileorigin::file_origin,
+        commands::file_origin,
         commands::clipboard_image,
         commands::interrupt,
         commands::stop_subagent,

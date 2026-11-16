@@ -520,8 +520,8 @@ impl AgentRt {
         // Told once the core knows whether it goes on or waits for a sign-in (`signin`).
         if !interrupted && !had_queue && !sign_in {
             fx.notify = Some(match &failure {
-                Some(reason) => AgentAlert::new(NotifyKind::Error, notify::error_body(reason)),
-                None => AgentAlert::new(NotifyKind::Done, notify::done_body(&reply)),
+                Some(reason) => AgentAlert::new(NotifyKind::Error, alerts::error_body(reason)),
+                None => AgentAlert::new(NotifyKind::Done, alerts::done_body(&reply)),
             });
         }
         fx.agent_changed = true;
@@ -566,9 +566,9 @@ impl AgentRt {
             }
         }
         let body = if tool == "AskUserQuestion" {
-            notify::question_body(crate::engine::of(&self.meta).speaker(), &input)
+            alerts::question_body(crate::engine::of(&self.meta).speaker(), &input)
         } else {
-            notify::permission_body(&tool, &input, &self.meta.cwd)
+            alerts::permission_body(&tool, &input, &self.meta.cwd)
         };
         let item = if tool == "AskUserQuestion" {
             json!({

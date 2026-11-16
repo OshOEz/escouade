@@ -39,11 +39,6 @@ impl Core {
         *self.page_crash.lock() = Some(shown);
         line
     }
-
-    /// What the page showed at its last crash, told once to the page that follows.
-    pub fn take_page_crash(&self) -> Option<PageCrash> {
-        self.page_crash.lock().take()
-    }
 }
 
 /// The page's process ended for `reason`: written, and the page loaded again.

@@ -20,10 +20,9 @@
 //! `console.error` in the page as its only reaction: nothing is run and nothing is answered.
 
 pub use crate::fileorigins::FileOrigins;
-use escouade_macros::command;
 use serde::Deserialize;
 use std::time::Duration;
-use tauri::{Manager, Runtime, WebviewWindow};
+use tauri::{Runtime, WebviewWindow};
 
 /// The longest an id may be (a UUID is 36).
 const MAX_ID: usize = 64;
@@ -32,10 +31,10 @@ const MAX_ID: usize = 64;
 /// to the host's thread, and the command may be asked first. A `File` that is no file of the disk
 /// (a screenshot pasted) makes WebView2 refuse the message in the page itself (a TypeError, which
 /// `file-origin.ts` turns into « no path » at once): this delay is for a message that got lost.
-const WAIT: Duration = Duration::from_secs(2);
+pub(crate) const WAIT: Duration = Duration::from_secs(2);
 
 /// Whether `id` is one the page may give: 1 to 64 letters, digits, `-` or `_`.
-fn valid_id(id: &str) -> bool {
+pub(crate) fn valid_id(id: &str) -> bool {
     (1..=MAX_ID).contains(&id.len())
         && id
             .bytes()
@@ -53,18 +52,6 @@ pub(crate) fn parse_message(message: &str) -> Option<String> {
     }
     let Asked { id } = serde_json::from_str(message).ok()?;
     valid_id(&id).then_some(id)
-}
-
-/// The path of the file on the disk that the page sent as `id`, as the host read it: nothing
-/// where the system gives none, or if it did not arrive in time. What it answers is kept for
-/// `attach_origin`, which takes the id (`take_handed`) and never a path the page makes up.
-#[command(desktop)]
-pub async fn file_origin<R: Runtime>(app: tauri::AppHandle<R>, id: String) -> Option<String> {
-    if !cfg!(windows) || !valid_id(&id) {
-        return None;
-    }
-    let origins = app.try_state::<FileOrigins>()?.inner().clone();
-    origins.wait(&id, WAIT).await
 }
 
 /// Puts the listener on the WebView of `window`, which it keeps for good: the app only ever makes

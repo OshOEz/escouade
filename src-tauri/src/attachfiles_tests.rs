@@ -500,7 +500,8 @@ async fn a_file_is_joined_by_the_id_of_a_path_the_host_read_and_by_nothing_else(
 
 #[tokio::test]
 async fn the_core_takes_its_paths_from_the_table_the_app_manages_and_the_command_fills_it() {
-    use crate::fileorigin::{file_origin, FileOrigins};
+    use crate::commands::file_origin;
+    use crate::fileorigin::FileOrigins;
     use tauri::Manager as _;
     let app = tauri::test::mock_app();
     let origins = FileOrigins::default();

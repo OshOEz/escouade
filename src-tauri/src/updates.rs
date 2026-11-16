@@ -10,6 +10,7 @@
 
 use crate::core::Core;
 use crate::i18n::{self, Lang};
+pub use crate::model::Installed;
 use crate::model::{now_ms, AgentStatus, Settings, UiEvent};
 use crate::paths::DataDir;
 use anyhow::{anyhow, bail, Result};
@@ -1058,14 +1059,6 @@ pub fn apply(
     }
     leave(relaunch);
     installed
-}
-
-/// The update the app stopped to install, told to the window of its next start.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "camelCase")]
-pub struct Installed {
-    pub version: String,
-    pub notes: String,
 }
 
 /// How the window was when the app stopped for an update: the app restarted for it brings it

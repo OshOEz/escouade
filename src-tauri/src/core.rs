@@ -15,7 +15,6 @@ use crate::i18n::{self, LangInfo};
 use crate::integrations;
 use crate::job::JobUsage;
 use crate::model::*;
-use crate::notify;
 use crate::paths::{self, DataDir};
 use crate::planfiles;
 use crate::pty::{PtyManager, ShellInfo};
@@ -3497,7 +3496,7 @@ impl Core {
             self.alerts.lock().push(format!("{title} | {body}"));
         }
         if wanted && settings.sound {
-            notify::play_chime();
+            self.host.chime();
         }
         if self.host.window_attended() {
             return;
@@ -5358,6 +5357,11 @@ impl Core {
     /// A window that subscribes (started, or reloaded and so without the files it held) has no unsaved file yet.
     pub fn reset_unsaved(&self) {
         self.unsaved.store(0, Ordering::Release);
+    }
+
+    /// What the page showed at its last crash, told once to the page that follows.
+    pub fn take_page_crash(&self) -> Option<PageCrash> {
+        self.page_crash.lock().take()
     }
 
     /// "Quitter" goes to the window first when the editor has unsaved files: true when it did.

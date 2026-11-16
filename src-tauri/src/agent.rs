@@ -1,13 +1,13 @@
 //! Runtime state of one agent: turns raw Claude Code frames into conversation items,
 //! tracks status, pending questions/permissions and per-turn usage.
 
+use crate::alerts;
 use crate::attachfiles;
 use crate::board::TurnEnd;
 use crate::conv::Conv;
 use crate::engine::{self, PermissionAnswer, Process, StartLost};
 use crate::i18n::{self, Lang};
 use crate::model::*;
-use crate::notify;
 use crate::paths::relative_slash;
 use crate::plan::{BgMemory, Change, PlanState, RunStatus};
 use crate::planfiles::{self, FileList};
@@ -1465,7 +1465,7 @@ impl AgentRt {
             self.set_status(AgentStatus::Error, fx);
             fx.notify = Some(AgentAlert::new(
                 NotifyKind::Error,
-                notify::error_body(&reason),
+                alerts::error_body(&reason),
             ));
             if was_running {
                 fx.turn_end = Some(TurnEnd::Error(reason));

@@ -22,6 +22,8 @@ pub trait Host: Send + Sync + 'static {
     /// The main window is shown and has the focus.
     fn window_attended(&self) -> bool;
     fn attention(&self);
+    /// The chime of an alert, heard on the machine.
+    fn chime(&self);
     /// `on_click` runs after the host has brought its window forward.
     fn toast(&self, title: &str, body: &str, on_click: Box<dyn Fn() + Send + Sync>);
     /// The agents waiting, for the tray icon and its tooltip.
@@ -63,6 +65,10 @@ impl<R: Runtime> Host for Desktop<R> {
 
     fn attention(&self) {
         notify::flash(&self.0);
+    }
+
+    fn chime(&self) {
+        notify::play_chime();
     }
 
     fn toast(&self, title: &str, body: &str, on_click: Box<dyn Fn() + Send + Sync>) {
@@ -121,6 +127,7 @@ mod fake {
         pub waiting: parking_lot::Mutex<Vec<usize>>,
         pub relabels: parking_lot::Mutex<Vec<(Lang, usize)>>,
         pub attention: parking_lot::Mutex<usize>,
+        pub chimes: parking_lot::Mutex<usize>,
         /// What `webview_version` gives.
         pub webview: Option<String>,
     }
@@ -150,6 +157,10 @@ mod fake {
 
         fn attention(&self) {
             *self.attention.lock() += 1;
+        }
+
+        fn chime(&self) {
+            *self.chimes.lock() += 1;
         }
 
         fn toast(&self, title: &str, body: &str, on_click: Box<dyn Fn() + Send + Sync>) {
