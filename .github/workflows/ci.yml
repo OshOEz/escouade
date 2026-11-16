@@ -23,9 +23,9 @@ concurrency:
 # public repository's runners cost nothing. On 2026-11-10 the run took 42 to 60 min, the macOS tests on one runner its
 # longest job (ESC-406's push).
 # The pull requests of Dependabot (dependabot.yml) run only the light jobs (ESC-427): the frontend, the store, escouade-js, the
-# plugin kit, Clippy (Linux, and Windows's with its format) and the Linux build and tests. No macOS job and no Windows
-# build, test or end-to-end job (the macOS ones took up to 45 min), which the dependency updates held for
-# hours (2026-11-12: six pull requests at once starved the runners main needs). The rule: `if: github.actor != 'dependabot[bot]'`
+# plugin kit, Clippy (Linux, and Windows's with its format), the Linux build and tests, and the core without a desktop. No
+# macOS job and no Windows build, test or end-to-end job (the macOS ones took up to 45 min), which the dependency
+# updates held for hours (2026-11-12: six pull requests at once starved the runners main needs). The rule: `if: github.actor != 'dependabot[bot]'`
 # on the three heavy roots (windows-build, macos-build, macos-bundle); the jobs that need them are skipped with them. A
 # human who has read the pull request runs the whole CI by pushing its branch under their name or with « Run workflow »
 # (workflow_dispatch), whose actor is the human.
@@ -744,6 +744,89 @@ jobs:
             src-tauri/target/debug/bundle/appimage/*.AppImage
             src-tauri/target/debug/bundle/deb/*.deb
           retention-days: 7
+
+  # The core without a desktop (docs/CRATES.md § 16, docs/REMOTE.md « Le mode serveur »): no system library of the app
+  # is installed, and the job fails if Tauri, GTK, WebKit, D-Bus or the sound stack come back into its dependencies.
+  linux-headless:
+    name: Linux (the core without a desktop)
+    needs: escouade-js
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    defaults:
+      run:
+        working-directory: src-tauri
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # escouade-js, embedded by escouade-plugin-cli (its build.rs): the run.js plugins of the tests run on it.
+      - name: Download escouade-js
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: escouade-js
+          path: src-tauri/escouade-js/target
+
+      # The fake harnesses of the tests (tests/fixtures) are Node scripts, with Node's own modules only.
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+
+      - name: Rust toolchain (pinned in src-tauri/rust-toolchain.toml)
+        run: rustup toolchain install
+
+      # A cache of its own: a target built with the desktop's features is not this one.
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          workspaces: src-tauri
+          shared-key: linux-headless
+
+      - uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
+        with:
+          tool: cargo-nextest
+
+      - name: Build without the desktop
+        run: cargo check --locked --no-default-features -p escouade
+
+      - name: Clippy without the desktop
+        run: cargo clippy --locked --no-default-features -p escouade --all-targets -- -D warnings
+
+      # The runner has many libraries installed, so a build that passes proves little: the dependency tree is the guard.
+      # Whole package names, on every target; the build dependencies too (a build script runs here, and a -sys crate
+      # links its system library), not the dev-dependencies, which the tests may need.
+      - name: No Tauri, GTK, WebKit, D-Bus or sound stack in the dependencies
+        run: |
+          forbidden='^(tauri|tauri-[a-z0-9_-]+|wry|tao|muda|gtk|webkit2gtk|glib|dbus|libdbus-sys|cpal|alsa|alsa-sys|whisper-rs|whisper-rs-sys) v'
+          tree=$(cargo tree --locked --no-default-features -p escouade -e normal,build --target all --prefix none)
+          if printf '%s\n' "$tree" | grep -E "$forbidden"; then
+            for p in $(printf '%s\n' "$tree" | grep -E "$forbidden" | awk '{ print $1 "@" substr($2, 2) }' | sort -u); do
+              echo "::error::$p is in the dependencies of the core without a desktop, through:"
+              cargo tree --locked --no-default-features -p escouade -e normal,build --target all -i "$p"
+            done
+            exit 1
+          fi
+
+      # What the tests play in the app's host (.config/nextest.toml).
+      - name: The modules of the plugins, which the tests play
+        working-directory: .
+        run: sh scripts/plugins-wasm.sh
+
+      # The app's MCP server takes its port in 47000-47999: kept out of the ephemeral ones, as in linux-rust.
+      - name: Keep the MCP port range out of the ephemeral ports
+        run: sudo sysctl -w net.ipv4.ip_local_reserved_ports=47000-47999
+
+      # One process per test (src-tauri/.config/nextest.toml); the failures are also annotations.
+      - name: Rust tests without the desktop
+        shell: bash
+        # As in the environment of an agent of Escouade: the tests must not depend on it. Without debug information, as
+        # the other test builds (docs/CRATES.md § 8).
+        env:
+          CLAUDE_CODE_ENABLE_TODO_TOOLS: '1'
+          CARGO_PROFILE_DEV_DEBUG: 0
+        run: |
+          set +e
+          cargo nextest run --locked --no-default-features -p escouade --profile ci 2>&1 | tee nextest.log
+          status=${PIPESTATUS[0]}
+          node ../scripts/nextest-annotations.mjs nextest.log target/nextest/ci/junit.xml $status
+          exit $status
 
   # The Rust tests built once, as on Windows: compiling them took 12 min and running them 16 on one runner of 3 vCPUs.
   macos-build:
