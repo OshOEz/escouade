@@ -47,8 +47,10 @@ pub trait Source: Send + Sync {
 // ---------------------------------------------------------------------------------------------
 // The microphone, through cpal.
 
+#[cfg(feature = "native")]
 pub struct Microphone;
 
+#[cfg(feature = "native")]
 impl From<cpal::Error> for VoiceError {
     fn from(e: cpal::Error) -> Self {
         use cpal::ErrorKind as K;
@@ -64,18 +66,21 @@ impl From<cpal::Error> for VoiceError {
 
 /// The cpal stream lives on a thread of its own, from its making to its end: some systems want
 /// it dropped where it was made.
+#[cfg(feature = "native")]
 struct MicCapture {
     rate: u32,
     stop: Option<mpsc::Sender<()>>,
     thread: Option<std::thread::JoinHandle<()>>,
 }
 
+#[cfg(feature = "native")]
 impl Capture for MicCapture {
     fn rate(&self) -> u32 {
         self.rate
     }
 }
 
+#[cfg(feature = "native")]
 impl Drop for MicCapture {
     fn drop(&mut self) {
         self.stop.take();
@@ -85,6 +90,7 @@ impl Drop for MicCapture {
     }
 }
 
+#[cfg(feature = "native")]
 fn input_device(host: &cpal::Host, id: &str) -> Option<cpal::Device> {
     use cpal::traits::HostTrait;
     if !id.is_empty() {
@@ -101,6 +107,7 @@ fn input_device(host: &cpal::Host, id: &str) -> Option<cpal::Device> {
     host.default_input_device()
 }
 
+#[cfg(feature = "native")]
 fn build_stream(device: &cpal::Device, sink: Sink) -> Result<(cpal::Stream, u32), VoiceError> {
     use cpal::traits::{DeviceTrait, StreamTrait};
     use cpal::{FromSample, SampleFormat, SizedSample};
@@ -164,6 +171,7 @@ fn build_stream(device: &cpal::Device, sink: Sink) -> Result<(cpal::Stream, u32)
     Ok((stream, rate))
 }
 
+#[cfg(feature = "native")]
 impl Source for Microphone {
     fn open(&self, device: &str, sink: Sink) -> Result<Box<dyn Capture>, VoiceError> {
         let (ready_tx, ready_rx) = mpsc::channel::<Result<u32, VoiceError>>();

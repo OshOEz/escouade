@@ -11,8 +11,28 @@ default-run = "escouade"
 
 [features]
 default = ["desktop"]
-# The window (Tauri): what a command layer without it leaves out (docs/REMOTE.md, « Le mode serveur »).
-desktop = []
+# The window (Tauri, its plugins and modules); it opens the microphone, so takes `voice` (docs/CRATES.md, § 16).
+desktop = [
+    "voice",
+    "dep:tauri",
+    "dep:tauri-build",
+    "dep:tauri-plugin-deep-link",
+    "dep:tauri-plugin-dialog",
+    "dep:tauri-plugin-opener",
+    "dep:tauri-plugin-process",
+    "dep:tauri-plugin-single-instance",
+    "dep:tauri-plugin-updater",
+    "dep:tauri-plugin-window-state",
+    "dep:tauri-winrt-notification",
+    "dep:webview2-com",
+    "dep:windows-core",
+    "dep:gtk",
+    "dep:webkit2gtk",
+    "dep:tauri-plugin-notification",
+    "dep:objc2",
+]
+# The voice's native code: cpal (ALSA under Linux) and whisper.cpp (libclang, cmake).
+voice = ["escouade-voice-local/native"]
 # ONNX Runtime loaded from a library at run time, as on Intel Macs and Linux: to try that path elsewhere
 # (`ESCOUADE_ORT_DYLIB` names the library).
 ort-dynamic = ["escouade-ort/ort-dynamic"]
@@ -24,20 +44,31 @@ name = "escouade_lib"
 # (LNK1140, 2026-10-28).
 crate-type = ["rlib"]
 
+# The window's program and the probe of the launches' pages: none without it.
+[[bin]]
+name = "escouade"
+path = "src/main.rs"
+required-features = ["desktop"]
+
+[[example]]
+name = "devpage_probe"
+required-features = ["desktop"]
+
 [build-dependencies]
-tauri-build = { version = "2", features = [] }
+tauri-build = { version = "2", features = [], optional = true }
 
 [dependencies]
-tauri = { version = "2", features = ["tray-icon", "image-png", "devtools", "unstable"] }
-tauri-plugin-deep-link = "2"
-tauri-plugin-dialog = "2"
-tauri-plugin-opener = "2"
-tauri-plugin-process = "2"
-tauri-plugin-single-instance = "2"
-tauri-plugin-updater = "2"
+# `test`: the tests' mock app, one module with no dependency, here since a dev-dependency cannot be optional.
+tauri = { version = "2", features = ["tray-icon", "image-png", "devtools", "unstable", "test"], optional = true }
+tauri-plugin-deep-link = { version = "2", optional = true }
+tauri-plugin-dialog = { version = "2", optional = true }
+tauri-plugin-opener = { version = "2", optional = true }
+tauri-plugin-process = { version = "2", optional = true }
+tauri-plugin-single-instance = { version = "2", optional = true }
+tauri-plugin-updater = { version = "2", optional = true }
 # The versions of the updater's latest.json, to leave the betas out unless « Recevoir les versions bêta » is on.
 semver = "1"
-tauri-plugin-window-state = "2"
+tauri-plugin-window-state = { version = "2", optional = true }
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["raw_value"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "process", "io-util", "sync", "time", "fs", "net"] }
@@ -91,7 +122,7 @@ escouade-model = { path = "../crates/escouade-model" }
 escouade-plan = { path = "../crates/escouade-plan" }
 # The voice on the machine (`voice`): the microphone (cpal), the dictation (whisper.cpp), the reading (Piper, eSpeak NG,
 # ONNX Runtime) and their models, in a crate of the workspace (docs/CRATES.md).
-escouade-voice-local = { path = "../crates/escouade-voice-local" }
+escouade-voice-local = { path = "../crates/escouade-voice-local", default-features = false }
 # Only for `ort-dynamic`: ONNX Runtime's owner, which the voice and the vectors share.
 escouade-ort = { path = "../crates/escouade-ort" }
 # The vectors of « Recherche par le sens » (`vectors`), in a crate of the workspace too.
@@ -126,11 +157,11 @@ quick-xml = "0.42"
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61", features = ["Win32_Media_Audio", "Win32_Foundation", "Win32_Security", "Win32_Storage_FileSystem", "Win32_System_Console", "Win32_System_Diagnostics_ToolHelp", "Win32_System_JobObjects", "Win32_System_ProcessStatus", "Win32_System_Registry", "Win32_System_Threading", "Win32_UI_WindowsAndMessaging"] }
-tauri-winrt-notification = "0.8"
+tauri-winrt-notification = { version = "0.8", optional = true }
 # The path of a file the page hands the window (`fileorigin`): WebView2's own COM interfaces, in the
 # versions Tauri's wry already uses (`windows-core` for `Interface::cast`, which webview2-com does not re-export).
-webview2-com = "0.39"
-windows-core = "0.62"
+webview2-com = { version = "0.39", optional = true }
+windows-core = { version = "0.62", optional = true }
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
@@ -138,14 +169,14 @@ libc = "0.2"
 [target.'cfg(target_os = "linux")'.dependencies]
 # The image of a paste, which WebKitGTK does not give the page: read from GTK's clipboard (the one
 # Tauri's windows already run on).
-gtk = "0.18"
+gtk = { version = "0.18", optional = true }
 # The end of the page's process (`pagecrash`), on the WebView wry makes: its version.
-webkit2gtk = { version = "2.0", features = ["v2_20"] }
+webkit2gtk = { version = "2.0", features = ["v2_20"], optional = true }
 
 [target.'cfg(target_os = "macos")'.dependencies]
-tauri-plugin-notification = "2"
+tauri-plugin-notification = { version = "2", optional = true }
 # The inspector of a launch's page in a window of its own (`devpage::open_devtools`): wry's version.
-objc2 = "0.6"
+objc2 = { version = "0.6", optional = true }
 
 # The dependencies keep their line tables only (backtraces still say where), Escouade its full debug info: with
 # everything in full, the program database of the debug build went over the MSVC linker's limit (LNK1140, 2026-10-28,
@@ -240,7 +271,6 @@ strip = true
 hound = "3.5"
 # Each test process's temporary folder of its own, given before `main` (`src/test_tmp.rs`).
 ctor = "1"
-tauri = { version = "2", features = ["test", "tray-icon", "image-png", "devtools", "unstable"] }
 # An https server with a self-signed certificate (a corporate proxy's), for the TLS settings.
 rcgen = { version = "0.14", default-features = false, features = ["crypto", "ring"] }
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }

@@ -20,6 +20,7 @@ use escouade_plugin_cli::i18n::Lang;
 pub use escouade_ort::ort;
 
 /// whisper.cpp's logs, handed to the `log` crate (the app filters them).
+#[cfg(feature = "native")]
 pub fn install_logging_hooks() {
     whisper_rs::install_logging_hooks();
 }

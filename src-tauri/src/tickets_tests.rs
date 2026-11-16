@@ -6217,6 +6217,7 @@ async fn an_isola_projects_ticket_reserves_no_port_and_is_told_of_isola() {
 
 // ---------- automatic restarts for an update ----------
 
+#[cfg(feature = "desktop")]
 #[tokio::test]
 async fn a_ticket_being_started_holds_off_a_restart_until_its_agent_works() {
     let h = harness("upd-ticket-start");
@@ -6250,6 +6251,7 @@ async fn a_ticket_being_started_holds_off_a_restart_until_its_agent_works() {
     assert_eq!(rest, 0, "at rest in {rest} of {} samples", starting.len());
 }
 
+#[cfg(feature = "desktop")]
 #[tokio::test]
 async fn a_validation_holds_off_a_restart_until_its_cleanup_is_over() {
     let h = harness("upd-ticket-validate");

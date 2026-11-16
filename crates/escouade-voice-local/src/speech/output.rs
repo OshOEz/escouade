@@ -208,8 +208,10 @@ impl Output for Silent {
 }
 
 /// The system's speakers (its default output), through cpal: the stream lives on a thread of its own.
+#[cfg(feature = "native")]
 pub struct Speakers;
 
+#[cfg(feature = "native")]
 impl Output for Speakers {
     fn open(&self, rate: u32, volume: f32, done: Done) -> Result<Arc<dyn Playing>, String> {
         use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};

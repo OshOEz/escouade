@@ -15,6 +15,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 /// One sample of `Harness::sample_rest`: what stops an automatic restart, the mark, then again.
+#[cfg(feature = "desktop")]
 pub(crate) type RestSample<T> = (
     Option<crate::updates::Busy>,
     T,
@@ -174,6 +175,7 @@ impl Harness {
     /// Samples, about every millisecond until the flag returned is set (30 s at most), what an
     /// automatic restart would find (`updates::busy`) just before and just after what `mark`
     /// says of that moment.
+    #[cfg(feature = "desktop")]
     pub(crate) fn sample_rest<T: Send + 'static>(
         &self,
         mark: impl Fn(&Core) -> T + Send + 'static,

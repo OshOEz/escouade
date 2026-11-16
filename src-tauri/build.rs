@@ -1,4 +1,11 @@
 fn main() {
+    // Without the window (`desktop` off) there is nothing of Tauri's to build.
+    #[cfg(feature = "desktop")]
+    tauri();
+}
+
+#[cfg(feature = "desktop")]
+fn tauri() {
     #[allow(unused_mut)] // only changed on Windows
     let mut attributes = tauri_build::Attributes::new();
     // Embed the Common-Controls v6 manifest in every binary, test harnesses included:

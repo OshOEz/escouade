@@ -172,9 +172,9 @@ fn each_project_keeps_its_pages_storage_apart_from_the_window() {
 #[test]
 fn the_window_never_has_devtools_in_a_release() {
     // Tauri's `devtools` gives every webview its devtools unless told otherwise: the main window is.
-    let lib =
-        std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("src/lib.rs")).unwrap();
-    assert!(lib.contains("window.devtools = Some(cfg!(debug_assertions));"));
+    let app =
+        std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("src/app.rs")).unwrap();
+    assert!(app.contains("window.devtools = Some(cfg!(debug_assertions));"));
     let page =
         std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("src/devpage.rs"))
             .unwrap();
