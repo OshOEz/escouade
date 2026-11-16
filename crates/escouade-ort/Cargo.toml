@@ -1,0 +1,28 @@
+[package]
+name = "escouade-ort"
+version = "0.1.0"
+description = "Escouade's ONNX Runtime, linked in or loaded from its library, made ready once for the voice and the local vectors, and the errors of a checked model download"
+authors = ["Guillaume Gagnaire"]
+license = "GPL-3.0-or-later"
+edition = "2021"
+rust-version = "1.88"
+workspace = "../../src-tauri"
+# A part of the app, cut out of its crate for it to compile faster (docs/CRATES.md): never published.
+publish = false
+
+[features]
+# ONNX Runtime loaded from a library at run time, as on Intel Macs and Linux (the app's `ort-dynamic`).
+ort-dynamic = ["ort/load-dynamic"]
+
+[dependencies]
+anyhow = "1"
+log = "0.4"
+
+# ONNX Runtime, linked in statically on Windows and Apple Silicon (pyke's builds, downloaded by its build script). Pyke
+# builds none for Intel Macs, and its Linux one needs glibc 2.38: there Microsoft's own library (1.23.2, glibc 2.27) is
+# shipped in the bundle (scripts/onnxruntime.sh, tauri.ort-<os>.conf.json) and loaded at run time.
+[target.'cfg(any(windows, all(target_os = "macos", target_arch = "aarch64")))'.dependencies]
+ort = { version = "=2.0.0-rc.13", default-features = false, features = ["std", "download-binaries", "tls-rustls", "api-22"] }
+
+[target.'cfg(any(target_os = "linux", all(target_os = "macos", target_arch = "x86_64")))'.dependencies]
+ort = { version = "=2.0.0-rc.13", default-features = false, features = ["std", "load-dynamic", "api-22"] }

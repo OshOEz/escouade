@@ -223,26 +223,5 @@ pub async fn fetch_checked(
     Ok(())
 }
 
-/// A download called off by the user.
-#[derive(Debug)]
-pub struct Cancelled;
-
-impl std::fmt::Display for Cancelled {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str("cancelled")
-    }
-}
-
-impl std::error::Error for Cancelled {}
-
-/// What was downloaded is not the model: not kept.
-#[derive(Debug)]
-pub struct ChecksumMismatch;
-
-impl std::fmt::Display for ChecksumMismatch {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str("checksum mismatch")
-    }
-}
-
-impl std::error::Error for ChecksumMismatch {}
+/// The two ends of a checked download, shared with the vectors.
+pub use escouade_ort::{Cancelled, ChecksumMismatch};

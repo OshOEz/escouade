@@ -94,7 +94,7 @@ Quatre crates du workspace de `src-tauri`, dans `crates/` à côté de celles de
 Ce qui a dû s'ouvrir, et pourquoi :
 
 - `plan::BgMemory`, `plan::Seen`, `PlanState::with_memory`, les champs `PlanState::{seen, memory}` et `PlanTask::call` deviennent `pub` : l'app et ses tests écrivent des plans en littéraux (`PlanState { tasks, ..Default::default() }`), ce qu'une autre crate ne peut faire si un champ est privé. Ces champs restent hors de ce que le plan sérialise (`#[serde(skip)]`).
-- `escouade-voice-local` réexporte `ort` : les vecteurs lancent leur modèle avec le même ONNX Runtime, configuré une fois (ses deux blocs par cible et la feature `ort-dynamic`, que l'app transmet : `ort-dynamic = ["escouade-voice-local/ort-dynamic"]`).
+- `escouade-voice-local` réexporte `ort` : les vecteurs lancent leur modèle avec le même ONNX Runtime, configuré une fois. Depuis, `ort` est dans `escouade-ort` (§ 15), que la voix et les vecteurs prennent tous deux.
 - `escouade-voice-local::install_logging_hooks` remplace l'appel direct de l'app à `whisper_rs`.
 
 Ce qui n'a pas bougé : `canon.rs` et tout fichier dont une empreinte dépend (aucun fichier de `crates/escouade-plugin-cli`, des goldens ni des fixtures de parité n'a changé) ; les versions des crates publiées ; les sons de test (`src-tauri/src/voice/testdata/`, lus par les tests de l'app et de `escouade-voice-local`) ; `docs/SPEC.md`. Déplacés : `voices.json` (`crates/escouade-voice-local/src/speech/`, que lisent `src/lib/conversation.test.ts` et `scripts/piper-voices.mjs`).
@@ -493,3 +493,11 @@ Pas un morceau sorti de l'app : la crate de ses macros procédurales, qu'une cra
 - `handlers![…]` donne `tauri::generate_handler![…]` et la table des entrées d'une seule liste, pour que les deux ne divergent jamais ; sans `desktop`, la table seule. Chaque élément de la liste doit être un `#[command]` : un `#[tauri::command]` y échoue avec « cannot find value `__REMOTE_…` ».
 - `CoreState` est un type de l'app (`commands.rs`) et non plus un alias de `tauri::State` : Tauri le tire de son état comme avant, la table le fait du cœur de la connexion, ce qu'un `State` ne permet pas.
 - Ses tests sont ceux de la crate (le classement des paramètres, les clés, l'expansion) ; ceux de la table, qui chargent un cœur, restent dans l'app (`remoteapi/table.rs`).
+
+## 15. `escouade-ort`
+
+ONNX Runtime sort de la voix : les vecteurs (« Recherche par le sens ») ne le prenaient à `escouade-voice-local` que pour lui, et la voix tire cpal (ALSA sous Linux) et whisper.cpp (libclang, cmake). Un serveur construit sans la voix (docs/REMOTE.md, « Le mode serveur ») garde ainsi la recherche par le sens. Mêmes règles qu'au § 4 (`publish = false`, GPL-3.0-or-later, membre et `default-member`).
+
+- Elle tient la dépendance `ort` (ses deux blocs par cible, inchangés), la feature `ort-dynamic`, `DYNAMIC`, `runtime_path` (`ESCOUADE_ORT_DYLIB`, la même bibliothèque au même endroit) et `runtime` (ONNX Runtime prêt une fois), et les deux fins d'un téléchargement vérifié, `Cancelled` et `ChecksumMismatch`, que la voix et les vecteurs partagent.
+- `escouade-voice-local` en dépend et réexporte tout à ses chemins d'avant (`ort`, `speech::piper::{runtime, runtime_path}`, `models::{Cancelled, ChecksumMismatch}`) : aucun appelant de l'app ne change. `escouade-vectors` en dépend et ne dépend plus de la voix.
+- L'app la prend pour sa feature : `ort-dynamic = ["escouade-ort/ort-dynamic"]`. Ce que Cargo résout pour `ort` est le même qu'avant, par cible, avec et sans `ort-dynamic`.

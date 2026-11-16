@@ -16,8 +16,8 @@ pub mod vad;
 
 use escouade_plugin_cli::i18n::Lang;
 
-/// ONNX Runtime, as this crate links it: the app's vectors (`escouade-vectors`) run their model with it.
-pub use ort;
+/// ONNX Runtime, as `escouade-ort` links it.
+pub use escouade_ort::ort;
 
 /// whisper.cpp's logs, handed to the `log` crate (the app filters them).
 pub fn install_logging_hooks() {

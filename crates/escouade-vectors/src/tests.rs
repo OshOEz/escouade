@@ -425,7 +425,7 @@ mod download {
             .await
             .unwrap_err();
         assert!(err
-            .downcast_ref::<escouade_voice_local::models::ChecksumMismatch>()
+            .downcast_ref::<escouade_ort::ChecksumMismatch>()
             .is_some());
         assert!(!store.has(&spec));
         assert_eq!(store.have(&spec), 0);
@@ -449,9 +449,7 @@ mod download {
             )
             .await
             .unwrap_err();
-        assert!(err
-            .downcast_ref::<escouade_voice_local::models::Cancelled>()
-            .is_some());
+        assert!(err.downcast_ref::<escouade_ort::Cancelled>().is_some());
         assert!(!store.has(&spec));
         store.delete(&spec).unwrap();
         assert_eq!(store.have(&spec), 0);

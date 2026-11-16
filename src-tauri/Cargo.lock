@@ -1728,6 +1728,7 @@ dependencies = [
  "escouade-macros",
  "escouade-mcp",
  "escouade-model",
+ "escouade-ort",
  "escouade-plan",
  "escouade-plugin-cli",
  "escouade-plugin-kit",
@@ -1919,6 +1920,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "escouade-ort"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "log",
+ "ort",
+]
+
+[[package]]
 name = "escouade-plan"
 version = "0.1.0"
 dependencies = [
@@ -2034,7 +2044,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "escouade-base",
- "escouade-voice-local",
+ "escouade-ort",
  "parking_lot 0.13.0",
  "reqwest 0.12.28",
  "rusqlite",
@@ -2062,13 +2072,13 @@ dependencies = [
  "cpal",
  "dirs 7.0.0",
  "escouade-base",
+ "escouade-ort",
  "escouade-plugin-cli",
  "escouade-plugin-kit",
  "escouade-voice",
  "espeak-ng",
  "hound",
  "log",
- "ort",
  "parking_lot 0.13.0",
  "reqwest 0.12.28",
  "serde",
