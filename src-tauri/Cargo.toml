@@ -15,7 +15,7 @@ default = ["desktop"]
 desktop = []
 # ONNX Runtime loaded from a library at run time, as on Intel Macs and Linux: to try that path elsewhere
 # (`ESCOUADE_ORT_DYLIB` names the library, read by a build with this feature alone).
-ort-dynamic = ["escouade-voice-local/ort-dynamic"]
+ort-dynamic = ["escouade-ort/ort-dynamic"]
 
 [lib]
 name = "escouade_lib"
@@ -92,6 +92,8 @@ escouade-plan = { path = "../crates/escouade-plan" }
 # The voice on the machine (`voice`): the microphone (cpal), the dictation (whisper.cpp), the reading (Piper, eSpeak NG,
 # ONNX Runtime) and their models, in a crate of the workspace (docs/CRATES.md).
 escouade-voice-local = { path = "../crates/escouade-voice-local" }
+# Only for `ort-dynamic`: ONNX Runtime's owner, which the voice and the vectors share.
+escouade-ort = { path = "../crates/escouade-ort" }
 # The vectors of « Recherche par le sens » (`vectors`), in a crate of the workspace too.
 escouade-vectors = { path = "../crates/escouade-vectors" }
 # The parts of the harnesses that stand without the app (where their programs are, the user configs Escouade edits,
@@ -161,6 +163,7 @@ members = [
     "../crates/escouade-voice",
     "../crates/escouade-base",
     "../crates/escouade-plan",
+    "../crates/escouade-ort",
     "../crates/escouade-voice-local",
     "../crates/escouade-vectors",
     "../crates/escouade-model",
@@ -180,6 +183,7 @@ default-members = [
     "../crates/escouade-voice",
     "../crates/escouade-base",
     "../crates/escouade-plan",
+    "../crates/escouade-ort",
     "../crates/escouade-voice-local",
     "../crates/escouade-vectors",
     "../crates/escouade-model",

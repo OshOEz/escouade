@@ -3,7 +3,7 @@
 
 use super::embed::{Onnx, Prefixes};
 use anyhow::{bail, Result};
-use escouade_voice_local::models::{Cancelled, ChecksumMismatch};
+use escouade_ort::{Cancelled, ChecksumMismatch};
 use sha2::{Digest, Sha256};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
