@@ -5,13 +5,14 @@
 //! process may hold all 16 for up to 10 s each (acceptable for now). Its calls of one family keep their order, as the
 //! window's do (`windowthread`). The six commands with a flow (`subscribe` and the terminals) are served here, the
 //! others by the table. Nothing waits on a client: a queue that fills, or a socket write that hangs, closes it. A
-//! remote `subscribe` takes the window's events and cancels the desktop's dictation in progress, and a remote
-//! `agent_terminal` the agent's terminal output, while the core has one sink for each; a remote `save_settings`
-//! retunes the desktop's conversation.
+//! remote `subscribe` adds the connection to the hub's subscribers, the window keeping its own, until the connection
+//! ends; a second one takes the place of the first. A remote `agent_terminal` takes the agent's terminal output, while
+//! the core has one sink for it; a remote `save_settings` retunes the desktop's conversation.
 use super::table::{self, CallError, Ctx, Entry, ResultTag};
 use super::wire;
 use crate::commands::{self, CoreState};
 use crate::core::Core;
+use crate::hub::Subscription;
 use crate::lanes::{lane_of, Lanes};
 use crate::model::UiEvent;
 use crate::sink::{Closed, Sink};
@@ -297,6 +298,7 @@ impl Server {
             self.dispatch(&conn, request, permits);
         }
         conn.close("left");
+        drop(conn.subscription.lock().take());
         let _ = writer.await;
     }
 
@@ -344,10 +346,15 @@ impl Server {
         let core = self.core.clone();
         let failed = |e: tokio::task::JoinError| CallError::Failed(e.to_string().into());
         if entry.name == "subscribe" {
+            // The first subscription leaves before the second comes: the client gets each event once.
+            drop(conn.subscription.lock().take());
             let sink = conn.event_sink();
-            let state = rt::spawn_blocking(move || commands::subscribe_to(&core, sink))
-                .await
-                .map_err(failed)?;
+            let (state, subscription) = rt::spawn_blocking(move || {
+                commands::subscribe_to(&core, sink, commands::Subscriber::Remote)
+            })
+            .await
+            .map_err(failed)?;
+            *conn.subscription.lock() = subscription;
             return table::ValueTag.reply(state);
         }
         let name = entry.name;
@@ -435,6 +442,8 @@ struct Conn {
     /// The stream numbers of its terminals still running.
     streams: Mutex<HashSet<u32>>,
     lanes: Arc<Lanes>,
+    /// Its place among the hub's subscribers, once it subscribed.
+    subscription: Mutex<Option<Subscription>>,
 }
 
 type Queue = mpsc::Receiver<Message>;
@@ -449,6 +458,7 @@ impl Conn {
             closed: watch::channel(false).0,
             streams: Mutex::default(),
             lanes: Arc::default(),
+            subscription: Mutex::default(),
         });
         (conn, text_rx, bytes_rx)
     }

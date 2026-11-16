@@ -243,7 +243,7 @@ pub fn run() {
                 log::error!("app menu not set: {e}");
             }
             core.start(git_rx);
-            // Off unless both variables are set; a remote `subscribe` or `agent_terminal` takes the window's events or that terminal's output.
+            // Off unless both variables are set; a remote `agent_terminal` takes that terminal's output from the window.
             #[cfg(debug_assertions)]
             match remote {
                 Ok(None) => {}

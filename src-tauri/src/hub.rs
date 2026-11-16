@@ -1,10 +1,11 @@
-//! Single event flow towards the webview, or a remote client.
+//! The core's event flow, to the window and to the remote clients subscribed.
 
 use crate::model::UiEvent;
 use crate::sink::Sink;
-use parking_lot::{Mutex, RwLock};
+use parking_lot::Mutex;
 use std::collections::HashMap;
 use std::mem::Discriminant;
+use std::sync::{Arc, Weak};
 use std::time::{Duration, Instant};
 
 /// Past this many events sent to the page in one second, the second is written in the log
@@ -15,8 +16,21 @@ const LOUD_EVERY: Duration = Duration::from_secs(30);
 
 #[derive(Default)]
 pub struct Hub {
-    sink: RwLock<Option<Sink<UiEvent>>>,
+    subscribers: Mutex<Subscribers>,
     meter: Mutex<Meter>,
+}
+
+#[derive(Default)]
+struct Subscribers {
+    /// The window's: kept when a send fails, as before, until the next window takes its place.
+    window: Option<Sink<UiEvent>>,
+    /// The others', each while its `Subscription` lives and its sink takes what it is sent.
+    others: Vec<(Weak<()>, Sink<UiEvent>)>,
+}
+
+/// A subscriber's place in the hub: dropped, it gets no more events (it leaves at the next one).
+pub struct Subscription {
+    _alive: Arc<()>,
 }
 
 /// The events of the current second, by kind.
@@ -86,17 +100,35 @@ fn kind_of(event: &UiEvent) -> String {
 }
 
 impl Hub {
-    pub fn set_sink(&self, sink: Sink<UiEvent>) {
-        *self.sink.write() = Some(sink);
+    /// Adds a subscriber; it leaves when its `Subscription` is dropped or its sink says `Closed`.
+    pub fn subscribe(&self, sink: Sink<UiEvent>) -> Subscription {
+        let alive = Arc::new(());
+        let mut subscribers = self.subscribers.lock();
+        subscribers
+            .others
+            .retain(|(alive, _)| alive.strong_count() > 0);
+        subscribers.others.push((Arc::downgrade(&alive), sink));
+        Subscription { _alive: alive }
     }
 
+    /// The window's own subscriber: a new one takes the place of the one before (a page that reloads).
+    pub fn set_window(&self, sink: Sink<UiEvent>) {
+        let _before = self.subscribers.lock().window.replace(sink);
+    }
+
+    /// To every subscriber, in one order.
     pub fn emit(&self, event: UiEvent) {
         if let Some(line) = self.meter.lock().count(&event, Instant::now()) {
             log::warn!("{line}");
         }
-        if let Some(sink) = &*self.sink.read() {
+        // Sent under the lock, so all see one order: a Sink never waits, nor calls the hub back.
+        let mut subscribers = self.subscribers.lock();
+        subscribers
+            .others
+            .retain(|(alive, sink)| alive.strong_count() > 0 && sink.send(event.clone()).is_ok());
+        if let Some(window) = &subscribers.window {
             // The window's sink logs why it failed (`Sink::from`).
-            let _ = sink.send(event);
+            let _ = window.send(event);
         }
     }
 }
@@ -104,6 +136,7 @@ impl Hub {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::sink::Closed;
 
     fn git() -> UiEvent {
         UiEvent::Git {
@@ -135,15 +168,140 @@ mod tests {
 
     #[test]
     fn the_hub_emits_to_its_sink() {
-        let got = std::sync::Arc::new(Mutex::new(Vec::new()));
+        let got = Arc::new(Mutex::new(Vec::new()));
         let to = got.clone();
         let hub = Hub::default();
-        hub.set_sink(Sink::new(move |e: UiEvent| {
+        hub.set_window(Sink::new(move |e: UiEvent| {
             to.lock().push(serde_json::to_value(&e).unwrap());
             Ok(())
         }));
         hub.emit(git());
         assert_eq!(*got.lock(), [serde_json::to_value(git()).unwrap()]);
+    }
+
+    /// An event numbered `n`, which `number` reads back.
+    fn numbered(n: u64) -> UiEvent {
+        UiEvent::VectorsDownload { done: n, total: 0 }
+    }
+
+    fn number(e: &UiEvent) -> u64 {
+        match e {
+            UiEvent::VectorsDownload { done, .. } => *done,
+            other => panic!("not numbered: {other:?}"),
+        }
+    }
+
+    /// A sink that keeps the numbers it gets.
+    fn recorder() -> (Sink<UiEvent>, Arc<Mutex<Vec<u64>>>) {
+        let got = Arc::new(Mutex::new(Vec::new()));
+        let to = got.clone();
+        let sink = Sink::new(move |e: UiEvent| {
+            to.lock().push(number(&e));
+            Ok(())
+        });
+        (sink, got)
+    }
+
+    #[test]
+    fn every_subscriber_gets_every_event_in_one_order() {
+        let hub = Arc::new(Hub::default());
+        let (window, w) = recorder();
+        hub.set_window(window);
+        let (a, ga) = recorder();
+        let (b, gb) = recorder();
+        let _subs = (hub.subscribe(a), hub.subscribe(b));
+        let threads: Vec<_> = [0u64, 1_000]
+            .into_iter()
+            .map(|base| {
+                let hub = hub.clone();
+                std::thread::spawn(move || (base..base + 500).for_each(|n| hub.emit(numbered(n))))
+            })
+            .collect();
+        threads.into_iter().for_each(|t| t.join().unwrap());
+        let w = w.lock().clone();
+        assert_eq!(w.len(), 1_000);
+        // Each series in its order, and both interleaved the same way for every subscriber.
+        for base in [0, 1_000] {
+            let mine: Vec<u64> = w
+                .iter()
+                .copied()
+                .filter(|n| (base..base + 500).contains(n))
+                .collect();
+            assert_eq!(mine, (base..base + 500).collect::<Vec<_>>());
+        }
+        assert_eq!(*ga.lock(), w);
+        assert_eq!(*gb.lock(), w);
+    }
+
+    #[test]
+    fn a_dropped_subscription_gets_nothing_more() {
+        let hub = Hub::default();
+        let (sink, got) = recorder();
+        let sub = hub.subscribe(sink);
+        hub.emit(numbered(1));
+        drop(sub);
+        hub.emit(numbered(2));
+        assert_eq!(*got.lock(), [1]);
+        assert_eq!(hub.subscribers.lock().others.len(), 0);
+    }
+
+    #[test]
+    fn a_closed_sink_is_forgotten_at_its_first_failed_send() {
+        let hub = Hub::default();
+        let tries = Arc::new(Mutex::new(0));
+        let counted = tries.clone();
+        let _sub = hub.subscribe(Sink::new(move |_: UiEvent| {
+            *counted.lock() += 1;
+            Err(Closed)
+        }));
+        let (sink, got) = recorder();
+        let _alive = hub.subscribe(sink);
+        assert_eq!(hub.subscribers.lock().others.len(), 2);
+        hub.emit(numbered(1));
+        hub.emit(numbered(2));
+        assert_eq!(*tries.lock(), 1);
+        assert_eq!(hub.subscribers.lock().others.len(), 1);
+        assert_eq!(*got.lock(), [1, 2]);
+    }
+
+    #[test]
+    fn the_window_keeps_its_events_when_a_remote_client_subscribes() {
+        let hub = Hub::default();
+        let (window, w) = recorder();
+        hub.set_window(window);
+        let (remote, r) = recorder();
+        let _sub = hub.subscribe(remote);
+        hub.emit(numbered(1));
+        assert_eq!(*w.lock(), [1]);
+        assert_eq!(*r.lock(), [1]);
+    }
+
+    #[test]
+    fn the_window_keeps_its_events_when_a_remote_client_leaves() {
+        let hub = Hub::default();
+        let (window, w) = recorder();
+        hub.set_window(window);
+        let (remote, r) = recorder();
+        drop(hub.subscribe(remote));
+        hub.emit(numbered(1));
+        assert_eq!(*w.lock(), [1]);
+        assert!(r.lock().is_empty());
+    }
+
+    #[test]
+    fn a_window_that_reloads_takes_its_own_place_only() {
+        let hub = Hub::default();
+        let (old, o) = recorder();
+        hub.set_window(old);
+        let (remote, r) = recorder();
+        let _sub = hub.subscribe(remote);
+        hub.emit(numbered(1));
+        let (new, n) = recorder();
+        hub.set_window(new);
+        hub.emit(numbered(2));
+        assert_eq!(*o.lock(), [1]);
+        assert_eq!(*n.lock(), [2]);
+        assert_eq!(*r.lock(), [1, 2]);
     }
 
     #[test]

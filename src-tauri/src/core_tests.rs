@@ -124,7 +124,7 @@ pub(crate) fn harness(name: &str) -> Harness {
     let (core, _rx) = Core::load(host.clone(), data);
     let events = Arc::new(parking_lot::Mutex::new(Vec::new()));
     let sink = events.clone();
-    core.hub.set_sink(crate::sink::Sink::new(move |event| {
+    core.hub.set_window(crate::sink::Sink::new(move |event| {
         sink.lock().push(serde_json::to_value(&event).unwrap());
         Ok(())
     }));

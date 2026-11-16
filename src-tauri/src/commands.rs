@@ -5,6 +5,7 @@ use crate::attachfiles::AttachedFile;
 use crate::closed::ClosedProjectInfo;
 use crate::core::{AgentOptions, Attachment, Core, NotOnBase, SyncOp};
 use crate::fsedit;
+use crate::hub::Subscription;
 use crate::i18n::{self, Lang};
 use crate::integrations::{
     Account, AccountView, Container, ExternalIssue, IssuePage, Query, StatesView,
@@ -199,7 +200,7 @@ pub fn subscribe(
     updates: State<crate::updates::Updates>,
     channel: Channel<UiEvent>,
 ) -> InitialState {
-    let mut state = subscribe_to(core.inner(), channel.into());
+    let (mut state, _) = subscribe_to(core.inner(), channel.into(), Subscriber::Window);
     // The updates are the desktop app's alone.
     state.installed = updates.take_installed();
     state.restart_at = updates.restart_at();
@@ -207,14 +208,35 @@ pub fn subscribe(
     state
 }
 
+/// Who subscribes: the window, which a reload starts over, or a remote client, which changes nothing of the others.
+#[derive(Clone, Copy)]
+pub(crate) enum Subscriber {
+    Window,
+    Remote,
+}
+
 /// `subscribe` with its flow to `sink`: the window's channel, or a remote client's. The update fields stay empty: the
-/// Tauri command fills them from the desktop app's updates, which a remote client does not get.
-pub(crate) fn subscribe_to(core: &Arc<Core>, sink: Sink<UiEvent>) -> InitialState {
-    core.hub.set_sink(sink);
-    // A page that loads again has no dictation under way: the one of the page before stops.
-    core.host.cancel_dictation();
-    core.reset_unsaved();
-    core.held.lock().clear();
+/// Tauri command fills them from the desktop app's updates, which a remote client does not get. Subscribed before the
+/// state is read, so no event falls between the two. A remote client's events last as long as its `Subscription`.
+/// A client's contract, as the window's (`early`): events may come before the answer and are applied on top of the
+/// state; one the state already shows is harmless again, but a transition made meanwhile (an agent or a ticket done)
+/// may be seen twice.
+pub(crate) fn subscribe_to(
+    core: &Arc<Core>,
+    sink: Sink<UiEvent>,
+    who: Subscriber,
+) -> (InitialState, Option<Subscription>) {
+    let subscription = match who {
+        Subscriber::Remote => Some(core.hub.subscribe(sink)),
+        Subscriber::Window => {
+            core.hub.set_window(sink);
+            // A page that loads again has no dictation under way: the one of the page before stops.
+            core.host.cancel_dictation();
+            core.reset_unsaved();
+            core.held.lock().clear();
+            None
+        }
+    };
     // One lock at a time, each guard ending with its statement: in a struct literal the guards
     // would live together (the lock order is projects before tickets, see `Core`).
     let settings = core.settings.read().clone();
@@ -239,7 +261,12 @@ pub(crate) fn subscribe_to(core: &Arc<Core>, sink: Sink<UiEvent>) -> InitialStat
     let claude_path_found = crate::engine::default()
         .locate(&settings.claude_path, &settings.wsl_distro)
         .is_some();
-    InitialState {
+    // The window's own page crashed: told to the window once, never to a remote client.
+    let page_crash = match who {
+        Subscriber::Window => core.take_page_crash(),
+        Subscriber::Remote => None,
+    };
+    let state = InitialState {
         lang,
         projects,
         tickets,
@@ -270,9 +297,10 @@ pub(crate) fn subscribe_to(core: &Arc<Core>, sink: Sink<UiEvent>) -> InitialStat
         project_pauses,
         accounts,
         setup_output,
-        page_crash: core.take_page_crash(),
+        page_crash,
         recovered: escouade_model::backups::notices(core.data.root()),
-    }
+    };
+    (state, subscription)
 }
 
 /// The notice of the files recovered at a start, closed by the user (ESC-469): forgotten, the files set aside and the

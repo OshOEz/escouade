@@ -2,6 +2,7 @@
 //! shell, no harness.
 
 use super::*;
+use crate::commands::Subscriber;
 use crate::model::UiState;
 use crate::paths::{test_dir, DataDir};
 use escouade_macros::command;
@@ -579,7 +580,7 @@ fn exit(id: &str) -> UiEvent {
 }
 
 #[test]
-fn the_window_can_subscribe_again_after_a_remote_client_left() {
+fn the_window_keeps_its_events_while_a_remote_client_comes_and_goes() {
     let loaded = load("remote-server-window-again");
     let running = serve(&loaded);
     let got = Arc::new(Mutex::new(Vec::new()));
@@ -589,25 +590,31 @@ fn the_window_can_subscribe_again_after_a_remote_client_left() {
             .push(serde_json::to_value(&e).unwrap()["id"].clone());
         Ok(())
     });
-    commands::subscribe_to(&loaded.core, window.clone());
+    commands::subscribe_to(&loaded.core, window.clone(), Subscriber::Window);
     rt::block_on(async {
         let mut ws = connect(running.addr).await;
         call(&mut ws, 1, "subscribe", json!({})).await;
-        // The remote client took the hub's one sink from the window.
+        // A second subscribe takes the place of the first: each event comes once.
+        call(&mut ws, 2, "subscribe", json!({})).await;
         loaded.core.hub.emit(exit("during"));
-        loop {
+        loaded.core.hub.emit(exit("next"));
+        let mut seen = Vec::new();
+        while seen.last() != Some(&json!("next")) {
             let v = text(&mut ws).await;
-            if v["event"]["id"] == "during" {
-                break;
+            if v.get("event").is_some() {
+                seen.push(v["event"]["id"].clone());
             }
         }
+        assert_eq!(seen, [json!("during"), json!("next")]);
         drop(ws);
         tokio::time::sleep(Duration::from_millis(300)).await;
     });
-    // The hub keeps the remote sink, closed: an event reaches no one, and nothing fails.
+    // The connection gone, its subscription left with it.
     loaded.core.hub.emit(exit("gone"));
-    assert!(got.lock().is_empty());
-    commands::subscribe_to(&loaded.core, window);
+    assert_eq!(*got.lock(), [json!("during"), json!("next"), json!("gone")]);
+    // A window that reloads takes its own place again.
+    got.lock().clear();
+    commands::subscribe_to(&loaded.core, window, Subscriber::Window);
     loaded.core.hub.emit(exit("after"));
     assert_eq!(*got.lock(), [json!("after")]);
     // A remote sink after its client left says so, each time, without waiting.
@@ -616,6 +623,87 @@ fn the_window_can_subscribe_again_after_a_remote_client_left() {
     conn.close("left");
     assert_eq!(remote.send(exit("x")), Err(Closed));
     assert_eq!(remote.send(exit("x")), Err(Closed));
+}
+
+#[test]
+fn a_remote_subscribe_undoes_nothing_of_the_others() {
+    let dir = test_dir("remote-server-undoes-nothing");
+    let host = crate::host::Fake::new();
+    let (core, _rx) = Core::load(host.clone(), DataDir::new(dir.join("data")));
+    commands::subscribe_to(&core, Sink::new(|_| Ok(())), Subscriber::Window);
+    assert_eq!(*host.dictations_cancelled.lock(), 1);
+    // What the window holds: a message for an agent, a file left unsaved, a crash to tell.
+    core.held.lock().insert("a1".into());
+    core.unsaved.store(1, SeqCst);
+    let crash = crate::model::PageCrash {
+        project_id: Some("p1".into()),
+        agent_id: None,
+    };
+    *core.page_crash.lock() = Some(crash.clone());
+    let (state, sub) = commands::subscribe_to(&core, Sink::new(|_| Ok(())), Subscriber::Remote);
+    assert!(sub.is_some());
+    assert_eq!(*host.dictations_cancelled.lock(), 1);
+    assert!(core.held.lock().contains("a1"));
+    assert_eq!(core.unsaved.load(SeqCst), 1);
+    assert!(serde_json::to_value(&state).unwrap()["pageCrash"].is_null());
+    assert_eq!(*core.page_crash.lock(), Some(crash));
+}
+
+#[test]
+fn nothing_is_lost_between_the_initial_state_and_the_events() {
+    let loaded = load("remote-server-no-gap");
+    let core = loaded.core.clone();
+    let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    // As the core does: the value changed, then its event emitted.
+    let emitter = {
+        let (core, stop) = (core.clone(), stop.clone());
+        std::thread::spawn(move || {
+            let mut n = 0u64;
+            while !stop.load(SeqCst) {
+                n += 1;
+                core.board_issues.lock().insert("p".into(), n.to_string());
+                core.hub.emit(UiEvent::BoardIssue {
+                    project_id: "p".into(),
+                    issue: Some(n.to_string()),
+                });
+            }
+            n
+        })
+    };
+    let got = Arc::new(Mutex::new(Vec::new()));
+    let to = got.clone();
+    let sink = Sink::new(move |e: UiEvent| {
+        if let UiEvent::BoardIssue { issue: Some(n), .. } = e {
+            to.lock().push(n.parse::<u64>().unwrap());
+        }
+        Ok(())
+    });
+    std::thread::sleep(Duration::from_millis(20));
+    let (state, _sub) = commands::subscribe_to(&core, sink, Subscriber::Remote);
+    // Some events after the subscription, however slow the machine.
+    let deadline = std::time::Instant::now() + Duration::from_secs(10);
+    while got.lock().len() < 100 && std::time::Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    stop.store(true, SeqCst);
+    let last = emitter.join().unwrap();
+    let initial: u64 = serde_json::to_value(&state).unwrap()["boardIssues"]["p"]
+        .as_str()
+        .unwrap()
+        .parse()
+        .unwrap();
+    let got = got.lock().clone();
+    // The events from the first one received to the last, each once and in order.
+    let first = *got
+        .first()
+        .expect("no event after the subscription in 10 s");
+    assert_eq!(got, (first..=last).collect::<Vec<_>>());
+    // None between the state and the first event: the state applied, then the events, give the last value.
+    assert!(
+        first <= initial + 1,
+        "lost: {} events between the state ({initial}) and the first event ({first})",
+        first - initial - 1
+    );
 }
 
 #[test]

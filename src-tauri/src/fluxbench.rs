@@ -182,7 +182,7 @@ impl Bench {
             sink.lock().push((at, mine));
             Ok(())
         });
-        h.core.hub.set_sink(channel.into());
+        h.core.hub.set_window(channel.into());
         tokio::spawn(h.core.clone().conv_flusher());
         let (p, _) = h.project(false).await;
         Bench {

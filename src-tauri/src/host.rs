@@ -51,6 +51,7 @@ mod fake {
         pub relabels: parking_lot::Mutex<Vec<(Lang, usize)>>,
         pub attention: parking_lot::Mutex<usize>,
         pub chimes: parking_lot::Mutex<usize>,
+        pub dictations_cancelled: parking_lot::Mutex<usize>,
         /// What `webview_version` gives.
         pub webview: Option<String>,
     }
@@ -101,7 +102,9 @@ mod fake {
 
         fn stop_voice(&self) {}
 
-        fn cancel_dictation(&self) {}
+        fn cancel_dictation(&self) {
+            *self.dictations_cancelled.lock() += 1;
+        }
 
         fn tune_conversation(&self, _: &Settings, _: &dyn SecretStore) {}
     }
