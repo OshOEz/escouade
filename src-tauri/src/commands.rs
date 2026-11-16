@@ -151,7 +151,7 @@ pub struct InitialState {
     /// The languages of the interface, of the system and of the texts Claude writes.
     lang: crate::i18n::LangInfo,
     /// What the page showed when its process last ended, for it to offer to open it again.
-    page_crash: Option<crate::pagecrash::PageCrash>,
+    page_crash: Option<crate::model::PageCrash>,
     /// The files found unreadable at a start and recovered from their copies (ESC-469), until the user closes the
     /// notice that tells them.
     recovered: Vec<escouade_model::backups::Recovery>,

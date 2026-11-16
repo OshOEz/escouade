@@ -5,17 +5,9 @@
 //! for a page that crashes on it would crash again at each start.
 
 use crate::core::Core;
-use serde::Serialize;
+pub use crate::model::PageCrash;
 use std::sync::Arc;
 use tauri::{Manager, Runtime, WebviewWindow};
-
-/// What the page showed when its process ended.
-#[derive(Debug, Clone, PartialEq, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct PageCrash {
-    pub project_id: Option<String>,
-    pub agent_id: Option<String>,
-}
 
 impl Core {
     /// The page's process ended for `reason`: what it showed is kept and closed (the next page

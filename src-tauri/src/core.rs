@@ -1105,7 +1105,7 @@ pub struct Core {
     /// The agents the window holds a message for (`outbox.svelte.ts`).
     pub held: Mutex<HashSet<String>>,
     /// What the page showed when its process ended abnormally, until the page told it (ESC-290).
-    pub page_crash: Mutex<Option<crate::pagecrash::PageCrash>>,
+    pub page_crash: Mutex<Option<PageCrash>>,
     /// Work under way outside of an agent's turn that a restart would cut (`Core::working`): a
     /// ticket being started, a validation and its cleanup, a message being delivered, a merge.
     pub(crate) works: AtomicUsize,
@@ -1194,7 +1194,7 @@ pub struct Core {
     /// The paths the window's host read for the files the page handed it (`fileorigin`): the table
     /// the app manages (the listener fills it, `file_origin` answers from it), or a table of its
     /// own where the app has none. `attach_origin` takes the paths handed out from it, only.
-    pub(crate) file_origins: crate::fileorigin::FileOrigins,
+    pub(crate) file_origins: crate::fileorigins::FileOrigins,
     /// The files of the user's own joined by their path, by agent: the only ones a message may
     /// give as joined by it (`attachfiles::OriginFiles`).
     pub(crate) origin_files: crate::attachfiles::OriginFiles,
@@ -2171,6 +2171,7 @@ impl Core {
             host.version(),
             settings.telemetry,
             paths::sandbox_dir().is_none(),
+            host.clone(),
         ));
         let file_origins = host.file_origins();
         // The seed of the plugins of the first hand, in the installer (ESC-338): its list of revocations stands in for the

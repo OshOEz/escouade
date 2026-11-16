@@ -1,6 +1,6 @@
 //! The app the core runs in: what the core asks of it, and the desktop app's answers.
 
-use crate::fileorigin::FileOrigins;
+use crate::fileorigins::FileOrigins;
 use crate::i18n::{self, Lang};
 use crate::integrations::secrets::SecretStore;
 use crate::model::Settings;
@@ -17,6 +17,8 @@ pub trait Host: Send + Sync + 'static {
     fn file_origins(&self) -> FileOrigins {
         Default::default()
     }
+    /// The version of the webview the window shows, when there is one.
+    fn webview_version(&self) -> Option<String>;
     /// The main window is shown and has the focus.
     fn window_attended(&self) -> bool;
     fn attention(&self);
@@ -49,6 +51,10 @@ impl<R: Runtime> Host for Desktop<R> {
             .try_state::<FileOrigins>()
             .map(|s| s.inner().clone())
             .unwrap_or_default()
+    }
+
+    fn webview_version(&self) -> Option<String> {
+        tauri::webview_version().ok()
     }
 
     fn window_attended(&self) -> bool {
@@ -115,6 +121,8 @@ mod fake {
         pub waiting: parking_lot::Mutex<Vec<usize>>,
         pub relabels: parking_lot::Mutex<Vec<(Lang, usize)>>,
         pub attention: parking_lot::Mutex<usize>,
+        /// What `webview_version` gives.
+        pub webview: Option<String>,
     }
 
     impl Fake {
@@ -130,6 +138,10 @@ mod fake {
 
         fn seed_dir(&self) -> Option<PathBuf> {
             None
+        }
+
+        fn webview_version(&self) -> Option<String> {
+            self.webview.clone()
         }
 
         fn window_attended(&self) -> bool {

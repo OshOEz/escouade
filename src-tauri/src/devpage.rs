@@ -14,6 +14,7 @@
 //!   origin opens in the system's browser, anything else nowhere;
 //! - its devtools are its own (`open_devtools` on its webview); the window's stay off in a release.
 
+pub use crate::model::PageEvent;
 use parking_lot::Mutex;
 use serde::Serialize;
 use std::collections::HashMap;
@@ -215,17 +216,6 @@ pub struct PageView {
     pub mode: PageMode,
     /// The page of a launch command run in its project (`RUN_PREFIX`): no agent's view to go back to.
     pub agentless: bool,
-}
-
-/// What happened to a page, for the window (`UiEvent::DevPage`) and the « Pages » windows.
-#[derive(Debug, Clone, PartialEq, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct PageEvent {
-    pub agent_id: String,
-    /// `started` and `finished` (a load, at `url`), `outside` (`url` opened in the system's
-    /// browser), `refused` (`url` opened nowhere), `devtools`, `attached`, `detached`, `closed`.
-    pub phase: &'static str,
-    pub url: String,
 }
 
 /// Tells a page's events.
