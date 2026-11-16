@@ -10,6 +10,9 @@ rust-version = "1.88"
 default-run = "escouade"
 
 [features]
+default = ["desktop"]
+# The window (Tauri): what a command layer without it leaves out (docs/REMOTE.md, « Le mode serveur »).
+desktop = []
 # ONNX Runtime loaded from a library at run time, as on Intel Macs and Linux: to try that path elsewhere
 # (`ESCOUADE_ORT_DYLIB` names the library, read by a build with this feature alone).
 ort-dynamic = ["escouade-voice-local/ort-dynamic"]

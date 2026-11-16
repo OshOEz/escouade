@@ -3,6 +3,7 @@
 
 use serde::Serialize;
 use std::sync::Arc;
+#[cfg(feature = "desktop")]
 use tauri::ipc::{Channel, InvokeResponseBody};
 
 /// Where a flow of the core goes: the window's channel, or a remote client's socket.
@@ -29,6 +30,7 @@ impl<T> Sink<T> {
 }
 
 /// The window's events, serialized to JSON by the channel.
+#[cfg(feature = "desktop")]
 impl<T: Serialize + Send + Sync + 'static> From<Channel<T>> for Sink<T> {
     fn from(channel: Channel<T>) -> Self {
         Sink::new(move |value| {
@@ -41,6 +43,7 @@ impl<T: Serialize + Send + Sync + 'static> From<Channel<T>> for Sink<T> {
 }
 
 /// A terminal's bytes, sent raw as they were read.
+#[cfg(feature = "desktop")]
 impl From<Channel<InvokeResponseBody>> for Sink<Vec<u8>> {
     fn from(channel: Channel<InvokeResponseBody>) -> Self {
         Sink::new(move |bytes| {
