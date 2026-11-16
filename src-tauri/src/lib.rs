@@ -175,6 +175,7 @@ mod opencode_tests;
 mod opening;
 #[cfg(test)]
 mod opening_tests;
+mod output;
 #[cfg(feature = "desktop")]
 mod outside;
 #[cfg(not(feature = "desktop"))]
@@ -693,7 +694,9 @@ macro_rules! all_commands {
             commands::fs_base,
             commands::code_search,
             commands::term_spawn,
+            commands::term_attach,
             commands::run_start,
+            commands::run_attach,
             commands::term_write,
             commands::term_resize,
             commands::term_kill,

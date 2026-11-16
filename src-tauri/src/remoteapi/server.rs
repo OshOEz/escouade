@@ -3,11 +3,13 @@
 //! start-up so that no child process inherits the token; release builds never read them nor listen. A connection
 //! brings the token, comes from no web page and names this server; its slot is taken before the handshake, so a local
 //! process may hold all 16 for up to 10 s each (acceptable for now). Its calls of one family keep their order, as the
-//! window's do (`windowthread`). The six commands with a flow (`subscribe` and the terminals) are served here, the
-//! others by the table. Nothing waits on a client: a queue that fills, or a socket write that hangs, closes it. A
-//! remote `subscribe` adds the connection to the hub's subscribers, the window keeping its own, until the connection
-//! ends; a second one takes the place of the first. A remote `agent_terminal` takes the agent's terminal output, while
-//! the core has one sink for it; a remote `save_settings` retunes the desktop's conversation.
+//! window's do (`windowthread`). The eight commands with a flow (`subscribe` and the terminals) are served here, the
+//! others by the table. A client's stream commands start one at a time, each waiting at most 10 s for half of its
+//! 16 MiB budget of terminal bytes, and give up when the connection ends; a client that does not read is closed: a
+//! queue that fills, or a socket write that hangs, closes it. A remote `subscribe` adds the connection to the hub's
+//! subscribers, the window keeping its own, until the connection ends; a second one takes the place of the first. A
+//! terminal's stream reads its output beside the window, from what it kept, until the connection ends. A remote
+//! `save_settings` retunes the desktop's conversation.
 use super::table::{self, CallError, Ctx, Entry, ResultTag};
 use super::wire;
 use crate::commands::{self, CoreState};
@@ -15,18 +17,20 @@ use crate::core::Core;
 use crate::hub::Subscription;
 use crate::lanes::{lane_of, Lanes};
 use crate::model::UiEvent;
+use crate::output::{Reader, Viewer};
 use crate::sink::{Closed, Sink};
 use escouade_base::rt;
 use futures_util::{SinkExt, StreamExt};
 use parking_lot::Mutex;
 use serde_json::Value;
-use std::collections::HashSet;
+use std::collections::HashMap;
 use std::net::{Ipv4Addr, SocketAddr};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Weak};
 use std::time::Duration;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::mpsc::{self, error::TrySendError};
-use tokio::sync::{watch, OwnedSemaphorePermit, Semaphore};
+use tokio::sync::{watch, Notify, OwnedSemaphorePermit, Semaphore};
 use tokio_tungstenite::tungstenite::handshake::server::{ErrorResponse, Request, Response};
 use tokio_tungstenite::tungstenite::http::{header, StatusCode};
 use tokio_tungstenite::tungstenite::protocol::WebSocketConfig;
@@ -48,19 +52,25 @@ const MAX_CALLS: usize = 64;
 const MAX_STREAMS: usize = 256;
 /// Answers and events waiting for the socket; full, the connection is closed.
 const TEXT_QUEUE: usize = 1024;
-/// A terminal's reads waiting for the socket, 32 KiB each at most (8 MiB); full, the connection is closed.
-const BYTES_QUEUE: usize = 256;
+/// The terminals' bytes waiting for the socket (16 MiB, four full replays of a terminal's kept output); past it, the
+/// connection is closed. A client's stream commands start one at a time, each once half of it is free: a whole replay
+/// then fits, with as much again for the live output of its terminals.
+const BYTES_BUDGET: usize = 4 * crate::output::OUTPUT_KEPT;
+/// What a frame of a terminal's bytes counts for, beyond its bytes: tiny reads cannot queue without bound.
+const FRAME_COST: usize = 64;
 /// How long one frame may take to reach the socket before the connection is closed.
 const WRITE: Duration = Duration::from_secs(10);
 /// How long a connection has to make its handshake.
 const HANDSHAKE: Duration = Duration::from_secs(10);
 /// The commands with a flow, which this server serves itself.
-const STREAMS: [&str; 6] = [
+const STREAMS: [&str; 8] = [
     "subscribe",
     "account_login",
     "agent_terminal",
     "term_spawn",
+    "term_attach",
     "run_start",
+    "run_attach",
     "test_run_start",
 ];
 
@@ -267,7 +277,7 @@ impl Server {
             return;
         };
         log::info!("remote API: a client connected");
-        let (conn, text, bytes) = Conn::new(TEXT_QUEUE, BYTES_QUEUE);
+        let (conn, text, bytes) = Conn::new(TEXT_QUEUE, BYTES_BUDGET);
         let writer = rt::spawn(conn.clone().write(out, text, bytes));
         let in_flight = Arc::new(Semaphore::new(MAX_IN_FLIGHT));
         let mut closed = conn.closed.subscribe();
@@ -299,6 +309,8 @@ impl Server {
         }
         conn.close("left");
         drop(conn.subscription.lock().take());
+        // Its terminals' readers leave with it.
+        conn.streams.lock().clear();
         let _ = writer.await;
     }
 
@@ -360,6 +372,12 @@ impl Server {
         let name = entry.name;
         let stream = stream
             .ok_or_else(|| CallError::Args(format!("command `{name}` needs a `stream` number")))?;
+        // One stream command at a time per client, each with room for its replay.
+        let _one = conn.streaming.lock().await;
+        if conn.is_closed() {
+            return Err(gone());
+        }
+        conn.room_for_a_replay().await?;
         let output = conn.open(stream)?;
         // Off the runtime's workers, as the table runs a synchronous command.
         rt::spawn_blocking(move || rt::block_on(start_stream(&core, name, &args, output)))
@@ -382,7 +400,7 @@ async fn start_stream(
     core: &Arc<Core>,
     name: &'static str,
     args: &Value,
-    output: Sink<Vec<u8>>,
+    output: Viewer,
 ) -> Result<Value, CallError> {
     let core = CoreState::from(core);
     macro_rules! arg {
@@ -406,6 +424,12 @@ async fn start_stream(
                 core, project, agent, subdir, shell, title, cols, rows, output,
             )
             .await
+        }
+        "term_attach" => {
+            commands::term_attach_to(core, arg!("id"), arg!("cols"), arg!("rows"), output)
+        }
+        "run_attach" => {
+            commands::run_attach_to(core, arg!("id"), arg!("cols"), arg!("rows"), output)
         }
         "run_start" => commands::run_start_to(
             core,
@@ -438,9 +462,16 @@ struct Conn {
     text: mpsc::Sender<Message>,
     /// Terminals' bytes, behind the text.
     bytes: mpsc::Sender<Message>,
+    /// What `bytes` holds, each frame counted with `FRAME_COST`, and the most it may.
+    bytes_queued: AtomicUsize,
+    bytes_budget: usize,
+    /// Told when `bytes` gave some to the socket.
+    room: Notify,
+    /// Held by the stream command that starts, with its replay.
+    streaming: tokio::sync::Mutex<()>,
     closed: watch::Sender<bool>,
-    /// The stream numbers of its terminals still running.
-    streams: Mutex<HashSet<u32>>,
+    /// The stream numbers of its terminals still running, each with its place among the terminal's readers.
+    streams: Mutex<HashMap<u32, Reader>>,
     lanes: Arc<Lanes>,
     /// Its place among the hub's subscribers, once it subscribed.
     subscription: Mutex<Option<Subscription>>,
@@ -449,12 +480,17 @@ struct Conn {
 type Queue = mpsc::Receiver<Message>;
 
 impl Conn {
-    fn new(text: usize, bytes: usize) -> (Arc<Self>, Queue, Queue) {
+    fn new(text: usize, bytes_budget: usize) -> (Arc<Self>, Queue, Queue) {
         let (text, text_rx) = mpsc::channel(text);
-        let (bytes, bytes_rx) = mpsc::channel(bytes);
+        // As many frames as the budget can hold: the budget is the bound.
+        let (bytes, bytes_rx) = mpsc::channel(bytes_budget / FRAME_COST + 1);
         let conn = Arc::new(Conn {
             text,
             bytes,
+            bytes_queued: AtomicUsize::new(0),
+            bytes_budget,
+            room: Notify::new(),
+            streaming: tokio::sync::Mutex::new(()),
             closed: watch::channel(false).0,
             streams: Mutex::default(),
             lanes: Arc::default(),
@@ -487,7 +523,12 @@ impl Conn {
                 biased;
                 _ = closed.wait_for(|c| *c) => break,
                 Some(m) = text.recv() => m,
-                Some(m) = bytes.recv() => m,
+                Some(m) = bytes.recv() => {
+                    // Its room given back once it leaves the queue.
+                    self.bytes_queued.fetch_sub(m.len() + FRAME_COST, Ordering::AcqRel);
+                    self.room.notify_waiters();
+                    m
+                }
                 else => break,
             };
             // A client that reads nothing is closed, never waited for.
@@ -532,29 +573,73 @@ impl Conn {
         }
     }
 
+    /// A terminal's frame queued without waiting: past the budget, the connection is closed.
+    fn push_bytes(&self, message: Message) -> Result<(), Closed> {
+        let cost = message.len() + FRAME_COST;
+        if self.bytes_queued.fetch_add(cost, Ordering::AcqRel) + cost > self.bytes_budget {
+            self.bytes_queued.fetch_sub(cost, Ordering::AcqRel);
+            self.close("read too slowly: closed");
+            return Err(Closed);
+        }
+        let pushed = self.push(&self.bytes, message);
+        if pushed.is_err() {
+            self.bytes_queued.fetch_sub(cost, Ordering::AcqRel);
+        }
+        pushed
+    }
+
+    /// Waits, up to `WRITE`, until half the bytes' budget is free: a whole replay fits; else the client is closed.
+    /// A connection that ends meanwhile ends the wait: its writer is gone, nothing would free room.
+    async fn room_for_a_replay(&self) -> Result<(), CallError> {
+        let deadline = tokio::time::Instant::now() + WRITE;
+        let mut closed = self.closed.subscribe();
+        loop {
+            let notified = self.room.notified();
+            tokio::pin!(notified);
+            notified.as_mut().enable();
+            if self.bytes_queued.load(Ordering::Acquire) <= self.bytes_budget / 2 {
+                return Ok(());
+            }
+            tokio::select! {
+                _ = closed.wait_for(|c| *c) => return Err(gone()),
+                woke = tokio::time::timeout_at(deadline, notified) => {
+                    if woke.is_err() {
+                        self.close("read too slowly: closed");
+                        return Err(CallError::Failed("the client reads too slowly".into()));
+                    }
+                }
+            }
+        }
+    }
+
     /// A terminal's bytes, under `stream`: refused while that number is in use.
-    fn open(self: &Arc<Self>, stream: u32) -> Result<Sink<Vec<u8>>, CallError> {
+    fn open(self: &Arc<Self>, stream: u32) -> Result<Viewer, CallError> {
         let mut streams = self.streams.lock();
-        if streams.contains(&stream) {
+        if streams.contains_key(&stream) {
             return Err(CallError::Args(format!("stream {stream} is in use")));
         }
         if streams.len() >= MAX_STREAMS {
             return Err(CallError::Args("too many streams".into()));
         }
-        streams.insert(stream);
+        let reader = Reader::new();
         let open = Open {
             conn: Arc::downgrade(self),
             stream,
         };
-        Ok(Sink::new(move |bytes: Vec<u8>| {
-            // Called under core locks (`tui::TuiOutput`): it never waits.
+        let sink = Sink::new(move |bytes: Vec<u8>| {
+            // Called under the output's lock (`output::Output`): it never waits.
             let conn = live(&open.conn)?;
-            conn.push(
-                &conn.bytes,
-                Message::binary(wire::frame(open.stream, &bytes)),
-            )
-        }))
+            conn.push_bytes(Message::binary(wire::frame(open.stream, &bytes)))
+        });
+        let viewer = Viewer::client(sink, &reader);
+        streams.insert(stream, reader);
+        Ok(viewer)
     }
+}
+
+/// What a stream command gets once its connection has ended.
+fn gone() -> CallError {
+    CallError::Failed("the connection is closed".into())
 }
 
 /// The connection, while it lasts.

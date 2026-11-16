@@ -310,6 +310,101 @@ fn a_terminal_stream_arrives_in_binary_frames_under_its_number() {
 }
 
 #[test]
+fn a_second_client_reads_a_terminal_already_running() {
+    let loaded = load("remote-server-second-reader");
+    let running = serve(&loaded);
+    rt::block_on(async {
+        let (project, shell) = project(&loaded).await;
+        let mut first = connect(running.addr).await;
+        let term = spawn(&mut first, 1, &project, &shell, 1).await;
+        write(&mut first, 2, &term, "printf 'before-%s\\n' attach\n").await;
+        read_stream(&mut first, 1, |s| s.contains("before-attach")).await;
+        let mut second = connect(running.addr).await;
+        let args = json!({ "id": term, "cols": 80, "rows": 24 });
+        send(&mut second, 1, "term_attach", args, Some(4)).await;
+        assert_eq!(answer(&mut second, 1).await["ok"]["id"], term.as_str());
+        // The screen kept, then what follows, for both.
+        read_stream(&mut second, 4, |s| s.contains("before-attach")).await;
+        write(&mut second, 2, &term, "printf 'after-%s\\n' attach\n").await;
+        let got = read_stream(&mut second, 4, |s| s.contains("after-attach")).await;
+        assert_eq!(got.matches("before-attach").count(), 1, "{got}");
+        read_stream(&mut first, 1, |s| s.contains("after-attach")).await;
+        // A launch is not a terminal, and the reverse: refused, as a terminal that ended is.
+        let a = call(
+            &mut second,
+            3,
+            "run_attach",
+            json!({ "id": term, "cols": 80, "rows": 24 }),
+        )
+        .await;
+        assert!(a.get("err").is_some(), "{a}");
+        let a = call(
+            &mut second,
+            4,
+            "term_attach",
+            json!({ "id": "gone", "cols": 80, "rows": 24 }),
+        )
+        .await;
+        assert!(a.get("err").is_some(), "{a}");
+    });
+}
+
+#[test]
+fn an_attach_without_a_size_reads_and_one_with_a_size_resizes() {
+    let loaded = load("remote-server-attach-size");
+    let running = serve(&loaded);
+    rt::block_on(async {
+        let (project, shell) = project(&loaded).await;
+        let mut ws = connect(running.addr).await;
+        let term = spawn(&mut ws, 1, &project, &shell, 1).await;
+        // A passive reader: the terminal keeps its 80 columns and 24 rows.
+        send(&mut ws, 2, "term_attach", json!({ "id": term }), Some(2)).await;
+        assert!(answer(&mut ws, 2).await.get("ok").is_some());
+        write(&mut ws, 3, &term, "stty size\n").await;
+        read_stream(&mut ws, 2, |s| s.contains("24 80")).await;
+        // With a size: drawn again at it.
+        let args = json!({ "id": term, "cols": 100, "rows": 30 });
+        send(&mut ws, 4, "term_attach", args, Some(3)).await;
+        assert!(answer(&mut ws, 4).await.get("ok").is_some());
+        write(&mut ws, 5, &term, "stty size\n").await;
+        read_stream(&mut ws, 3, |s| s.contains("30 100")).await;
+    });
+}
+
+#[test]
+fn a_client_that_comes_back_finds_its_terminals_screen() {
+    let loaded = load("remote-server-comes-back");
+    let running = serve(&loaded);
+    rt::block_on(async {
+        let (project, shell) = project(&loaded).await;
+        let mut ws = connect(running.addr).await;
+        let term = spawn(&mut ws, 1, &project, &shell, 1).await;
+        write(&mut ws, 2, &term, "printf 'kept-%s\\n' screen\n").await;
+        read_stream(&mut ws, 1, |s| s.contains("kept-screen")).await;
+        drop(ws);
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        // Printed while no one reads it.
+        loaded
+            .core
+            .pty
+            .write(&term, b"printf 'while-%s\\n' away\n")
+            .unwrap();
+        tokio::time::sleep(Duration::from_millis(500)).await;
+        let mut again = connect(running.addr).await;
+        let args = json!({ "id": term, "cols": 80, "rows": 24 });
+        send(&mut again, 1, "term_attach", args, Some(1)).await;
+        assert!(answer(&mut again, 1).await.get("ok").is_some());
+        let got = read_stream(&mut again, 1, |s| s.contains("while-away")).await;
+        assert!(got.contains("kept-screen"), "{got}");
+        // The same client twice, under two numbers: each its replay.
+        let args = json!({ "id": term, "cols": 80, "rows": 24 });
+        send(&mut again, 2, "term_attach", args, Some(2)).await;
+        assert!(answer(&mut again, 2).await.get("ok").is_some());
+        read_stream(&mut again, 2, |s| s.contains("while-away")).await;
+    });
+}
+
+#[test]
 fn the_calls_of_a_family_keep_their_order() {
     let loaded = load("remote-server-order");
     let running = serve(&loaded);
@@ -707,20 +802,129 @@ fn nothing_is_lost_between_the_initial_state_and_the_events() {
 }
 
 #[test]
+fn a_client_that_resumes_six_full_terminals_at_once_is_not_cut() {
+    use crate::output::{Output, OUTPUT_KEPT};
+    let loaded = load("remote-server-six-replays");
+    let running = serve(&loaded);
+    let terms: Vec<String> = (1..=6u8)
+        .map(|n| {
+            let id = format!("full-{n}");
+            loaded.core.pty.insert_fake(&id, Box::new(std::io::sink()));
+            let output = Output::new(OUTPUT_KEPT);
+            for _ in 0..OUTPUT_KEPT / (32 << 10) {
+                output.push(vec![b'a' + n; 32 << 10]);
+            }
+            assert!(loaded.core.pty.keep_output(&id, output));
+            id
+        })
+        .collect();
+    rt::block_on(async {
+        let mut ws = connect(running.addr).await;
+        // Back to back, as a client that comes back asks for its terminals.
+        for (n, term) in terms.iter().enumerate() {
+            let n = n as u32 + 1;
+            send(
+                &mut ws,
+                n.into(),
+                "term_attach",
+                json!({ "id": term }),
+                Some(n),
+            )
+            .await;
+        }
+        // Busy a moment before it reads, as a client that just came back is.
+        tokio::time::sleep(Duration::from_millis(500)).await;
+        let mut answered = 0;
+        while answered < 6 || (1..=6).any(|n| ws.bytes.get(&n).map_or(0, Vec::len) < OUTPUT_KEPT) {
+            if let Some(v) = next(&mut ws).await {
+                assert!(v.get("ok").is_some(), "{v}");
+                answered += 1;
+            }
+        }
+        for n in 1..=6u32 {
+            let got = &ws.bytes[&n];
+            assert_eq!(got.len(), OUTPUT_KEPT);
+            assert!(got.iter().all(|b| *b == b'a' + n as u8));
+        }
+    });
+}
+
+#[test]
+fn a_client_cut_while_an_attach_waits_for_room_frees_it_at_once() {
+    use crate::output::{Output, OUTPUT_KEPT};
+    // The wait itself: more than half the budget queued, the connection ends, the wait with it.
+    let (conn, _text, _bytes) = Conn::new(4, 2 * (1004 + FRAME_COST));
+    let output = conn.open(1).unwrap();
+    output.send(vec![0; 1000]).unwrap();
+    output.send(vec![1; 1000]).unwrap();
+    rt::block_on(async {
+        let waiting = rt::spawn({
+            let conn = conn.clone();
+            async move { conn.room_for_a_replay().await }
+        });
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        assert!(!waiting.is_finished(), "no room yet: it waits");
+        conn.close("left");
+        let waited = tokio::time::timeout(Duration::from_secs(1), waiting).await;
+        let Err(CallError::Failed(why)) = waited.expect("released at once").unwrap() else {
+            panic!("a closed connection gets no room");
+        };
+        assert_eq!(why, "the connection is closed");
+    });
+    // Through the server: a client that resumes more terminals than it reads, cut mid-resume, holds no call.
+    let loaded = load("remote-server-cut-mid-resume");
+    let config = Config {
+        port: 0,
+        token: TOKEN.into(),
+    };
+    // One call at a time across the server: the attach that waits holds it.
+    let running = start_with(loaded.core.clone(), table::entries(), config, 1).unwrap();
+    for n in 1..=8u8 {
+        let id = format!("full-{n}");
+        loaded.core.pty.insert_fake(&id, Box::new(std::io::sink()));
+        let output = Output::new(OUTPUT_KEPT);
+        for _ in 0..OUTPUT_KEPT / (32 << 10) {
+            output.push(vec![b'a' + n; 32 << 10]);
+        }
+        assert!(loaded.core.pty.keep_output(&id, output));
+    }
+    rt::block_on(async {
+        let mut ws = connect(running.addr).await;
+        for n in 1..=8u32 {
+            let args = json!({ "id": format!("full-{n}") });
+            send(&mut ws, n.into(), "term_attach", args, Some(n)).await;
+        }
+        // It reads nothing: its queue passes half the budget, and an attach waits for room.
+        tokio::time::sleep(Duration::from_millis(500)).await;
+        drop(ws);
+        let cut = std::time::Instant::now();
+        let mut again = connect(running.addr).await;
+        let a = call(&mut again, 1, "pr_reviews", json!({ "projectId": "none" })).await;
+        assert!(a.get("id").is_some(), "{a}");
+        assert!(
+            cut.elapsed() < Duration::from_secs(3),
+            "the calls came back after {:?}",
+            cut.elapsed()
+        );
+    });
+}
+
+#[test]
 fn a_slow_client_does_not_grow_the_queue_without_bound() {
-    let (conn, _text, mut bytes) = Conn::new(4, 2);
+    // Room for two frames of 1000 bytes (and their 4 of header), counted in bytes.
+    let (conn, _text, mut bytes) = Conn::new(4, 2 * (1004 + FRAME_COST));
     let output = conn.open(9).unwrap();
-    // A terminal's reads never wait: past the bound, the client is closed.
-    assert_eq!(output.send(vec![0]), Ok(()));
-    assert_eq!(output.send(vec![1]), Ok(()));
+    // A terminal's reads never wait: past the budget, the client is closed.
+    assert_eq!(output.send(vec![0; 1000]), Ok(()));
+    assert_eq!(output.send(vec![1; 1000]), Ok(()));
     assert_eq!(output.send(vec![2]), Err(Closed));
     assert!(conn.is_closed());
     assert_eq!(bytes.len(), 2);
     let first = bytes.blocking_recv().unwrap();
-    assert_eq!(&first.into_data()[..], [0, 0, 0, 9, 0]);
+    assert_eq!(&first.into_data()[..5], [0, 0, 0, 9, 0]);
     assert_eq!(output.send(vec![3]), Err(Closed));
     // Events and answers never wait either: one that finds the text queue full closes the client.
-    let (conn, _text, _bytes) = Conn::new(4, 2);
+    let (conn, _text, _bytes) = Conn::new(4, BYTES_BUDGET);
     let events = conn.event_sink();
     for _ in 0..4 {
         events.send(exit("x")).unwrap();

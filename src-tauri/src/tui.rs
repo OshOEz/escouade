@@ -23,6 +23,7 @@ use crate::engine::Escouade;
 use crate::engine::TerminalView;
 use crate::handover::{self, Relay};
 use crate::model::*;
+use crate::output::{Output, Viewer, ESC, OUTPUT_KEPT};
 use crate::pty::{PtyManager, TermInfo};
 use anyhow::{anyhow, bail, Context, Result};
 use http_body_util::{BodyExt, Full, Limited};
@@ -140,29 +141,21 @@ impl Hooks {
 pub(crate) const CURSOR_HOME: &[u8] = b"\x1b[1;1R";
 /// The size of the terminal of an interface started with no window.
 const BACKGROUND_SIZE: (u16, u16) = (120, 40);
-/// The most an interface's output keeps (bytes): its last screens, for a window that shows it
-/// later.
-const OUTPUT_KEPT: usize = 4 << 20;
-/// The size of the pieces the kept output is sent to a window in.
-const REPLAY_PIECE: usize = 64 << 10;
-
-/// What an interface printed in its terminal. The pseudo-terminal lives in the backend, which
-/// keeps the last `OUTPUT_KEPT` bytes of its output, so that the interface runs with no window
+/// What an interface printed in its terminal. The pseudo-terminal lives in the backend, whose
+/// `Output` keeps the last `OUTPUT_KEPT` bytes of it, so that the interface runs with no window
 /// (Remote Control keeps it up) and a window that opens it, or opens it again after a reload,
-/// finds its screen as it is.
-#[derive(Default)]
+/// finds its screen as it is. An agent's view adds what a plain terminal has not: whether a
+/// window showed it, the modes the program set, the cursor position query.
 pub struct TuiOutput {
-    inner: Mutex<Output>,
+    inner: Mutex<ViewState>,
+    output: Arc<Output>,
 }
 
-/// Where a window is sent what a terminal prints.
-pub type Forward = Box<dyn Fn(Vec<u8>) + Send>;
+/// Who is sent what a terminal prints: the window, or a remote client.
+pub type Forward = Viewer;
 
 #[derive(Default)]
-struct Output {
-    kept: std::collections::VecDeque<u8>,
-    /// The window's sink, while a window shows the terminal.
-    forward: Option<Forward>,
+struct ViewState {
     /// A window has shown it (it still does, or did before it was closed).
     shown: bool,
     /// The private modes the program set (`CSI ? Pn h` and `l`), by number: on or off, as last
@@ -179,9 +172,6 @@ struct Output {
 const MAX_MODES: usize = 64;
 /// The longest list of mode numbers looked into (`CSI ? 1049;25;… h`).
 const MAX_MODE_PARAMS: usize = 64;
-/// Where the output is cut at the start when it is too long: after the first line end found in
-/// this many bytes, so that what is kept does not begin in the middle of a sequence.
-const CUT_LOOKS_IN: usize = 4096;
 
 /// What of a private mode's sequence has been read: `ESC`, `ESC [`, `ESC [ ?` and its numbers.
 #[derive(Default)]
@@ -193,7 +183,7 @@ enum ModeParse {
     Private(Vec<u8>),
 }
 
-impl Output {
+impl ViewState {
     /// Follows the modes `data` sets or resets.
     fn track_modes(&mut self, data: &[u8]) {
         for &b in data {
@@ -239,47 +229,45 @@ impl Output {
 
 impl std::fmt::Debug for TuiOutput {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let o = self.inner.lock();
         f.debug_struct("TuiOutput")
-            .field("kept", &o.kept.len())
-            .field("shown", &o.shown)
+            .field("kept", &self.output.len())
+            .field("shown", &self.inner.lock().shown)
             .finish()
+    }
+}
+
+impl Default for TuiOutput {
+    fn default() -> Self {
+        Self::new(None)
     }
 }
 
 impl TuiOutput {
     /// An output for the window `forward` sends to, if there is one yet.
     pub(crate) fn new(forward: Option<Forward>) -> Self {
+        let output = Output::new(OUTPUT_KEPT);
+        let shown = forward.is_some();
+        if let Some(forward) = forward {
+            output.read_by(forward);
+        }
         Self {
-            inner: Mutex::new(Output {
-                shown: forward.is_some(),
-                forward,
+            inner: Mutex::new(ViewState {
+                shown,
                 ..Default::default()
             }),
+            output,
         }
     }
 
-    /// What the terminal just printed: kept, and sent to the window that shows it. Under one lock
-    /// with `attach`, so that a window taking over finds every byte once, in order. True when it
-    /// ends the cursor position query of a terminal no window has shown: the caller answers it,
-    /// where a window would have (the same lock tells whether one does).
+    /// What the terminal just printed: kept, and sent to its readers. Under one lock with
+    /// `attach`, so that the modes posed to a reader that comes agree with what it is replayed.
+    /// True when it ends the cursor position query of a terminal no window has shown: the caller
+    /// answers it, where a window would have (the same lock tells whether one does).
     pub(crate) fn push(&self, data: Vec<u8>) -> bool {
         let mut o = self.inner.lock();
         o.track_modes(&data);
         let asked = o.query.feed(&data);
-        o.kept.extend(data.iter());
-        let excess = o.kept.len().saturating_sub(OUTPUT_KEPT);
-        if excess > 0 {
-            o.kept.drain(..excess);
-            // Not in the middle of a sequence, or of a line: from the next line.
-            let line = o.kept.iter().take(CUT_LOOKS_IN).position(|b| *b == b'\n');
-            if let Some(line) = line {
-                o.kept.drain(..=line);
-            }
-        }
-        if let Some(forward) = &o.forward {
-            forward(data);
-        }
+        self.output.push(data);
         asked && !o.shown
     }
 
@@ -289,22 +277,15 @@ impl TuiOutput {
         self.inner.lock().shown = true;
     }
 
-    /// A window takes the terminal over: it is sent all that was kept, then what comes, and the
-    /// window that had it before (a reloaded one) is let go. The queries the terminal made
-    /// (`without_terminal_queries`) are left out of what is replayed: they were answered, and
-    /// the window's terminal would answer them again, the answers typed into the interface.
+    /// A reader comes: it is sent the modes, then all that was kept, then what comes. A window
+    /// takes the place of the window before it (a reloaded one); a remote client leaves the
+    /// others theirs. The queries the terminal made (`without_terminal_queries`) are left out of
+    /// what is replayed: they were answered, and the reader's terminal would answer them again,
+    /// the answers typed into the interface.
     pub(crate) fn attach(&self, forward: Forward) {
         let mut o = self.inner.lock();
-        let kept: Vec<u8> = o.kept.iter().copied().collect();
         // The modes first: the start of the output, which set them, may be gone.
-        let modes = o.modes_again();
-        if !modes.is_empty() {
-            forward(modes);
-        }
-        for piece in without_terminal_queries(&kept).chunks(REPLAY_PIECE) {
-            forward(piece.to_vec());
-        }
-        o.forward = Some(forward);
+        self.output.read_by_after(o.modes_again(), forward);
         o.shown = true;
     }
 
@@ -321,119 +302,8 @@ impl TuiOutput {
     /// The bytes kept (tests).
     #[cfg(test)]
     pub(crate) fn kept(&self) -> Vec<u8> {
-        self.inner.lock().kept.iter().copied().collect()
+        self.output.kept()
     }
-}
-
-const ESC: u8 = 0x1b;
-const BEL: u8 = 0x07;
-/// The longest OSC or DCS string looked into for a query (the longer ones are kept as they are).
-const MAX_STRING: usize = 4096;
-
-/// `bytes` less the requests a terminal answers (the answers go to the program as input): device
-/// attributes (`CSI c`), device and cursor status reports (`CSI n`, `CSI ? n`), `CSI > q`, mode
-/// requests (`CSI $ p`), the keyboard protocol's (`CSI ? u`), window reports (`CSI 14 t`, 16, 18,
-/// 19), the OSC that ask a color or the clipboard (`?` for a value), and the DCS `$ q` and `+ q`.
-/// All else stays byte for byte. A sequence cut short at the end (or started before what the
-/// buffer begins with) is left as it is.
-fn without_terminal_queries(bytes: &[u8]) -> Vec<u8> {
-    let mut out = Vec::with_capacity(bytes.len());
-    let mut i = 0;
-    while i < bytes.len() {
-        let Some(at) = bytes[i..].iter().position(|b| *b == ESC) else {
-            out.extend_from_slice(&bytes[i..]);
-            break;
-        };
-        out.extend_from_slice(&bytes[i..i + at]);
-        i += at;
-        match terminal_query_len(&bytes[i..]) {
-            Some(n) => i += n,
-            None => {
-                out.push(ESC);
-                i += 1;
-            }
-        }
-    }
-    out
-}
-
-/// The length of the query `s`, which begins with ESC, opens; None when it opens something else
-/// or is not whole.
-fn terminal_query_len(s: &[u8]) -> Option<usize> {
-    match *s.get(1)? {
-        b'[' => csi_query_len(s),
-        b']' => {
-            let (end, len) = string_end(s, true)?;
-            let mut parts = s[2..end].split(|b| *b == b';');
-            let colors_or_clipboard = matches!(parts.next()?, b"4" | b"10" | b"11" | b"12" | b"52");
-            (colors_or_clipboard && parts.any(|p| p == b"?")).then_some(len)
-        }
-        b'P' => {
-            let (end, len) = string_end(s, false)?;
-            let payload = &s[2..end];
-            (payload.starts_with(b"$q") || payload.starts_with(b"+q")).then_some(len)
-        }
-        _ => None,
-    }
-}
-
-/// Where the OSC or DCS string `s` (ESC, then its opener) ends: the end of its payload and the
-/// length of the whole, up to its terminator (BEL too, for an OSC; else ESC \). None when it has
-/// none within `MAX_STRING`, or something else comes first.
-fn string_end(s: &[u8], bel: bool) -> Option<(usize, usize)> {
-    let limit = s.len().min(2 + MAX_STRING);
-    for i in 2..limit {
-        match s[i] {
-            BEL if bel => return Some((i, i + 1)),
-            ESC => return (s.get(i + 1) == Some(&b'\\')).then_some((i, i + 2)),
-            _ => {}
-        }
-    }
-    None
-}
-
-/// The length of the query the CSI `s` (ESC [ …) is, if it is one.
-fn csi_query_len(s: &[u8]) -> Option<usize> {
-    let mut i = 2;
-    while s.get(i).is_some_and(|b| (0x30..=0x3f).contains(b)) {
-        i += 1;
-    }
-    let params = &s[2..i];
-    let from = i;
-    while s.get(i).is_some_and(|b| (0x20..=0x2f).contains(b)) {
-        i += 1;
-    }
-    let intermediates = &s[from..i];
-    let last = *s.get(i)?;
-    // `params` less the prefix (one of `prefixes`, or none), made of digits only.
-    let digits_after = |prefixes: &[u8]| {
-        let rest = match params.split_first() {
-            Some((p, rest)) if prefixes.contains(p) => rest,
-            _ => params,
-        };
-        rest.iter().all(u8::is_ascii_digit)
-    };
-    let query = match (intermediates, last) {
-        // Device attributes: `CSI c`, `CSI 0 c`, `CSI > c`, `CSI > 0 c`, `CSI = c`.
-        ([], b'c') => digits_after(b">="),
-        // Status reports: `CSI 5 n`, `CSI 6 n`, `CSI ? 6 n`, `CSI ? 996 n`.
-        ([], b'n') => !params.is_empty() && params != b"?" && digits_after(b"?"),
-        // The terminal's name and version: `CSI > q`, `CSI > 0 q`.
-        ([], b'q') => params.first() == Some(&b'>') && digits_after(b">"),
-        // A mode's state: `CSI Ps $ p`, `CSI ? Ps $ p`.
-        ([b'$'], b'p') => digits_after(b"?"),
-        // The keyboard protocol's flags: `CSI ? u`.
-        ([], b'u') => params == b"?",
-        // Window reports: the size in pixels (14), of a cell (16), in characters (18), of the
-        // screen (19).
-        ([], b't') => {
-            let first = params.split(|b| *b == b';').next().unwrap_or_default();
-            params.iter().all(|b| b.is_ascii_digit() || *b == b';')
-                && matches!(first, b"14" | b"16" | b"18" | b"19")
-        }
-        _ => false,
-    };
-    query.then_some(i + 1)
 }
 
 /// Ends the interface in the terminal `term` for good, as its user would: two Ctrl+C, 700 ms apart,
@@ -1213,10 +1083,23 @@ impl Core {
         self.pty.kill(term);
     }
 
-    /// Claude Code's interface for the agent, in a terminal the window shows (`on_data`): its
-    /// session resumed, or started. One that runs already (started with Remote Control, or shown
-    /// before the window was reloaded) is neither stopped nor started again: the window takes it
-    /// over, and is sent its screen first.
+    /// `open_agent_terminal_for` the window's closure `on_data` (tests).
+    #[cfg(test)]
+    pub async fn open_agent_terminal(
+        self: &Arc<Self>,
+        id: &str,
+        size: (u16, u16),
+        manual: bool,
+        on_data: impl Fn(Vec<u8>) + Send + 'static,
+    ) -> Result<TermInfo> {
+        self.open_agent_terminal_for(id, size, manual, Viewer::window_fn(on_data))
+            .await
+    }
+
+    /// Claude Code's interface for the agent, in a terminal `on_data` reads (the window, or a
+    /// remote client that leaves the window its own): its session resumed, or started. One that
+    /// runs already (started with Remote Control, or shown before the window was reloaded) is
+    /// neither stopped nor started again: the reader joins it, and is sent its screen first.
     ///
     /// The session to resume is looked for first, where Claude Code will look (`settle_session`):
     /// found in another account's folder, it is copied into the agent's; found nowhere, it is given
@@ -1225,12 +1108,12 @@ impl Core {
     /// `manual`: the user asked for it (« Relancer »). The window's own start (it opened the view)
     /// is refused once the interface stopped as soon as it started twice in a row: it would only
     /// loop. A manual start always goes, and begins the count again.
-    pub async fn open_agent_terminal(
+    pub async fn open_agent_terminal_for(
         self: &Arc<Self>,
         id: &str,
         size: (u16, u16),
         manual: bool,
-        on_data: impl Fn(Vec<u8>) + Send + 'static,
+        on_data: Forward,
     ) -> Result<TermInfo> {
         let h = self.agent(id)?;
         // Its harness's plugin off for its project (ESC-404): its interface does not start either.
@@ -1243,7 +1126,7 @@ impl Core {
         // start either, and what still runs of it (a process started ahead, an interface kept up) stops, said (ESC-497).
         self.judge_start(id)?;
         if crate::engine::of(&h.lock().meta).attaches() {
-            return self.open_attached(&h, id, size, Box::new(on_data)).await;
+            return self.open_attached(&h, id, size, on_data).await;
         }
         let lock = self.spawn_lock(id);
         let _guard = lock.lock().await;
@@ -1279,13 +1162,12 @@ impl Core {
             }
         }
         if let Some((info, output)) = self.running_interface(&h, true) {
-            output.attach(Box::new(on_data));
+            output.attach(on_data);
             // Claude Code draws its screen again at the window's size.
             let _ = self.pty.resize(&info.id, size.0, size.1);
             return Ok(info);
         }
-        self.launch_interface(&h, id, size, Some(Box::new(on_data)))
-            .await
+        self.launch_interface(&h, id, size, Some(on_data)).await
     }
 
     /// The agent's interface, when it runs: its terminal and what that printed. With `show`, a
@@ -2980,6 +2862,7 @@ async fn answer(req: Request<Incoming>, core: &Weak<Core>, port: u16) -> Respons
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::output::{without_terminal_queries, BEL, MAX_STRING, REPLAY_PIECE};
 
     fn meta() -> AgentMeta {
         AgentMeta {
@@ -2993,7 +2876,7 @@ mod tests {
     fn collecting() -> (Arc<Mutex<Vec<u8>>>, Forward) {
         let seen = Arc::new(Mutex::new(Vec::new()));
         let sink = seen.clone();
-        (seen, Box::new(move |b| sink.lock().extend(b)))
+        (seen, Viewer::window_fn(move |b| sink.lock().extend(b)))
     }
 
     #[test]
@@ -3074,6 +2957,37 @@ mod tests {
     }
 
     #[test]
+    fn an_agents_view_is_read_by_two_at_once() {
+        let out = TuiOutput::new(None);
+        out.push(b"\x1b[?2004hscreen ".to_vec());
+        let (w, window) = collecting();
+        out.attach(window);
+        // A remote client reads it too: the window keeps its own.
+        let client = Arc::new(Mutex::new(Vec::new()));
+        let to = client.clone();
+        let reader = crate::output::Reader::new();
+        let sink = crate::sink::Sink::new(move |b: Vec<u8>| {
+            to.lock().extend(b);
+            Ok(())
+        });
+        out.attach(Viewer::client(sink, &reader));
+        out.push(b"next".to_vec());
+        assert_eq!(*w.lock(), b"\x1b[?2004h\x1b[?2004hscreen next");
+        assert_eq!(*client.lock(), b"\x1b[?2004h\x1b[?2004hscreen next");
+        // A reloaded window takes the window's place only.
+        let (a, again) = collecting();
+        out.attach(again);
+        out.push(b"!".to_vec());
+        assert!(w.lock().ends_with(b"next"));
+        assert!(a.lock().ends_with(b"next!"));
+        assert!(client.lock().ends_with(b"next!"));
+        // The client gone: nothing more for it.
+        drop(reader);
+        out.push(b"?".to_vec());
+        assert!(client.lock().ends_with(b"next!"));
+    }
+
+    #[test]
     fn an_output_made_for_a_window_is_shown_from_the_start() {
         let (seen, forward) = collecting();
         let out = TuiOutput::new(Some(forward));
@@ -3092,7 +3006,7 @@ mod tests {
         let pieces = Arc::new(Mutex::new(Vec::<usize>::new()));
         let all = Arc::new(Mutex::new(Vec::<u8>::new()));
         let (sizes, bytes) = (pieces.clone(), all.clone());
-        out.attach(Box::new(move |b| {
+        out.attach(Viewer::window_fn(move |b| {
             sizes.lock().push(b.len());
             bytes.lock().extend(b);
         }));
@@ -3105,7 +3019,7 @@ mod tests {
         assert!(out.kept().windows(4).any(|w| w == b"\x1b[6n"));
     }
 
-    /// What a window is sent when it takes the output over, as one string.
+    /// What a window is sent when it comes to read the output, as one string.
     fn replayed(out: &TuiOutput) -> Vec<u8> {
         let (all, forward) = collecting();
         out.attach(forward);

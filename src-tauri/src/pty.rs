@@ -61,6 +61,8 @@ struct Term {
     /// How many of the window's writes were typed by its user (`typing`), not answers of the
     /// terminal.
     typed: Arc<AtomicU64>,
+    /// What it printed, for whoever reads it (`keep_output`): gone with the terminal.
+    output: Mutex<Option<Arc<crate::output::Output>>>,
 }
 
 /// A write waiting for the input thread.
@@ -388,6 +390,8 @@ pub struct Activity {
 #[derive(Default, Clone)]
 pub struct PtyManager {
     terms: Arc<Mutex<HashMap<String, Arc<Term>>>>,
+    /// The outputs of terminals about to start (`output_ahead`), taken by their start.
+    ahead: Arc<Mutex<HashMap<String, Arc<crate::output::Output>>>>,
 }
 
 /// What a terminal starts.
@@ -1162,6 +1166,8 @@ impl PtyManager {
         on_data: impl Fn(Vec<u8>) + Send + 'static,
         on_exit: impl FnOnce(Option<u32>) + Send + 'static,
     ) -> Result<()> {
+        // Taken first: it goes with the terminal, or with this call if it does not start.
+        let output = self.ahead.lock().remove(&info.id);
         #[cfg(windows)]
         let_ctrl_c_through();
         let pty = native_pty_system();
@@ -1230,6 +1236,7 @@ impl PtyManager {
                 writes: writes.clone(),
                 slow_echo_at: AtomicI64::new(i64::MIN),
                 typed: Arc::default(),
+                output: Mutex::new(output),
             }),
         );
 
@@ -1359,6 +1366,30 @@ impl PtyManager {
             .get(id)
             .cloned()
             .ok_or_else(|| closed(i18n::ui()))
+    }
+
+    /// `output` kept with the terminal `id` from its start: it is there as soon as the terminal is.
+    pub fn output_ahead(&self, id: &str, output: Arc<crate::output::Output>) {
+        self.ahead.lock().insert(id.to_string(), output);
+    }
+
+    /// `output` kept with the terminal `id`, for readers that come later; false when it ended.
+    pub fn keep_output(&self, id: &str, output: Arc<crate::output::Output>) -> bool {
+        let Ok(term) = self.term(id) else {
+            return false;
+        };
+        *term.output.lock() = Some(output);
+        true
+    }
+
+    /// The terminal `id` and its output, if it runs and is a launch (`launch`) or an interactive one.
+    pub fn output(&self, id: &str, launch: bool) -> Result<(TermInfo, Arc<crate::output::Output>)> {
+        let term = self.term(id)?;
+        let output = term.output.lock().clone();
+        match output {
+            Some(output) if term.launch == launch => Ok((term.info.clone(), output)),
+            _ => Err(closed(i18n::ui())),
+        }
     }
 
     pub fn resize(&self, id: &str, cols: u16, rows: u16) -> Result<()> {
@@ -3747,7 +3778,7 @@ impl ChildKiller for NoKiller {
 #[cfg(test)]
 impl PtyManager {
     /// A terminal `id` with a pseudo-console but no process, whose input goes to `writer`.
-    fn insert_fake(&self, id: &str, writer: Box<dyn Write + Send>) {
+    pub(crate) fn insert_fake(&self, id: &str, writer: Box<dyn Write + Send>) {
         let pair = native_pty_system()
             .openpty(PtySize {
                 rows: 24,
@@ -3779,6 +3810,7 @@ impl PtyManager {
                 writes,
                 slow_echo_at: AtomicI64::new(i64::MIN),
                 typed: Arc::default(),
+                output: Mutex::default(),
             }),
         );
     }

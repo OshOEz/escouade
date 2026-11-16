@@ -12,6 +12,7 @@ use crate::integrations::{
 };
 use crate::model::Account as ClaudeAccount;
 use crate::model::*;
+use crate::output::{Output, Viewer, OUTPUT_KEPT};
 use crate::pty::{self, ShellInfo, TermInfo, TermReport};
 use crate::search;
 use crate::sink::Sink;
@@ -1168,7 +1169,7 @@ pub fn account_login(
     rows: u16,
     output: Channel<InvokeResponseBody>,
 ) -> Res<TermInfo> {
-    account_login_to(core, id, cols, rows, output.into())
+    account_login_to(core, id, cols, rows, Viewer::window(output.into()))
 }
 
 /// `account_login` with the terminal's bytes to `output`.
@@ -1177,12 +1178,16 @@ pub(crate) fn account_login_to(
     id: String,
     cols: u16,
     rows: u16,
-    output: Sink<Vec<u8>>,
+    output: Viewer,
 ) -> Res<TermInfo> {
-    core.claude_login(&id, (cols, rows), move |bytes| {
-        let _ = output.send(bytes);
-    })
-    .map_err(err)
+    // Its id is made by the sign-in: kept once it runs (an attach a moment before finds none).
+    let kept = read_output(output);
+    let pushed = kept.clone();
+    let info = core
+        .claude_login(&id, (cols, rows), move |bytes| pushed.push(bytes))
+        .map_err(err)?;
+    core.pty.keep_output(&info.id, kept);
+    Ok(info)
 }
 
 /// « Vue Claude Code »: the agent runs in Claude Code's own interface, or in Escouade's view.
@@ -1208,7 +1213,7 @@ pub async fn agent_terminal(
     manual: Option<bool>,
     output: Channel<InvokeResponseBody>,
 ) -> Res<TermInfo> {
-    agent_terminal_to(core, id, cols, rows, manual, output.into()).await
+    agent_terminal_to(core, id, cols, rows, manual, Viewer::window(output.into())).await
 }
 
 /// `agent_terminal` with the terminal's bytes to `output`.
@@ -1218,13 +1223,11 @@ pub(crate) async fn agent_terminal_to(
     cols: u16,
     rows: u16,
     manual: Option<bool>,
-    output: Sink<Vec<u8>>,
+    output: Viewer,
 ) -> Res<TermInfo> {
-    core.open_agent_terminal(&id, (cols, rows), manual.unwrap_or(false), move |bytes| {
-        let _ = output.send(bytes);
-    })
-    .await
-    .map_err(err)
+    core.open_agent_terminal_for(&id, (cols, rows), manual.unwrap_or(false), output)
+        .await
+        .map_err(err)
 }
 
 /// Whether the agent's interface asks the question about the trust of its folder (Codex, Copilot
@@ -2945,7 +2948,7 @@ pub async fn term_spawn(
     rows: u16,
     output: Channel<InvokeResponseBody>,
 ) -> Res<TermInfo> {
-    let output = output.into();
+    let output = Viewer::window(output.into());
     term_spawn_to(
         core, project_id, agent_id, subdir, shell, name, cols, rows, output,
     )
@@ -2963,7 +2966,7 @@ pub(crate) async fn term_spawn_to(
     name: String,
     cols: u16,
     rows: u16,
-    output: Sink<Vec<u8>>,
+    output: Viewer,
 ) -> Res<TermInfo> {
     let cwd = core
         .term_cwd(&project_id, agent_id, subdir.as_deref())
@@ -2988,6 +2991,8 @@ pub(crate) async fn term_spawn_to(
     };
     let hub_core = Arc::downgrade(core.inner());
     let id = info.id.clone();
+    let pushed = read_output(output);
+    core.pty.output_ahead(&info.id, pushed.clone());
     core.pty
         .spawn(
             info.clone(),
@@ -2996,9 +3001,7 @@ pub(crate) async fn term_spawn_to(
             &cwd,
             (cols, rows),
             env,
-            move |bytes| {
-                let _ = output.send(bytes);
-            },
+            move |bytes| pushed.push(bytes),
             move |code| {
                 if let Some(c) = hub_core.upgrade() {
                     c.test_run_ended(&id);
@@ -3028,7 +3031,7 @@ pub fn run_start(
     cursor_row: Option<u16>,
     output: Channel<InvokeResponseBody>,
 ) -> Res<TermInfo> {
-    let output = output.into();
+    let output = Viewer::window(output.into());
     run_start_to(
         core, project_id, command_id, agent_id, cols, rows, cursor_row, output,
     )
@@ -3044,7 +3047,7 @@ pub(crate) fn run_start_to(
     cols: u16,
     rows: u16,
     cursor_row: Option<u16>,
-    output: Sink<Vec<u8>>,
+    output: Viewer,
 ) -> Res<TermInfo> {
     let project = core.project(&project_id).map_err(err)?;
     let run = project
@@ -3123,7 +3126,7 @@ fn spawn_launch(
     launch: Launch,
     size: (u16, u16),
     cursor_row: Option<u16>,
-    output: Sink<Vec<u8>>,
+    output: Viewer,
 ) -> Res<TermInfo> {
     let mut env = if settings.proxy_terminals {
         settings.proxy_env()
@@ -3133,6 +3136,8 @@ fn spawn_launch(
     env.extend(launch.env);
     let hub_core = Arc::downgrade(core);
     let id = launch.info.id.clone();
+    let pushed = read_output(output);
+    core.pty.output_ahead(&id, pushed.clone());
     core.pty
         .spawn_command(
             launch.info.clone(),
@@ -3143,9 +3148,7 @@ fn spawn_launch(
             env,
             cursor_row.unwrap_or(1),
             launch.command,
-            move |bytes| {
-                let _ = output.send(bytes);
-            },
+            move |bytes| pushed.push(bytes),
             move |code| {
                 if let Some(c) = hub_core.upgrade() {
                     c.hub.emit(UiEvent::TerminalExit { id, code });
@@ -3154,6 +3157,77 @@ fn spawn_launch(
         )
         .map_err(err)?;
     Ok(launch.info)
+}
+
+/// A new terminal's output, kept with it and read by `viewer` from its first byte.
+fn read_output(viewer: Viewer) -> Arc<Output> {
+    let output = Output::new(OUTPUT_KEPT);
+    output.read_by(viewer);
+    output
+}
+
+/// A terminal already running, read from now on by `output`: its screen kept, then what follows.
+/// With `cols` and `rows`, it is drawn again at that size; without, it is read as it is.
+#[command(async, desktop)]
+pub fn term_attach(
+    core: CoreState,
+    id: String,
+    cols: Option<u16>,
+    rows: Option<u16>,
+    output: Channel<InvokeResponseBody>,
+) -> Res<TermInfo> {
+    term_attach_to(core, id, cols, rows, Viewer::window(output.into()))
+}
+
+/// `term_attach` with the terminal's bytes to `output`.
+pub(crate) fn term_attach_to(
+    core: CoreState,
+    id: String,
+    cols: Option<u16>,
+    rows: Option<u16>,
+    output: Viewer,
+) -> Res<TermInfo> {
+    attach_to(&core, &id, cols.zip(rows), false, output)
+}
+
+/// A launch already running, read from now on by `output`: its log kept, then what follows.
+/// With `cols` and `rows`, it is drawn again at that size; without, it is read as it is.
+#[command(async, desktop)]
+pub fn run_attach(
+    core: CoreState,
+    id: String,
+    cols: Option<u16>,
+    rows: Option<u16>,
+    output: Channel<InvokeResponseBody>,
+) -> Res<TermInfo> {
+    run_attach_to(core, id, cols, rows, Viewer::window(output.into()))
+}
+
+/// `run_attach` with the launch's bytes to `output`.
+pub(crate) fn run_attach_to(
+    core: CoreState,
+    id: String,
+    cols: Option<u16>,
+    rows: Option<u16>,
+    output: Viewer,
+) -> Res<TermInfo> {
+    attach_to(&core, &id, cols.zip(rows), true, output)
+}
+
+/// The terminal `id` (a launch with `launch`) read by `viewer`, drawn again at `size` if given.
+fn attach_to(
+    core: &Core,
+    id: &str,
+    size: Option<(u16, u16)>,
+    launch: bool,
+    viewer: Viewer,
+) -> Res<TermInfo> {
+    let (info, output) = core.pty.output(id, launch).map_err(err)?;
+    output.read_by(viewer);
+    if let Some((cols, rows)) = size {
+        let _ = core.pty.resize(id, cols, rows);
+    }
+    Ok(info)
 }
 
 /// Synchronous on purpose: Tauri handles these on the window's main thread, in the order the
@@ -3502,7 +3576,7 @@ pub fn test_run_start(
     cursor_row: Option<u16>,
     output: Channel<InvokeResponseBody>,
 ) -> Res<TermInfo> {
-    let output = output.into();
+    let output = Viewer::window(output.into());
     test_run_start_to(core, agent_id, kind, index, cols, rows, cursor_row, output)
 }
 
@@ -3516,7 +3590,7 @@ pub(crate) fn test_run_start_to(
     cols: u16,
     rows: u16,
     cursor_row: Option<u16>,
-    output: Sink<Vec<u8>>,
+    output: Viewer,
 ) -> Res<TermInfo> {
     let spec = core.test_run_spec(&agent_id, &kind, index).map_err(err)?;
     let project_id = core
