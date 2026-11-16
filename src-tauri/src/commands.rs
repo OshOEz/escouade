@@ -68,6 +68,7 @@ impl<'a> From<&'a Arc<Core>> for CoreState<'a> {
     }
 }
 
+#[cfg(feature = "desktop")]
 impl<'r, 'de: 'r, R: tauri::Runtime> tauri::ipc::CommandArg<'de, R> for CoreState<'r> {
     fn from_command(
         command: tauri::ipc::CommandItem<'de, R>,

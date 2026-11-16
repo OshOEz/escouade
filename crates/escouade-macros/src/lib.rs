@@ -13,7 +13,8 @@ use syn::spanned::Spanned;
 use syn::{Error, FnArg, Ident, ItemFn, Pat, Path, Token, Type};
 
 /// `#[command]`, `#[command(async)]`, `#[command(desktop)]`, `#[command(async, desktop)]`: the function under
-/// `#[tauri::command]` (`async` as Tauri's), and `__REMOTE_<NAME>`, its entry of the remote table. Remotely, the core
+/// `#[tauri::command]` (`async` as Tauri's) with the app's feature `desktop` (`cfg_attr`: the function stays without
+/// it, a `desktop` one goes), and `__REMOTE_<NAME>`, its entry of the remote table, always. Remotely, the core
 /// is given for a `CoreState` parameter and every other one is read from the JSON object under Tauri's key; a
 /// parameter only the window has (`AppHandle`, `State`, `Channel`…) is refused unless the command is `desktop`, whose
 /// entry says it is not called remotely.
@@ -24,7 +25,8 @@ pub fn command(args: TokenStream, item: TokenStream) -> TokenStream {
         .into()
 }
 
-/// `handlers![commands::a, commands::b]`: `(tauri::generate_handler![commands::a, commands::b], &[their entries])`.
+/// `handlers![commands::a, commands::b]`: `(tauri::generate_handler![commands::a, commands::b], &[their entries])`
+/// with the app's feature `desktop`, `&[their entries]` alone without it.
 /// Bare paths only: no attribute on an item (a `#[cfg]`), no `#![plugin(…)]` as `generate_handler!` takes.
 /// Every item must be a `#[command]`: a `#[tauri::command]` in the list fails with « cannot find value
 /// `__REMOTE_…` ».
@@ -50,9 +52,9 @@ fn expand_command(args: Tokens, item: Tokens) -> syn::Result<Tokens> {
     }
     let function: ItemFn = syn::parse2(item)?;
     let tauri = if run_async {
-        quote!(#[::tauri::command(async)])
+        quote!(::tauri::command(async))
     } else {
-        quote!(#[::tauri::command])
+        quote!(::tauri::command)
     };
     let entry = entry(&function, desktop).unwrap_or_else(Error::into_compile_error);
     let ItemFn {
@@ -61,8 +63,15 @@ fn expand_command(args: Tokens, item: Tokens) -> syn::Result<Tokens> {
         sig,
         block,
     } = function;
+    // A desktop command takes what only the window has: without `desktop`, its entry alone stays.
+    let (only, tauri) = if desktop {
+        (quote!(#[cfg(feature = "desktop")]), quote!(#[#tauri]))
+    } else {
+        (quote!(), quote!(#[cfg_attr(feature = "desktop", #tauri)]))
+    };
     // Tauri's attribute after the command's own, where it was: a `cfg` among them still goes first.
     Ok(quote! {
+        #only
         #(#attrs)*
         #tauri
         #vis #sig #block
@@ -255,13 +264,16 @@ fn expand_handlers(input: Tokens) -> syn::Result<Tokens> {
     });
     let commands = paths.iter();
     Ok(quote! {
-        (
-            ::tauri::generate_handler![#(#commands),*],
-            {
-                const ENTRIES: &[crate::remoteapi::table::Entry] = &[#(#entries),*];
-                ENTRIES
-            },
-        )
+        {
+            const ENTRIES: &[crate::remoteapi::table::Entry] = &[#(#entries),*];
+            // Arms, not `let`s: Tauri's handler is a closure whose argument's type comes from where it is returned.
+            match () {
+                #[cfg(feature = "desktop")]
+                () => (::tauri::generate_handler![#(#commands),*], ENTRIES),
+                #[cfg(not(feature = "desktop"))]
+                () => ENTRIES,
+            }
+        }
     })
 }
 
@@ -343,14 +355,19 @@ mod tests {
     fn handlers_give_tauris_list_and_the_entries() {
         let got = expand_handlers(quote!(commands::set_ui, commands::quit_app,)).unwrap();
         let want = quote! {
-            (
-                ::tauri::generate_handler![commands::set_ui, commands::quit_app],
-                {
-                    const ENTRIES: &[crate::remoteapi::table::Entry] =
-                        &[commands::__REMOTE_SET_UI, commands::__REMOTE_QUIT_APP];
-                    ENTRIES
-                },
-            )
+            {
+                const ENTRIES: &[crate::remoteapi::table::Entry] =
+                    &[commands::__REMOTE_SET_UI, commands::__REMOTE_QUIT_APP];
+                match () {
+                    #[cfg(feature = "desktop")]
+                    () => (
+                        ::tauri::generate_handler![commands::set_ui, commands::quit_app],
+                        ENTRIES
+                    ),
+                    #[cfg(not(feature = "desktop"))]
+                    () => ENTRIES,
+                }
+            }
         };
         assert_eq!(got.to_string(), want.to_string());
     }
@@ -417,7 +434,7 @@ mod tests {
             #[doc = r" Doc."]
             #[cfg(target_os = "macos")]
             #[allow(clippy::too_many_arguments)]
-            #[::tauri::command(async)]
+            #[cfg_attr(feature = "desktop", ::tauri::command(async))]
             pub(crate) fn f(core: CoreState, agent_id: String) {}
             #[cfg(target_os = "macos")]
             #[doc(hidden)]
@@ -436,12 +453,104 @@ mod tests {
             ),
         );
         assert!(
-            awaited.starts_with("# [:: tauri :: command] async fn g"),
+            awaited.starts_with(
+                "# [cfg_attr (feature = \"desktop\" , :: tauri :: command)] async fn g"
+            ),
             "{awaited}"
         );
         assert!(
             awaited.contains("g (:: std :: convert :: From :: from (& ctx . core)) . await"),
             "{awaited}"
+        );
+    }
+
+    /// Whether an attribute is `#[cfg(feature = "desktop")]`.
+    fn is_desktop_cfg(attr: &syn::Attribute) -> bool {
+        attr.path().is_ident("cfg")
+            && attr.meta.require_list().unwrap().tokens.to_string() == "feature = \"desktop\""
+    }
+
+    /// What the crate compiles without `desktop`: false for an item under its `cfg`; its `cfg_attr` dropped.
+    fn without_desktop(attrs: &mut Vec<syn::Attribute>) -> bool {
+        let gone = attrs.iter().any(is_desktop_cfg);
+        attrs.retain(|a| {
+            !(a.path().is_ident("cfg_attr")
+                && a.meta
+                    .require_list()
+                    .unwrap()
+                    .tokens
+                    .to_string()
+                    .starts_with("feature = \"desktop\" ,"))
+        });
+        !gone
+    }
+
+    fn command_without_desktop(args: Tokens, item: Tokens) -> String {
+        let mut file: syn::File = syn::parse2(expand_command(args, item).unwrap()).unwrap();
+        file.items.retain_mut(|item| match item {
+            syn::Item::Fn(f) => without_desktop(&mut f.attrs),
+            syn::Item::Const(c) => without_desktop(&mut c.attrs),
+            _ => true,
+        });
+        quote!(#file).to_string()
+    }
+
+    #[test]
+    fn the_tauri_command_is_written_for_the_desktop_alone() {
+        let item = quote!(
+            /// Doc.
+            pub fn f(core: CoreState, n: u32) {}
+        );
+        let got = expand(quote!(), item.clone());
+        let want = quote! {
+            #[doc = r" Doc."]
+            #[cfg_attr(feature = "desktop", ::tauri::command)]
+            pub fn f(core: CoreState, n: u32) {}
+            #[doc(hidden)]
+            pub const __REMOTE_F: crate::remoteapi::table::Entry
+        };
+        assert!(got.starts_with(&want.to_string()), "{got}");
+        let off = command_without_desktop(quote!(), item);
+        assert!(!off.contains("tauri"), "{off}");
+        assert!(off.contains("pub fn f"), "{off}");
+        assert!(off.contains("Option :: Some"), "{off}");
+
+        // A desktop command keeps its Tauri parameters: without the feature, only its entry stays.
+        let desktop = quote!(
+            pub fn quit_app(app: tauri::AppHandle) {}
+        );
+        let got = expand(quote!(desktop), desktop.clone());
+        assert!(
+            got.starts_with(
+                &quote!(#[cfg(feature = "desktop")] #[::tauri::command] pub fn quit_app)
+                    .to_string()
+            ),
+            "{got}"
+        );
+        let off = command_without_desktop(quote!(desktop), desktop);
+        assert!(!off.contains("tauri"), "{off}");
+        assert!(!off.contains("fn quit_app"), "{off}");
+        assert!(off.contains("__REMOTE_QUIT_APP"), "{off}");
+        assert!(off.contains("Option :: None"), "{off}");
+    }
+
+    #[test]
+    fn the_handlers_give_the_entries_without_the_desktop() {
+        let got = expand_handlers(quote!(commands::set_ui, commands::quit_app)).unwrap();
+        let mut block: syn::Block = syn::parse2(quote!({ #got })).unwrap();
+        let syn::Stmt::Expr(syn::Expr::Block(inner), None) = &mut block.stmts[0] else {
+            panic!("{got}")
+        };
+        let Some(syn::Stmt::Expr(syn::Expr::Match(arms), None)) = inner.block.stmts.last_mut()
+        else {
+            panic!("{got}")
+        };
+        arms.arms.retain_mut(|arm| without_desktop(&mut arm.attrs));
+        let off = quote!(#block).to_string();
+        assert!(!off.contains("tauri"), "{off}");
+        assert!(
+            off.contains("& [commands :: __REMOTE_SET_UI , commands :: __REMOTE_QUIT_APP]"),
+            "{off}"
         );
     }
 
