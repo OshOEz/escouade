@@ -56,7 +56,7 @@ pub fn runtime() -> Result<()> {
                     .map_err(|e| format!("ONNX Runtime ({}): {e}", path.display()))?
                     .commit();
                 log::info!(
-                    "speech: ONNX Runtime loaded from {} in {:?}",
+                    "ONNX Runtime loaded from {} in {:?}",
                     path.display(),
                     started.elapsed()
                 );

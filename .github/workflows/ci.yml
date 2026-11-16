@@ -731,6 +731,7 @@ jobs:
   linux-headless:
     name: Linux (the core without a desktop)
     needs: escouade-js
+    # Unpinned, unlike linux-rust: no system package is installed here, so nothing ties this job to a release.
     runs-on: ubuntu-latest
     timeout-minutes: 45
     defaults:
@@ -760,22 +761,12 @@ jobs:
           workspaces: src-tauri
           shared-key: linux-headless
 
-      - uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
-        with:
-          tool: cargo-nextest
-
-      - name: Build without the desktop
-        run: cargo check --locked --no-default-features -p escouade
-
-      - name: Clippy without the desktop
-        run: cargo clippy --locked --no-default-features -p escouade --all-targets -- -D warnings
-
       # The runner has many libraries installed, so a build that passes proves little: the dependency tree is the guard.
       # Whole package names, on every target; the build dependencies too (a build script runs here, and a -sys crate
       # links its system library), not the dev-dependencies, which the tests may need.
       - name: No Tauri, GTK, WebKit, D-Bus or sound stack in the dependencies
         run: |
-          forbidden='^(tauri|tauri-[a-z0-9_-]+|wry|tao|muda|gtk|webkit2gtk|glib|dbus|libdbus-sys|cpal|alsa|alsa-sys|whisper-rs|whisper-rs-sys) v'
+          forbidden='^(tauri|tauri-[a-z0-9_-]+|wry|tao|muda|gtk|gdk|gio|glib|webkit2gtk|javascriptcore-rs|soup3|libappindicator|dbus|libdbus-sys|cpal|alsa|whisper-rs)(-sys)? v'
           tree=$(cargo tree --locked --no-default-features -p escouade -e normal,build --target all --prefix none)
           if printf '%s\n' "$tree" | grep -E "$forbidden"; then
             for p in $(printf '%s\n' "$tree" | grep -E "$forbidden" | awk '{ print $1 "@" substr($2, 2) }' | sort -u); do
@@ -784,6 +775,14 @@ jobs:
             done
             exit 1
           fi
+
+      - uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
+        with:
+          tool: cargo-nextest
+
+      - name: Clippy without the desktop
+        run: |
+          cargo clippy --locked --no-default-features -p escouade --all-targets -- -D warnings || { echo "::error::A core module uses the desktop: put it under feature \"desktop\" (docs/CRATES.md § 16)"; exit 1; }
 
       # What the tests play in the app's host (.config/nextest.toml).
       - name: The modules of the plugins, which the tests play
