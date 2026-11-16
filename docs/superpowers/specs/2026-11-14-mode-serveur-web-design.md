@@ -29,6 +29,8 @@ Sur le compte rendu `docs/superpowers/specs/2026-11-14-mode-serveur-lot0-compte-
 
 Après le lot 1 (2026-11-15) : le code est sur la branche `feat/coeur-sans-apphandle` du fork, en deux commits (`23028b0c`, `adfbb516`) ; la suite de tests avec Node donne le même résultat que l'amont, plus cinq tests neufs. Le demandeur a choisi de ne rien proposer à l'amont avant d'avoir essayé l'app de bureau sur une vraie machine, et de continuer par le lot 2 (`docs/superpowers/plans/2026-11-15-mode-serveur-lot2-api-distante.md`).
 
+Après le lot 2 (2026-11-16) : le code est sur la branche `feat/api-distante` du fork, en quatre commits (`03bc0ef1`, `052f1563`, `b295b20e`, `86a6c47d`) : les flux par un `Sink`, les 348 commandes déclarées une fois (302 distantes, 46 propres au bureau), et un serveur WebSocket sur `127.0.0.1` compilé en debug seulement. Le demandeur a demandé l'essai de l'app de bureau sur son Mac avant d'aller plus loin, puis la suite des lots à la file, sans validation de chaque plan : le lot 2b (`docs/superpowers/plans/2026-11-16-mode-serveur-lot2b-separation.md`, le cœur construit sans bureau, la recherche par le sens gardée, le job de CI), puis les lots 3, 4 et 5.
+
 Là où la suite de ce document dit encore « à confirmer par le demandeur » ou présente deux options sur ces points, c'est cette section qui vaut.
 
 ## Buts
