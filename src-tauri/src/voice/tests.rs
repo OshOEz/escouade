@@ -646,6 +646,7 @@ async fn the_service_tells_the_progress_and_deletes_a_model() {
 
 /// The real thing, when a model and a WAV of speech are given (`ESCOUADE_VOICE_TEST_MODEL`,
 /// `ESCOUADE_VOICE_TEST_WAV`, `ESCOUADE_VOICE_TEST_EXPECT`): run by hand, the CI has neither.
+#[cfg(feature = "voice")]
 #[test]
 fn whisper_transcribes_a_wav_of_speech_when_a_model_is_given() {
     let (Ok(model), Ok(wav)) = (

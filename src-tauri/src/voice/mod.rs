@@ -282,6 +282,7 @@ impl Voice {
     /// The app's: the microphone and whisper.cpp; in a debug build, `ESCOUADE_VOICE_WAV` plays a
     /// WAV file in place of the microphone, `ESCOUADE_VOICE_TRANSCRIPT` gives its text in place of
     /// Whisper, and `ESCOUADE_VOICE_MODELS_URL` is where the models come from (end-to-end tests).
+    #[cfg(feature = "voice")]
     pub fn for_app(data: PathBuf, emit: Emit) -> Self {
         escouade_voice_local::install_logging_hooks();
         let var = |k: &str| {

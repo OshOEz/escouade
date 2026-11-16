@@ -22,8 +22,42 @@ use serde::Serialize;
 use serde_json::Value;
 use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
-use tauri::ipc::{Channel, InvokeResponseBody};
-use tauri::State;
+
+#[cfg(feature = "desktop")]
+use desktop::*;
+
+/// What only the window's commands take: Tauri's arguments, the voice's state, the launches' pages.
+#[cfg(feature = "desktop")]
+mod desktop {
+    use crate::core::Core;
+    use crate::model::UiEvent;
+    use std::sync::Arc;
+    pub use tauri::ipc::{Channel, InvokeResponseBody};
+    pub use tauri::State;
+
+    pub type VoiceState<'a> = State<'a, Arc<crate::voice::Voice>>;
+
+    /// Whether an address is Escouade's own (`navigation::destination`), never loaded in a page.
+    pub fn own_of(app: &tauri::AppHandle) -> crate::devpage::Own {
+        use tauri::Manager;
+        let dev = app
+            .try_state::<crate::navigation::Home>()
+            .and_then(|h| h.dev.clone());
+        Arc::new(move |u: &tauri::Url| {
+            crate::navigation::destination(u, dev.as_ref()) == crate::navigation::Destination::App
+        })
+    }
+
+    /// What happens to the pages, to the window.
+    pub fn tell_of(core: &Arc<Core>) -> crate::devpage::Tell {
+        let hub = Arc::downgrade(core);
+        Arc::new(move |page| {
+            if let Some(core) = hub.upgrade() {
+                core.hub.emit(UiEvent::DevPage { page });
+            }
+        })
+    }
+}
 
 type Res<T> = Result<T, String>;
 
@@ -3859,8 +3893,6 @@ pub fn mcp_manual_command(core: CoreState, account: String) -> Res<String> {
 // ---------------------------------------------------------------------------------------------
 // Dictation (`voice`).
 
-type VoiceState<'a> = State<'a, Arc<crate::voice::Voice>>;
-
 /// What Réglages › Voix lists: the microphones and the models (which are downloaded).
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -4804,27 +4836,6 @@ pub fn deep_links_take(inbox: State<'_, crate::deeplink::Inbox>) -> Vec<crate::d
 }
 
 // ---------- The launches' pages (ESC-311) ----------
-
-/// Whether an address is Escouade's own (`navigation::destination`), never loaded in a page.
-fn own_of(app: &tauri::AppHandle) -> crate::devpage::Own {
-    use tauri::Manager;
-    let dev = app
-        .try_state::<crate::navigation::Home>()
-        .and_then(|h| h.dev.clone());
-    Arc::new(move |u: &tauri::Url| {
-        crate::navigation::destination(u, dev.as_ref()) == crate::navigation::Destination::App
-    })
-}
-
-/// What happens to the pages, to the window.
-fn tell_of(core: &Arc<Core>) -> crate::devpage::Tell {
-    let hub = Arc::downgrade(core);
-    Arc::new(move |page| {
-        if let Some(core) = hub.upgrade() {
-            core.hub.emit(UiEvent::DevPage { page });
-        }
-    })
-}
 
 /// Opens the page of agent `agent_id`'s launch at `url` (or loads it in the page already open):
 /// in the agent's view at `bounds`, or in its project's « Pages » window (`detached`).

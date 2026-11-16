@@ -1107,7 +1107,7 @@ mod tests {
         assert_eq!((calls.get(), e.to_string()), (1, "refused".to_string()));
     }
 
-    #[cfg(unix)]
+    #[cfg(all(unix, feature = "desktop"))]
     #[test]
     fn a_broken_link_of_the_tree_has_its_folder_opened() {
         let root = test_dir("fsedit-reveal-broken-link");

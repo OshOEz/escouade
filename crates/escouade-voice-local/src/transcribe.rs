@@ -26,11 +26,13 @@ pub trait Transcriber: Send + Sync {
 }
 
 /// whisper.cpp, its model kept loaded from one dictation to the next.
+#[cfg(feature = "native")]
 #[derive(Default)]
 pub struct Whisper {
     loaded: Mutex<Option<(PathBuf, Arc<whisper_rs::WhisperContext>)>>,
 }
 
+#[cfg(feature = "native")]
 impl Whisper {
     fn context(&self, model: &Path) -> Result<Arc<whisper_rs::WhisperContext>> {
         let mut loaded = self.loaded.lock();
@@ -106,6 +108,7 @@ pub fn clean(segments: &[String]) -> String {
 /// The encoder's window, in its frames (50 a second), for `samples` of sound: as long as them and a second more,
 /// rather than the 30 s it is trained on, which it pads a short sentence to and encodes the whole of (ESC-135: a
 /// sentence 4 to 6 times faster, its text the same in the bench). 0, whisper's own 30 s, from 29 s of sound on.
+#[cfg(feature = "native")]
 fn audio_ctx(samples: usize) -> i32 {
     let frames = samples.div_ceil(16_000 / 50) + 50;
     if frames >= 1500 {
@@ -116,6 +119,7 @@ fn audio_ctx(samples: usize) -> i32 {
 }
 
 /// The threads whisper.cpp computes on.
+#[cfg(feature = "native")]
 fn threads() -> usize {
     std::thread::available_parallelism()
         .map(|n| n.get())
@@ -123,6 +127,7 @@ fn threads() -> usize {
         .clamp(1, 8)
 }
 
+#[cfg(feature = "native")]
 impl Transcriber for Whisper {
     fn transcribe(
         &self,

@@ -498,6 +498,7 @@ async fn a_file_is_joined_by_the_id_of_a_path_the_host_read_and_by_nothing_else(
     assert!(h.core.attach_origin(&id, "d").is_err());
 }
 
+#[cfg(feature = "desktop")]
 #[tokio::test]
 async fn the_core_takes_its_paths_from_the_table_the_app_manages_and_the_command_fills_it() {
     use crate::commands::file_origin;
@@ -509,7 +510,7 @@ async fn the_core_takes_its_paths_from_the_table_the_app_manages_and_the_command
     let dir = test_dir("af-origin-command");
     let path = write(&dir.join("docs").join("rapport.xlsx"), b"12345");
     let (core, _rx) = Core::load(
-        std::sync::Arc::new(crate::host::Desktop(app.handle().clone())),
+        std::sync::Arc::new(crate::app::Desktop(app.handle().clone())),
         crate::paths::DataDir::new(dir.join("data")),
     );
     // What the host's listener read: not yet asked for, so not a path to join a file by.

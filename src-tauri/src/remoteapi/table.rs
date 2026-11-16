@@ -335,6 +335,24 @@ mod tests {
         assert!(names.contains(&"subscribe") && names.contains(&"file_origin"));
     }
 
+    /// The same table with the window or without it: a command of the desktop alone keeps its entry, without a call.
+    #[test]
+    fn the_table_is_the_same_with_and_without_the_desktop() {
+        let table = entries();
+        assert_eq!(table.len(), 384);
+        assert_eq!(table.iter().filter(|e| e.call.is_some()).count(), 337);
+        let called = |name: &str| {
+            table
+                .iter()
+                .find(|e| e.name == name)
+                .map(|e| e.call.is_some())
+        };
+        assert_eq!(called("file_origin"), Some(false));
+        assert_eq!(called("voice_start"), Some(false));
+        assert_eq!(called("open_url"), Some(true));
+        assert_eq!(called("play_chime"), Some(true));
+    }
+
     #[test]
     fn the_commands_of_the_desktop_alone_are_these() {
         let mut want = vec![

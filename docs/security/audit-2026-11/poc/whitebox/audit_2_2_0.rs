@@ -935,6 +935,7 @@ fn taken_from_a_seed(json: &[u8], expected: &str, id: &str, version: &str) -> St
 // ---- The readers of what third parties write: generated inputs ---------------------------------------------------
 
 /// The link `escouade://`: whatever it holds, it opens a plugin's page by a well-formed id, or nothing.
+#[cfg(feature = "desktop")]
 #[test]
 #[ignore = "audit 2026-11"]
 fn fuzz_the_deep_link_gives_a_plugin_id_or_nothing() {

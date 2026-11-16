@@ -3,7 +3,7 @@
 //   - `data-theme` on the root gives the tokens of src/app.css their values, and `color-scheme` (scroll bars, native
 //     fields and menus) follows;
 //   - the window's own theme (the native title bar of macOS, the corners and shadow of Windows 11, what shows before the
-//     page): the backend sets it before the window shows (lib.rs), this as it changes;
+//     page): the backend sets it before the window shows (app.rs), this as it changes;
 //   - the choice is kept in the page's storage as well, read before the first render (`earlyAppearance`, main.ts): the
 //     settings come from the backend a moment later, and a light app never flashes dark.
 

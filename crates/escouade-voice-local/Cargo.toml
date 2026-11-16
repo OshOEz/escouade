@@ -11,6 +11,11 @@ workspace = "../../src-tauri"
 # A part of the app, cut out of its crate for it to compile faster (docs/CRATES.md): never published.
 publish = false
 
+[features]
+default = ["native"]
+# The native code: cpal (ALSA under Linux) and whisper.cpp (libclang, cmake); the app's headless build leaves it out.
+native = ["dep:cpal", "dep:whisper-rs"]
+
 [dependencies]
 # The texts of the errors, in the app's two languages (`tr_in!`, `Lang`), and those of a service on line.
 escouade-plugin-cli = { path = "../escouade-plugin-cli" }
@@ -26,8 +31,8 @@ serde_json = "1"
 sha2 = "0.11"
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "rustls-tls-native-roots", "json"] }
 # The microphone through cpal (WASAPI, CoreAudio, ALSA), transcribed by whisper.cpp (whisper-rs builds it, with cmake).
-cpal = "0.18"
-whisper-rs = { version = "0.16", features = ["log_backend"] }
+cpal = { version = "0.18", optional = true }
+whisper-rs = { version = "0.16", features = ["log_backend"], optional = true }
 # A WAV file as the sound source: the end-to-end tests, which have no microphone.
 hound = "3.5"
 # Piper's voices: the text becomes phonemes through eSpeak NG (its port to Rust, the data of French and English built
@@ -41,4 +46,4 @@ dirs = "7"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 # Dictation on the GPU (Metal), whisper.cpp's shaders built into the binary.
-whisper-rs = { version = "0.16", features = ["log_backend", "metal"] }
+whisper-rs = { version = "0.16", features = ["log_backend", "metal"], optional = true }

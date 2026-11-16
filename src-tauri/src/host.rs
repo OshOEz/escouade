@@ -1,13 +1,10 @@
 //! The app the core runs in: what the core asks of it, and the desktop app's answers.
 
 use crate::fileorigins::FileOrigins;
-use crate::i18n::{self, Lang};
+use crate::i18n::Lang;
 use crate::integrations::secrets::SecretStore;
 use crate::model::Settings;
-use crate::{menus, notify};
 use std::path::PathBuf;
-use std::sync::Arc;
-use tauri::{AppHandle, Manager, Runtime};
 
 /// What the core asks of the app it runs in: the desktop app answers with Tauri, a server without.
 pub trait Host: Send + Sync + 'static {
@@ -36,87 +33,13 @@ pub trait Host: Send + Sync + 'static {
     fn tune_conversation(&self, settings: &Settings, secrets: &dyn SecretStore);
 }
 
-pub struct Desktop<R: Runtime>(pub AppHandle<R>);
-
-impl<R: Runtime> Host for Desktop<R> {
-    fn version(&self) -> String {
-        self.0.package_info().version.to_string()
-    }
-
-    fn seed_dir(&self) -> Option<PathBuf> {
-        self.0.path().resource_dir().ok().map(|d| d.join("seed"))
-    }
-
-    /// The table the window's listener fills, when the app made it (it does, before the core).
-    fn file_origins(&self) -> FileOrigins {
-        self.0
-            .try_state::<FileOrigins>()
-            .map(|s| s.inner().clone())
-            .unwrap_or_default()
-    }
-
-    fn webview_version(&self) -> Option<String> {
-        tauri::webview_version().ok()
-    }
-
-    fn window_attended(&self) -> bool {
-        notify::window_attended(&self.0)
-    }
-
-    fn attention(&self) {
-        notify::flash(&self.0);
-    }
-
-    fn chime(&self) {
-        notify::play_chime();
-    }
-
-    fn toast(&self, title: &str, body: &str, on_click: Box<dyn Fn() + Send + Sync>) {
-        let app = self.0.clone();
-        notify::toast(&self.0, title, body, move || {
-            notify::show_main(&app);
-            on_click();
-        });
-    }
-
-    fn waiting(&self, n: usize) {
-        if let Some(tray) = self.0.tray_by_id(menus::TRAY_ID) {
-            let _ = tray.set_icon(notify::tray_icon(&self.0, n));
-            let _ = tray.set_tooltip(Some(menus::tray_tooltip(i18n::ui(), n)));
-        }
-    }
-
-    fn relabel(&self, lang: Lang, waiting: usize) {
-        menus::relabel(&self.0, lang, waiting);
-    }
-
-    fn stop_voice(&self) {
-        if let Some(v) = self.0.try_state::<Arc<crate::voice::Voice>>() {
-            v.shutdown();
-        }
-    }
-
-    fn cancel_dictation(&self) {
-        // No voice managed: no dictation to cancel.
-        if let Some(v) = self.0.try_state::<Arc<crate::voice::Voice>>() {
-            v.cancel();
-        }
-    }
-
-    fn tune_conversation(&self, settings: &Settings, secrets: &dyn SecretStore) {
-        // No voice managed: no conversation to tune.
-        if let Some(v) = self.0.try_state::<Arc<crate::voice::Voice>>() {
-            v.conversation_tune(&crate::commands::conv_choice(settings, secrets, &v.catalog).0);
-        }
-    }
-}
-
 #[cfg(test)]
 pub use fake::Fake;
 
 #[cfg(test)]
 mod fake {
     use super::*;
+    use std::sync::Arc;
 
     /// A host without a window, tray or seed, that keeps what it was asked.
     #[derive(Default)]
