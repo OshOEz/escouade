@@ -232,7 +232,7 @@ pub struct System {
 
 impl System {
     /// This one, as the SDK reads it.
-    pub fn current(app_version: String) -> Self {
+    pub fn current(app_version: String, engine_version: Option<String>) -> Self {
         let info = os_info::get();
         let os_name = match info.os_type() {
             os_info::Type::Macos => "macOS".to_string(),
@@ -258,7 +258,7 @@ impl System {
                 "WebKitGTK"
             }
             .to_string(),
-            engine_version: tauri::webview_version().unwrap_or_default(),
+            engine_version: engine_version.unwrap_or_default(),
         }
     }
 
@@ -318,6 +318,8 @@ struct Batch {
 pub struct Telemetry {
     id_file: PathBuf,
     app_version: String,
+    /// Asked the webview's version at the first event, with the rest of `system`.
+    host: Arc<dyn crate::host::Host>,
     /// Read at the first event (`os_info` may run a program): never while the user said no.
     system: OnceLock<System>,
     /// False in a sandbox (`ESCOUADE_DATA_DIR`: the e2e tests, the demos): nothing is ever sent.
@@ -333,10 +335,12 @@ impl Telemetry {
         app_version: String,
         consent: Option<bool>,
         allowed: bool,
+        host: Arc<dyn crate::host::Host>,
     ) -> Self {
         let t = Self {
             id_file,
             app_version,
+            host,
             system: OnceLock::new(),
             allowed,
             endpoint: ENDPOINT.into(),
@@ -480,7 +484,7 @@ impl Telemetry {
 
     fn system(&self) -> &System {
         self.system
-            .get_or_init(|| System::current(self.app_version.clone()))
+            .get_or_init(|| System::current(self.app_version.clone(), self.host.webview_version()))
     }
 
     /// What is waiting to leave.
@@ -598,7 +602,13 @@ mod tests {
 
     impl Telemetry {
         fn with(id_file: PathBuf, system: System, consent: Option<bool>, allowed: bool) -> Self {
-            let t = Telemetry::new(id_file, system.app_version.clone(), consent, allowed);
+            let t = Telemetry::new(
+                id_file,
+                system.app_version.clone(),
+                consent,
+                allowed,
+                crate::host::Fake::new(),
+            );
             let _ = t.system.set(system);
             t
         }
@@ -668,6 +678,28 @@ mod tests {
             json!({ "installId": id.trim(), "worktree": "yes" })
         );
         assert!(SDK.len() <= 40);
+    }
+
+    /// The webview's version is the host's word; a host that has none gives an empty one.
+    #[test]
+    fn the_telemetry_takes_the_webviews_version_from_its_host() {
+        let d = dir("webview");
+        for (given, told) in [(Some("2.46.3"), "2.46.3"), (None, "")] {
+            let host = Arc::new(crate::host::Fake {
+                webview: given.map(String::from),
+                ..Default::default()
+            });
+            let t = Telemetry::new(
+                d.join("telemetry-id"),
+                "1.8.0".into(),
+                Some(true),
+                true,
+                host,
+            );
+            t.track(Event::MessageSent);
+            let e = &t.take_batch().events[0];
+            assert_eq!(e["systemProps"]["engineVersion"], told);
+        }
     }
 
     #[test]

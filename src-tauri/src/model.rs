@@ -131,6 +131,25 @@ pub enum SignInProblem {
     Expired,
 }
 
+/// What the page showed when its process ended (`pagecrash`), told to the page that follows.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PageCrash {
+    pub project_id: Option<String>,
+    pub agent_id: Option<String>,
+}
+
+/// What happened to a page (`devpage`), for the window (`UiEvent::DevPage`) and the « Pages » windows.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PageEvent {
+    pub agent_id: String,
+    /// `started` and `finished` (a load, at `url`), `outside` (`url` opened in the system's
+    /// browser), `refused` (`url` opened nowhere), `devtools`, `attached`, `detached`, `closed`.
+    pub phase: &'static str,
+    pub url: String,
+}
+
 // Serialized and sent right away: the size gap between variants does not matter.
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, Serialize)]
@@ -284,7 +303,7 @@ pub enum UiEvent {
     },
     /// What happened to a launch's page (ESC-311): a load, a link opened outside, its devtools.
     DevPage {
-        page: crate::devpage::PageEvent,
+        page: PageEvent,
     },
     /// An address to open in the default browser (a pull request to finish on GitHub).
     OpenUrl {

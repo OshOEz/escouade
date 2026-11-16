@@ -98,6 +98,7 @@ mod fence_tests;
 mod fileorigin;
 #[cfg(test)]
 mod fileorigin_tests;
+mod fileorigins;
 #[cfg(test)]
 mod first_message_tests;
 #[cfg(test)]
