@@ -5,7 +5,7 @@
 pub use escouade_model::model::*;
 
 use crate::resources::Resources;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
 /// The voice a conversation reads in, from the voices shipped with the app (`voice::speech::catalog`).
@@ -137,6 +137,14 @@ pub enum SignInProblem {
 pub struct PageCrash {
     pub project_id: Option<String>,
     pub agent_id: Option<String>,
+}
+
+/// The update the app stopped to install, told to the window of its next start.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct Installed {
+    pub version: String,
+    pub notes: String,
 }
 
 /// What happened to a page (`devpage`), for the window (`UiEvent::DevPage`) and the « Pages » windows.

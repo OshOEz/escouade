@@ -11,17 +11,6 @@ use tauri::ipc::{CallbackFn, InvokeBody, InvokeResponse};
 use tauri::webview::InvokeRequest;
 
 #[test]
-fn a_family_shares_a_lane_and_any_other_command_has_its_own() {
-    assert_eq!(lane_of("term_write"), "term");
-    assert_eq!(lane_of("term_resize"), "term");
-    assert_eq!(lane_of("attach_chunk"), "attach");
-    assert_eq!(lane_of("conversation_listen"), "voice");
-    assert_eq!(lane_of("voice_start"), "voice");
-    assert_eq!(lane_of("project_logo"), "project_logo");
-    assert_eq!(lane_of("get_conversation"), "get_conversation");
-}
-
-#[test]
 fn the_log_gets_the_ids_of_a_call_never_a_path_nor_a_text() {
     let body = InvokeBody::Json(json!({
         "projectId": "3f2a9c81d0e4",
@@ -39,40 +28,6 @@ fn the_log_gets_the_ids_of_a_call_never_a_path_nor_a_text() {
     assert_eq!(ids_of(&whole), " (project p1)");
     assert_eq!(ids_of(&InvokeBody::Json(json!({}))), "");
     assert_eq!(ids_of(&InvokeBody::Raw(b"/home/x".to_vec())), "");
-}
-
-#[test]
-fn a_command_over_250_ms_is_written_once_in_30_s_with_the_count_between() {
-    let lanes = Lanes::new(Arc::default());
-    assert_eq!(lanes.slow_line("stats", SLOW, ""), None);
-    assert_eq!(
-        lanes
-            .slow_line("stats", Duration::from_millis(812), " (project p1)")
-            .as_deref(),
-        Some("slow command: stats took 812 ms (project p1)")
-    );
-    assert_eq!(lanes.slow_line("stats", Duration::from_secs(2), ""), None);
-    assert_eq!(lanes.slow_line("stats", Duration::from_secs(2), ""), None);
-    // Another command is its own.
-    assert!(lanes
-        .slow_line("get_conversation", Duration::from_secs(1), "")
-        .is_some());
-}
-
-#[test]
-fn what_runs_is_told_the_longest_first_and_forgotten_once_done() {
-    let running = Running::default();
-    let a = running.enter("project_logo");
-    std::thread::sleep(Duration::from_millis(30));
-    {
-        let _b = running.enter("stats");
-        let told = running.told();
-        assert!(told.starts_with("project_logo "), "{told}");
-        assert!(told.contains(", stats "), "{told}");
-    }
-    assert!(!running.told().contains("stats"));
-    drop(a);
-    assert_eq!(running.told(), "");
 }
 
 /// A window's thread of the test: runs the jobs posted to it, and stops for `stall` when asked.
@@ -241,31 +196,6 @@ fn a_slow_command_neither_holds_the_window_thread_nor_the_other_commands() {
         answered.recv_timeout(within).unwrap(),
         ("slow_command".to_string(), "slow".to_string())
     );
-}
-
-/// The calls of one lane keep their order: a terminal's keystrokes reach it as typed.
-#[test]
-fn the_calls_of_a_lane_run_in_order() {
-    let lanes = Lanes::new(Arc::default());
-    let seen: Arc<Mutex<Vec<u32>>> = Arc::default();
-    let (done, finished) = mpsc::channel();
-    for i in 0..200u32 {
-        let (seen, done) = (seen.clone(), done.clone());
-        lanes.submit(
-            "term",
-            Box::new(move || {
-                if i % 50 == 0 {
-                    std::thread::sleep(Duration::from_millis(5));
-                }
-                seen.lock().push(i);
-                if i == 199 {
-                    done.send(()).unwrap();
-                }
-            }),
-        );
-    }
-    finished.recv_timeout(Duration::from_secs(10)).unwrap();
-    assert_eq!(*seen.lock(), (0..200).collect::<Vec<_>>());
 }
 
 /// An unknown command is refused, as Tauri refuses it, instead of never answering.

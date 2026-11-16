@@ -87,3 +87,7 @@ impl FileOrigins {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "fileorigins_tests.rs"]
+mod tests;

@@ -244,11 +244,11 @@ impl AgentRt {
                 }
             }
             "PermissionRequest" => {
-                let body = notify::permission_body(tool, &h["tool_input"], &self.meta.cwd);
+                let body = alerts::permission_body(tool, &h["tool_input"], &self.meta.cwd);
                 self.tui_wait(body, fx);
             }
             "PreToolUse" if tool == "AskUserQuestion" => {
-                let body = notify::question_body(
+                let body = alerts::question_body(
                     crate::engine::of(&self.meta).speaker(),
                     &h["tool_input"],
                 );

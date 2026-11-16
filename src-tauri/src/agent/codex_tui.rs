@@ -57,7 +57,7 @@ impl AgentRt {
             }
             "PermissionRequest" => {
                 let tool = h["tool_name"].as_str().unwrap_or_default();
-                let body = notify::permission_body(tool, &h["tool_input"], &self.meta.cwd);
+                let body = alerts::permission_body(tool, &h["tool_input"], &self.meta.cwd);
                 self.tui_wait(body, fx);
             }
             "PostToolUse" => {

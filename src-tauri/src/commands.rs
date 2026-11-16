@@ -142,7 +142,7 @@ pub struct InitialState {
     /// The external ticket systems' accounts, as the window knows them.
     accounts: Vec<AccountView>,
     /// The update installed since the app's last start, told once (« Voir les nouveautés »).
-    installed: Option<crate::updates::Installed>,
+    installed: Option<crate::model::Installed>,
     /// The automatic restart planned for an update: when it comes.
     restart_at: Option<i64>,
     /// A version that did not install at the last try (the window offers to try again).
@@ -1789,6 +1789,23 @@ pub fn attach_origin(core: CoreState, owner: String, id: String) -> Res<Attached
     core.attach_origin(&owner, &id).map_err(err)
 }
 
+/// The path of the file on the disk that the page sent as `id`, as the host read it (`fileorigin`): nothing
+/// where the system gives none, or if it did not arrive in time. What it answers is kept for
+/// `attach_origin`, which takes the id (`take_handed`) and never a path the page makes up.
+#[command(desktop)]
+pub async fn file_origin<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    id: String,
+) -> Option<String> {
+    use crate::fileorigin::{valid_id, FileOrigins, WAIT};
+    use tauri::Manager;
+    if !cfg!(windows) || !valid_id(&id) {
+        return None;
+    }
+    let origins = app.try_state::<FileOrigins>()?.inner().clone();
+    origins.wait(&id, WAIT).await
+}
+
 /// The image on the system's clipboard, as PNG (empty without one), for a paste WebKitGTK leaves
 /// without it.
 #[command(desktop)]
@@ -3115,8 +3132,8 @@ pub fn term_report(core: CoreState, id: String, report: TermReport) {
 }
 
 #[command]
-pub fn play_chime() {
-    crate::notify::play_chime();
+pub fn play_chime(core: CoreState) {
+    core.host.chime();
 }
 
 /// « Quitter »: with an update downloaded, it installs silently and the app stays closed.

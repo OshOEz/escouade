@@ -338,7 +338,7 @@ impl AgentRt {
                 let req = json!({ "description": description, "decision_reason": reason });
                 fx.notify = Some(AgentAlert::new(
                     NotifyKind::Question,
-                    notify::permission_body(&tool, &input, &self.meta.cwd),
+                    alerts::permission_body(&tool, &input, &self.meta.cwd),
                 ));
                 self.ask_with(&request, &call, tool, input, &req, item, fx);
             }
@@ -361,7 +361,7 @@ impl AgentRt {
                 let input = json!({ "questions": questions });
                 fx.notify = Some(AgentAlert::new(
                     NotifyKind::Question,
-                    notify::question_body(crate::engine::of(&self.meta).speaker(), &input),
+                    alerts::question_body(crate::engine::of(&self.meta).speaker(), &input),
                 ));
                 self.ask(&request, &call, "AskUserQuestion".into(), input, item, fx);
             }
@@ -401,7 +401,7 @@ impl AgentRt {
                 let req = json!({ "description": description, "decision_reason": reason });
                 fx.notify = Some(AgentAlert::new(
                     NotifyKind::Question,
-                    notify::permission_body(&tool, &input, &self.meta.cwd),
+                    alerts::permission_body(&tool, &input, &self.meta.cwd),
                 ));
                 self.ask_with(&request, &call, tool, input, &req, item, fx);
             }
@@ -455,7 +455,7 @@ impl AgentRt {
                 self.set_status(AgentStatus::Waiting, fx);
                 fx.notify = Some(AgentAlert::new(
                     NotifyKind::Question,
-                    notify::question_body(crate::engine::of(&self.meta).speaker(), &input),
+                    alerts::question_body(crate::engine::of(&self.meta).speaker(), &input),
                 ));
                 fx.agent_changed = true;
             }
@@ -676,9 +676,9 @@ impl AgentRt {
                 if !interrupted && !had_queue && limited.is_none() {
                     fx.notify = Some(match &error {
                         Some(reason) => {
-                            AgentAlert::new(NotifyKind::Error, notify::error_body(reason))
+                            AgentAlert::new(NotifyKind::Error, alerts::error_body(reason))
                         }
-                        None => AgentAlert::new(NotifyKind::Done, notify::done_body(&reply)),
+                        None => AgentAlert::new(NotifyKind::Done, alerts::done_body(&reply)),
                     });
                 }
                 fx.agent_changed = true;

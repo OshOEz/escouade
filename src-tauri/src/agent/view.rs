@@ -286,11 +286,11 @@ impl AgentRt {
             Item::Wrote => self.unwritten_session = None,
             Item::Waits { body } => self.tui_wait(body, fx),
             Item::WaitsOn { tool, input } => {
-                let body = notify::permission_body(&tool, &input, &self.meta.cwd);
+                let body = alerts::permission_body(&tool, &input, &self.meta.cwd);
                 self.tui_wait(body, fx);
             }
             Item::Asks { tool, input } => {
-                self.tui_asked = Some(notify::permission_body(&tool, &input, &self.meta.cwd));
+                self.tui_asked = Some(alerts::permission_body(&tool, &input, &self.meta.cwd));
             }
             Item::Runs => {
                 if !self.meta.status.is_active() {
