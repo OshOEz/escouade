@@ -356,7 +356,7 @@ Demandé le 2026-11-14 : « avoir plusieurs serveurs Escouade pilotés par un se
 
 **Fondation**
 - [ ] Essais : le cœur sans fenêtre sous Linux sans affichage ; `ssh -L` lancé par l'app sur les trois systèmes.
-- [ ] Le cœur sans Tauri : le trait `Host` à la place de l'`AppHandle` ; un verrou par fichier à la place de `single-instance` hors bureau.
+- [ ] Le cœur sans Tauri : le trait `Host` à la place de l'`AppHandle` ; un verrou par fichier à la place de `single-instance` hors bureau. Faits : le trait `Host` ; le cœur se construit et se teste sans Tauri, GTK ni WebKit (`--no-default-features`, docs/CRATES.md § 16), ce que la CI garde ; reste le verrou par fichier.
 - [ ] L'API distante : une seule liste des commandes (macro) pour l'IPC et la WebSocket ; les flux binaires des terminaux multiplexés ; la poignée de main des versions. Faits : la liste unique et les flux, servis sur 127.0.0.1 avec un jeton, éteints sans `ESCOUADE_REMOTE_PORT` et `ESCOUADE_REMOTE_TOKEN`, que seul un build de debug lit, pour les tests ; le jeton est une valeur de l'environnement, pas encore le jeton d'appareil révocable un par un du point 6 ; le `Host` doit nommer le port du serveur, si bien qu'un `ssh -L` sur un autre port local est refusé pour l'instant, et toute `Origin` l'est aussi, si bien qu'aucun navigateur ne s'y connecte encore ; le serveur annonce sa version et le numéro de son protocole, reste à refuser un écart de version.
 - [ ] `hub.rs` à plusieurs abonnés ; `UiState` par client ; une réponse fermée chez les autres clients.
 - [ ] Un tampon de sortie pour chaque terminal et chaque lancement ; la reprise d'un client après une coupure.
