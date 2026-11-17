@@ -167,6 +167,7 @@ impl Core {
             project_id: String::new(),
             name,
             shell: "opencode".into(),
+            launch: false,
         };
         // Its arguments hold no secret: they go to the log as they are.
         log::info!(

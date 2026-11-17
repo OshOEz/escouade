@@ -404,6 +404,175 @@ fn a_client_that_comes_back_finds_its_terminals_screen() {
     });
 }
 
+/// The numbers of the lines `line-N` in `s`, in the order they come.
+fn lines_numbered(s: &str) -> Vec<u32> {
+    s.split("line-")
+        .skip(1)
+        .filter_map(|p| {
+            let digits: String = p.chars().take_while(char::is_ascii_digit).collect();
+            digits.parse().ok()
+        })
+        .collect()
+}
+
+#[test]
+fn a_client_resumes_after_a_cut() {
+    const LINES: u32 = 300;
+    let loaded = load("remote-server-resume");
+    let running = serve(&loaded);
+    // The window, subscribed all along: every event once, in order.
+    let window = Arc::new(Mutex::new(Vec::new()));
+    let to = window.clone();
+    let sink = Sink::new(move |e: UiEvent| {
+        to.lock().push(serde_json::to_value(&e).unwrap());
+        Ok(())
+    });
+    commands::subscribe_to(&loaded.core, sink, Subscriber::Window);
+    // Events all along, numbered.
+    let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let ticker = {
+        let (core, stop) = (loaded.core.clone(), stop.clone());
+        std::thread::spawn(move || {
+            let mut n = 0u64;
+            while !stop.load(SeqCst) {
+                n += 1;
+                core.hub
+                    .emit(UiEvent::VectorsDownload { done: n, total: 0 });
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            n
+        })
+    };
+    rt::block_on(async {
+        let (project, shell) = project(&loaded).await;
+        let mut first = connect(running.addr).await;
+        call(&mut first, 1, "subscribe", json!({})).await;
+        let a = spawn(&mut first, 2, &project, &shell, 1).await;
+        let b = spawn(&mut first, 3, &project, &shell, 2).await;
+        // Lines written for a few seconds, through the cut.
+        let script = format!(
+            "i=0; while [ $i -lt {LINES} ]; do i=$((i+1)); echo line-$i; sleep 0.01; done\n"
+        );
+        write(&mut first, 4, &a, &script).await;
+        write(&mut first, 5, &b, &script).await;
+        let seen = |ws: &Ws, n: u32| {
+            lines_numbered(&String::from_utf8_lossy(
+                ws.bytes.get(&n).map_or(&[][..], |b| b),
+            ))
+        };
+        while seen(&first, 1).len() < 20 || seen(&first, 2).len() < 20 {
+            next(&mut first).await;
+        }
+        let before = [seen(&first, 1), seen(&first, 2)];
+        // Cut: the socket dropped, no closing frame sent.
+        drop(first);
+        tokio::time::sleep(Duration::from_millis(500)).await;
+        // Back: the state, its terminals, their screens.
+        let mut again = connect(running.addr).await;
+        let state = call(&mut again, 1, "subscribe", json!({})).await;
+        let terminals = state["ok"]["terminals"].as_array().unwrap().clone();
+        for term in [&a, &b] {
+            let found = terminals.iter().find(|t| t["id"] == term.as_str());
+            let found = found.unwrap_or_else(|| panic!("{term} not in {terminals:?}"));
+            assert_eq!(found["launch"], false);
+        }
+        for (n, term) in [(1u32, &a), (2, &b)] {
+            send(
+                &mut again,
+                10 + u64::from(n),
+                "term_attach",
+                json!({ "id": term }),
+                Some(n),
+            )
+            .await;
+            assert!(answer(&mut again, 10 + u64::from(n))
+                .await
+                .get("ok")
+                .is_some());
+        }
+        while seen(&again, 1).last() != Some(&LINES) || seen(&again, 2).last() != Some(&LINES) {
+            next(&mut again).await;
+        }
+        for (n, before) in [(1u32, &before[0]), (2, &before[1])] {
+            let after = seen(&again, n);
+            // From what the ring kept to the last line: none missing, none twice.
+            let from = after[0];
+            assert_eq!(after, (from..=LINES).collect::<Vec<_>>());
+            // It joins what the first connection saw: no line lost in the cut.
+            assert!(
+                from <= before.last().unwrap() + 1,
+                "{from} after {before:?}"
+            );
+        }
+    });
+    stop.store(true, SeqCst);
+    let last = ticker.join().unwrap();
+    let got: Vec<u64> = window
+        .lock()
+        .iter()
+        .filter(|e| e["type"] == "vectorsDownload")
+        .map(|e| e["done"].as_u64().unwrap())
+        .collect();
+    assert_eq!(got, (1..=last).collect::<Vec<_>>());
+}
+
+#[test]
+fn an_answer_given_by_one_client_is_seen_by_the_other() {
+    // The core's own harness: an agent whose fake `claude` asks a permission.
+    let h = crate::core_tests::harness("remote-server-answer-once");
+    let loaded = Loaded {
+        core: h.core.clone(),
+        dir: h.dir.clone(),
+    };
+    let running = serve(&loaded);
+    rt::block_on(async {
+        let (p, _) = h.project(false).await;
+        let id = h.core.create_agent(&p.id, None).await.unwrap().meta.id;
+        let mut one = connect(running.addr).await;
+        let mut other = connect(running.addr).await;
+        call(&mut one, 1, "subscribe", json!({})).await;
+        call(&mut other, 1, "subscribe", json!({})).await;
+        h.core
+            .send_message(&id, "permission".into(), vec![])
+            .await
+            .unwrap();
+        h.wait("the permission asked", |h| {
+            h.items(&id).iter().any(|i| i["kind"] == "permission")
+        })
+        .await;
+        let request = h
+            .items(&id)
+            .into_iter()
+            .find(|i| i["kind"] == "permission")
+            .unwrap()["id"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let args = json!({ "id": id, "requestId": request, "decision": "allow" });
+        let a = call(&mut one, 2, "answer_permission", args.clone()).await;
+        assert!(a.get("ok").is_some(), "{a}");
+        // The other client sees it closed: its agent waits for nothing more.
+        loop {
+            let v = text(&mut other).await;
+            let agent = &v["event"]["agent"];
+            if v["event"]["type"] == "agent" && agent["id"] == id.as_str() {
+                let pending = agent["pending"].as_array().unwrap();
+                if !pending.iter().any(|r| r == request.as_str()) {
+                    break;
+                }
+            }
+        }
+        // Its own answer comes too late: refused, as one from claude.ai would be.
+        let late = call(&mut other, 2, "answer_permission", args).await;
+        assert_eq!(late["err"]["kind"], "failed", "{late}");
+        assert_eq!(
+            late["err"]["message"],
+            crate::agent::already_answered(),
+            "{late}"
+        );
+    });
+}
+
 #[test]
 fn the_calls_of_a_family_keep_their_order() {
     let loaded = load("remote-server-order");

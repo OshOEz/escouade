@@ -2691,6 +2691,7 @@ impl Core {
             project_id: String::new(),
             name: account.name.clone(),
             shell: engine::by_id(account.engine).login_shell(),
+            launch: false,
         };
         // Run from the home folder, as the user would.
         let (_, home) = app_env();

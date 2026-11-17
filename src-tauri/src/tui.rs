@@ -1726,6 +1726,7 @@ impl Core {
             project_id: String::new(),
             name,
             shell: view.shell().into(),
+            launch: false,
         };
         log::info!(
             "agent {id}: starting {harness_name}'s interface {} {} in {cwd} (account {})",

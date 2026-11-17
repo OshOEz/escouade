@@ -5857,6 +5857,7 @@ fn test_terminal(h: &Harness, agent: &AgentMeta, term_id: &str) -> bool {
         project_id: agent.project_id.clone(),
         name: "web".into(),
         shell: shell.id.clone(),
+        launch: false,
     };
     h.core
         .pty

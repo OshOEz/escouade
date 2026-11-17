@@ -25,6 +25,8 @@ pub struct TermInfo {
     pub project_id: String,
     pub name: String,
     pub shell: String,
+    /// A launch command (or a step of a test launch), read with `run_attach`; else `term_attach`.
+    pub launch: bool,
 }
 
 /// What a terminal holds, shared (`Arc`) so that the map of terminals is locked for a lookup and
@@ -1168,6 +1170,10 @@ impl PtyManager {
     ) -> Result<()> {
         // Taken first: it goes with the terminal, or with this call if it does not start.
         let output = self.ahead.lock().remove(&info.id);
+        let info = TermInfo {
+            launch: started.launch,
+            ..info
+        };
         #[cfg(windows)]
         let_ctrl_c_through();
         let pty = native_pty_system();
@@ -1629,6 +1635,7 @@ mod tests {
             project_id: "p".into(),
             name: "pwsh-1".into(),
             shell: "pwsh".into(),
+            launch: false,
         };
         let cwd = std::env::temp_dir().to_string_lossy().to_string();
         let query = Mutex::new(CursorQuery::default());
@@ -1804,6 +1811,7 @@ mod tests {
             project_id: "p".into(),
             name: "serveur".into(),
             shell: shell.id.clone(),
+            launch: false,
         };
         let cwd = std::env::temp_dir().to_string_lossy().to_string();
         let before = pings();
@@ -2049,6 +2057,7 @@ mod tests {
             project_id: String::new(),
             name: "connexion".into(),
             shell: "claude".into(),
+            launch: false,
         };
         let (ended, done) = std::sync::mpsc::channel();
         pty.spawn_program(
@@ -2159,6 +2168,7 @@ mod unix_tests {
             project_id: "p".into(),
             name: "run".into(),
             shell: shell.id.clone(),
+            launch: false,
         };
         let cwd = std::env::temp_dir().to_string_lossy().to_string();
         pty.spawn_command(
@@ -2257,6 +2267,7 @@ mod unix_tests {
             project_id: "p".into(),
             name: "serveur".into(),
             shell: zsh.id.clone(),
+            launch: false,
         };
         pty.spawn_command(
             info,
@@ -2411,6 +2422,7 @@ mod unix_tests {
             project_id: String::new(),
             name: "connexion".into(),
             shell: "claude".into(),
+            launch: false,
         };
         let (ended, done) = std::sync::mpsc::channel();
         pty.spawn_program(
@@ -2698,6 +2710,7 @@ mod windows_powershell_tests {
             project_id: "p".into(),
             name: "run".into(),
             shell: shell.id.clone(),
+            launch: false,
         };
         let cwd = std::env::temp_dir().to_string_lossy().to_string();
         pty.spawn_command(
@@ -2762,6 +2775,7 @@ mod windows_powershell_tests {
             project_id: "p".into(),
             name: "run".into(),
             shell: shell.id.clone(),
+            launch: false,
         };
         let id = info.id.clone();
         let cwd = std::env::temp_dir().to_string_lossy().to_string();
@@ -2815,6 +2829,7 @@ mod windows_powershell_tests {
             project_id: "p".into(),
             name: "run".into(),
             shell: shell.id.clone(),
+            launch: false,
         };
         let id = info.id.clone();
         let cwd = std::env::temp_dir().to_string_lossy().to_string();
@@ -2959,6 +2974,7 @@ mod windows_powershell_tests {
             project_id: "p".into(),
             name: "powershell-1".into(),
             shell: shell.id.clone(),
+            launch: false,
         };
         let cwd = std::env::temp_dir().to_string_lossy().to_string();
         let query = Mutex::new(CursorQuery::default());
@@ -3024,6 +3040,7 @@ mod windows_powershell_tests {
             project_id: "p".into(),
             name: "powershell-1".into(),
             shell: shell.id.clone(),
+            launch: false,
         };
         let cwd = std::env::temp_dir().to_string_lossy().to_string();
         let query = Mutex::new(CursorQuery::default());
@@ -3192,6 +3209,7 @@ mod activity_tests {
             project_id: "p".into(),
             name: id.into(),
             shell: shell.id.clone(),
+            launch: false,
         }
     }
 
@@ -3797,6 +3815,7 @@ impl PtyManager {
                     project_id: "p".into(),
                     name: id.into(),
                     shell: "fake".into(),
+                    launch: false,
                 },
                 master: Mutex::new(Some(pair.master)),
                 input,

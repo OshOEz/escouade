@@ -2983,6 +2983,7 @@ pub(crate) async fn term_spawn_to(
         project_id,
         name,
         shell: sh.id.clone(),
+        launch: false,
     };
     let env = if settings.proxy_terminals {
         settings.proxy_env()
@@ -3085,6 +3086,7 @@ pub(crate) fn run_start_to(
         project_id,
         name: spec.name,
         shell: sh.id.clone(),
+        launch: true,
     };
     let launch = Launch {
         info,
@@ -3608,6 +3610,7 @@ pub(crate) fn test_run_start_to(
         project_id,
         name: spec.name,
         shell: sh.id.clone(),
+        launch: true,
     };
     let launch = Launch {
         info,

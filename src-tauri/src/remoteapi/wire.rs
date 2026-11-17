@@ -2,6 +2,18 @@
 //! bytes in binary frames under the stream number the client chose (4 bytes, big-endian, then the bytes). An error's
 //! `message` is a text, except for `failed`, where it is the command's error as the window gets it: a text, or a JSON
 //! structure. A terminal's end is the `terminalExit` event; a frame that is no request closes the connection.
+//!
+//! A client that comes back after a cut opens a new connection and calls `subscribe`, then reattaches its terminals:
+//! - the events that arrive before the `subscribe` answer are kept, then applied on top of its state; a second
+//!   `subscribe` starts the view again;
+//! - `terminals` is a snapshot: a terminal opened elsewhere raises no event, only `terminalExit` exists;
+//! - an entry whose id is an agent's `terminalId` is that agent's view, read with `agent_terminal` and the agent's id
+//!   (its size is required, resizes it for everyone and starts the interface if needed); otherwise `launch: true`
+//!   is read with `run_attach`, the rest with `term_attach`, whose size is optional (absent: a reader that does not
+//!   resize);
+//! - a stream replays the kept bytes (up to 4 MiB, in pieces of at most 64 KiB, possibly from mid-screen), then the
+//!   live ones; it ends with its terminal (`terminalExit`, which may come before its last bytes) or with the
+//!   connection: there is no detach command.
 
 use super::table::CallError;
 use crate::model::UiEvent;

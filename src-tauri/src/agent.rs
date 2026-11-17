@@ -373,6 +373,7 @@ impl TuiRun {
             project_id: String::new(),
             name: "agent".into(),
             shell: "claude".into(),
+            launch: false,
         };
         Self {
             term_id: info.id.clone(),
@@ -1861,7 +1862,7 @@ fn answered_by(patch: &mut Value, by: Option<&str>) {
 }
 
 /// Refused: the request has its answer already, from the user or from a client.
-fn already_answered() -> String {
+pub(crate) fn already_answered() -> String {
     tr!(
         "Cette demande a déjà reçu une réponse.",
         "This request has already been answered."
