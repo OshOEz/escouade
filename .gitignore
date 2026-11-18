@@ -1,5 +1,7 @@
 node_modules
 dist
+# The interface built for a browser (npm run build:web).
+dist-web
 *.local
 .env
 .env.*
