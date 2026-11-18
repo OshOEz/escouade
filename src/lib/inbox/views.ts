@@ -3,7 +3,7 @@
 // proposed, the docs to share, the reviews asked), read from the backend (`inbox_views`), never copies. A line of the
 // list is drawn from one, with the gestures of its source; a gesture goes through `inbox_view_act`, on the view the user
 // read: one settled meanwhile is refused (« Réglé ailleurs »).
-import { invoke } from '@tauri-apps/api/core';
+import { invoke } from '../transport';
 import type { Key } from '../i18n';
 import type { Column, PendingRequest } from '../types';
 

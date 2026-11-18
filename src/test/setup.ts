@@ -4,6 +4,9 @@ import { cleanup } from '@testing-library/svelte';
 import { afterEach, beforeEach } from 'vitest';
 import { setLang } from '../lib/i18n';
 
+// The tests are the desktop window's: the transport (src/lib/transport) chooses Tauri's IPC, which they mock.
+if (typeof window !== 'undefined') (window as any).__TAURI_INTERNALS__ ??= {};
+
 // The tests are written in French: each starts in French, whatever language the one before it switched to.
 beforeEach(() => setLang('fr'));
 

@@ -1,4 +1,4 @@
-import { invoke } from '@tauri-apps/api/core';
+import { invoke } from './transport';
 import type { FieldSetting } from './plugin-fields';
 import { activeIn, textOf, type Manifest, type ManifestText, type PluginView, type SecretState } from './plugins';
 import type { Project } from './types';

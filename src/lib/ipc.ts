@@ -1,4 +1,4 @@
-import { Channel, invoke } from '@tauri-apps/api/core';
+import { channel as flow, invoke } from './transport';
 import type {
   CodeHost,
   MergeHow,
@@ -163,7 +163,7 @@ function inRepo(repo: string | null): { repo?: string } {
 
 export const api = {
   subscribe: (onEvent: (e: UiEvent) => void) => {
-    const channel = new Channel<UiEvent>();
+    const channel = flow<UiEvent>();
     channel.onmessage = onEvent;
     return invoke<InitialState>('subscribe', { channel });
   },
@@ -278,7 +278,7 @@ export const api = {
   accountSignInEnded: (id: string) => invoke<string | null>('account_sign_in_ended', { id }),
   /** The account's `claude` in an interactive terminal, to sign in with (written to and killed as a terminal). */
   accountLogin: (id: string, cols: number, rows: number, onData: (d: ArrayBuffer) => void) => {
-    const output = new Channel<ArrayBuffer>();
+    const output = flow<ArrayBuffer>();
     output.onmessage = onData;
     return invoke<TermInfo>('account_login', { id, cols, rows, output });
   },
@@ -469,7 +469,7 @@ export const api = {
    * not, after two stops in a row as soon as it started.
    */
   agentTerminal: (id: string, cols: number, rows: number, onData: (d: ArrayBuffer) => void, manual = false) => {
-    const output = new Channel<ArrayBuffer>();
+    const output = flow<ArrayBuffer>();
     output.onmessage = onData;
     return invoke<TermInfo>('agent_terminal', { id, cols, rows, output, manual });
   },
@@ -797,7 +797,7 @@ export const api = {
     a: { projectId: string; agentId?: string | null; subdir?: string; shell: string; name: string; cols: number; rows: number },
     onData: (d: ArrayBuffer) => void,
   ) => {
-    const output = new Channel<ArrayBuffer>();
+    const output = flow<ArrayBuffer>();
     output.onmessage = onData;
     return invoke<TermInfo>('term_spawn', { ...a, output });
   },
@@ -805,7 +805,7 @@ export const api = {
     a: { projectId: string; commandId: string; agentId?: string; cols: number; rows: number; cursorRow: number },
     onData: (d: ArrayBuffer) => void,
   ) => {
-    const output = new Channel<ArrayBuffer>();
+    const output = flow<ArrayBuffer>();
     output.onmessage = onData;
     return invoke<TermInfo>('run_start', { ...a, output });
   },
@@ -817,7 +817,7 @@ export const api = {
     a: { agentId: string; kind: 'prep' | 'run' | 'isola'; index: number; cols: number; rows: number; cursorRow: number },
     onData: (d: ArrayBuffer) => void,
   ) => {
-    const output = new Channel<ArrayBuffer>();
+    const output = flow<ArrayBuffer>();
     output.onmessage = onData;
     return invoke<TermInfo>('test_run_start', { ...a, output });
   },
