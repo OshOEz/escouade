@@ -1,10 +1,9 @@
 <script lang="ts">
-  import { open } from '@tauri-apps/plugin-dialog';
   import { fSize, tildify } from '../../lib/format';
   import { t } from '../../lib/i18n';
   import { api } from '../../lib/ipc';
   import { openPath } from '../../lib/opener';
-  import { IS_MAC } from '../../lib/platform';
+  import { desktop, IS_MAC, open } from '../../lib/platform';
   import { settingsForm, type NumberSetting } from '../../lib/settings.svelte';
   import { app } from '../../lib/state.svelte';
   import Icon from '../Icon.svelte';
@@ -205,7 +204,7 @@
 <Group title={t('settings.groups.localData')}>
   <Row label={t('common.folder')}>
     {#snippet extra()}<span class="more mono data">{dataDir ? tildify(dataDir) : '~/.escouade'}</span>{/snippet}
-    {#if dataDir}
+    {#if dataDir && desktop}
       <button class="btn" onclick={() => openPath(dataDir!).catch((e) => app.toast(String(e), 'error'))}
         ><Icon name="folder" size={14} />{t('nav.titleBar.menu.openFolder')}</button
       >

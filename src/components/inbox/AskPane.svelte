@@ -6,6 +6,7 @@
   import { setDraft } from '../../lib/drafts';
   import { fDate, fSince, fTime } from '../../lib/format';
   import { t } from '../../lib/i18n';
+  import { desktop } from '../../lib/platform';
   import type { IconName } from '../../lib/icons';
   import { fLater, inbox, laterTimes, letter, startOption } from '../../lib/inbox/inbox.svelte';
   import { api } from '../../lib/ipc';
@@ -476,7 +477,7 @@
             tabindex="-1"
             aria-hidden="true"
           />
-          <MicButton target={dictated} />
+          {#if desktop}<MicButton target={dictated} />{/if}
           {#if picking}
             <span class="pick">
               <input type="datetime-local" aria-label={t('inbox.later.pickTitle')} bind:value={pickAt} />

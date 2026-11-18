@@ -9,6 +9,8 @@ export default defineZone('shell', {
     noAgent: 'No agents in this project.',
     newAgent: 'New agent',
     projectPrs: 'Project PRs and CI',
+    /** In a browser, a page to open the browser would block without a click: `{url}`, its address. */
+    pageToOpen: 'A page to open: {url}',
   },
   welcome: {
     intro: 'Add a project to run agents, follow their questions, and open terminals.',

@@ -1,11 +1,10 @@
 <script lang="ts">
   import { paneDrag } from '../lib/pane-drag.svelte';
-  import { getCurrentWindow } from '@tauri-apps/api/window';
   import { dictation } from '../lib/dictation.svelte';
   import { t } from '../lib/i18n';
   import { deltaDetail } from '../lib/repos';
   import { menu } from '../lib/menu.svelte';
-  import { IS_MAC, keyLabel } from '../lib/platform';
+  import { desktop, getCurrentWindow, IS_MAC, keyLabel } from '../lib/platform';
   import { projectMenu } from '../lib/project-rail';
   import { app } from '../lib/state.svelte';
   import { tip } from '../lib/tip';
@@ -102,7 +101,7 @@
         <span class="lbl">{t('common.editor')}</span>
       </button>
     {/if}
-    {#if !IS_MAC}
+    {#if !IS_MAC && desktop}
       <div class="controls">
         <button class="ctl" use:tip={t('nav.titleBar.minimize')} aria-label={t('nav.titleBar.minimize')} onclick={() => win.minimize()}>
           <Icon name="min" size={14} />

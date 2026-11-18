@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { openUrl } from '@tauri-apps/plugin-opener';
+  import { openUrl } from '../../lib/platform';
   import { fDate } from '../../lib/format';
   import { locale, t } from '../../lib/i18n';
   import { asksOf, roleKey, textOf } from '../../lib/plugins';

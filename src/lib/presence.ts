@@ -2,14 +2,16 @@
 // being prepared, the user at the keyboard or the mouse. The backend decides (updates.rs); the window tells it.
 
 import { api } from './ipc';
+import { desktop } from './platform';
 import { app } from './state.svelte';
 import { flows } from './test-launch.svelte';
 
 const EVERY_MS = 5000;
 const INPUTS = ['keydown', 'pointerdown', 'pointermove', 'wheel'] as const;
 
-/** Tells the backend every few seconds, when it changed. Returns what stops it. */
+/** Tells the backend every few seconds, when it changed. Returns what stops it. For the app's update: none in a browser. */
 export function watchPresence(): () => void {
+  if (!desktop) return () => {};
   let activeAt = Date.now();
   let sent = '';
   /** The restart whose countdown was told of the user's return already. */

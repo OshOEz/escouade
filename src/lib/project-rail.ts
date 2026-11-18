@@ -2,6 +2,7 @@
 // tile says of its project, the project's menu (its tile's right click, its name in the title bar) and its order.
 
 import { openPath } from './opener';
+import { desktop } from './platform';
 import { t } from './i18n';
 import { api } from './ipc';
 import type { MenuItem } from './menu.svelte';
@@ -167,11 +168,16 @@ export function projectMenu(p: Project): MenuItem[] {
         app.modal = { kind: 'settings', page: 'project', projectId: p.id };
       },
     },
-    {
-      label: t('nav.titleBar.menu.openFolder'),
-      icon: 'folder',
-      onClick: () => openPath(p.path).catch((err) => app.toast(String(err), 'error')),
-    },
+    // In a browser, the folder would open on the core's machine.
+    ...(desktop
+      ? [
+          {
+            label: t('nav.titleBar.menu.openFolder'),
+            icon: 'folder' as const,
+            onClick: () => openPath(p.path).catch((err) => app.toast(String(err), 'error')),
+          },
+        ]
+      : []),
     { label: '', separator: true },
     { label: t('nav.rail.up'), icon: 'up', hint: t('nav.rail.upKey'), disabled: i <= 0, onClick: () => moveProject(p.id, -1) },
     {

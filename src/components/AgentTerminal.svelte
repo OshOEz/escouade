@@ -31,6 +31,7 @@
   import { untrack } from 'svelte';
   import { paneCtx } from '../lib/pane-context';
   import { t } from '../lib/i18n';
+  import { desktop } from '../lib/platform';
   import type { DictationTarget } from '../lib/dictation.svelte';
   import { mountTerminal, roomOf, typeIntoTerminal } from '../lib/terminals';
   import { takeViewCommand } from '../lib/interactive';
@@ -286,7 +287,7 @@
   <!-- The terminal and its microphone, over its top right corner: under the band, if there is one. -->
   <div class="well">
     <div class="box" bind:this={box} aria-label={t('conv.header.toTerminal', { engine })}></div>
-    {#if term && !exited}
+    {#if term && !exited && desktop}
       <div class="voice"><MicButton target={dictated} below /></div>
     {/if}
   </div>

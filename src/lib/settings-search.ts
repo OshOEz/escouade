@@ -8,6 +8,7 @@ import { found, writerOptions } from './engines';
 import { tIn, type Lang } from './i18n';
 import { harnessInstalled, installedEngines, installedOf } from './installed';
 import { SERVICE_IDS } from './integrations';
+import { desktop } from './platform';
 import { app } from './state.svelte';
 import { pageInfo, SETTINGS_PAGES, SETTINGS_ROWS, type RowInfo, type SettingsPage } from './settings-pages';
 
@@ -65,6 +66,9 @@ const SHOWN: Record<string, () => boolean> = {
 /** Whether the row is on its page, as the plugins installed have it. */
 export const rowShown = (r: RowInfo) => SHOWN[r.id]?.() ?? true;
 
+/** The voice is the desktop app's alone (this machine's microphone and speakers): its page is not found in a browser. */
+const pageShown = (page: SettingsPage) => desktop || page !== 'voice';
+
 /** Every row, and every page, with its texts in both languages folded. Read at each search: the catalogs are loaded. */
 function docs(): Doc[] {
   const pages: Doc[] = SETTINGS_PAGES.map((p) => ({
@@ -79,7 +83,7 @@ function docs(): Doc[] {
     labels: LANGS.map((l) => normalize(r.labelIn(l))),
     descs: LANGS.map((l) => normalize(r.descIn(l))),
   }));
-  return [...pages, ...rows];
+  return [...pages, ...rows].filter((d) => pageShown(d.page));
 }
 
 /**

@@ -5,11 +5,9 @@
 // The interface is laid out for 1000 × 600 pixels at least (the window's minimum size): a zoom the window cannot hold
 // then is shown at the biggest step it can, and comes back by itself once the window is big enough again.
 
-import { getCurrentWebview } from '@tauri-apps/api/webview';
-import { getCurrentWindow } from '@tauri-apps/api/window';
 import { applyAppearance, themeChoice } from './appearance';
 import { api } from './ipc';
-import { IS_MAC, primaryKey } from './platform';
+import { getCurrentWebview, getCurrentWindow, IS_MAC, primaryKey } from './platform';
 import { app } from './state.svelte';
 import type { Settings } from './types';
 

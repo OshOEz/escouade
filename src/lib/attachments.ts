@@ -4,6 +4,7 @@
 import { fBytes } from './format';
 import { t } from './i18n';
 import { api } from './ipc';
+import { desktop } from './transport';
 import type { AttachedFile, Attachment, Settings } from './types';
 
 /** What the message itself can carry of a file. */
@@ -275,7 +276,8 @@ export async function base64(f: File): Promise<string> {
  * One read at a time (ESC-239): a paste made while one goes on gets null, the image going to the first.
  */
 export async function clipboardImage(): Promise<File | null> {
-  if (readingClipboard) return null;
+  // A browser gives the image in the paste event; the core's clipboard is another machine's.
+  if (!desktop || readingClipboard) return null;
   readingClipboard = true;
   try {
     const png = await api.clipboardImage();

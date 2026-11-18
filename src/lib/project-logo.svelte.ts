@@ -1,7 +1,7 @@
 // The projects' logos (ESC-167), as `data:` URLs for their tiles: asked of the backend once per logo file (a new logo
 // is a new file), kept for the rest of the run. Shown in an `<img>`: an SVG's scripts never run.
 
-import { open } from '@tauri-apps/plugin-dialog';
+import { open } from './platform';
 import { t } from './i18n';
 import { api } from './ipc';
 import { app } from './state.svelte';

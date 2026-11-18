@@ -2,6 +2,7 @@
   import { t } from '../lib/i18n';
   import { fDateTime } from '../lib/format';
   import { openPath } from '../lib/opener';
+  import { desktop } from '../lib/platform';
   import { errorText } from '../lib/refusal';
   import { app } from '../lib/state.svelte';
   import type { Recovery } from '../lib/types';
@@ -50,7 +51,7 @@
       {#if where}<p class="where">{t('shell.recovery.where', { path: where })}</p>{/if}
     </div>
     <div class="actions">
-      {#if where}<button class="small" onclick={open}>{t('shell.recovery.open')}</button>{/if}
+      {#if where && desktop}<button class="small" onclick={open}>{t('shell.recovery.open')}</button>{/if}
       <button class="small" data-testid="recovery-close" onclick={() => app.dismissRecovery()}>{t('shell.recovery.close')}</button>
     </div>
   </div>

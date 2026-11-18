@@ -4,7 +4,7 @@ import { handleZoomKey, zoomKey } from './display.svelte';
 import { findInFiles } from './editor/search.svelte';
 import { DEFAULT_SHORTCUT, matchesShortcut, parseShortcut } from './dictation';
 import { dictation } from './dictation.svelte';
-import { IS_MAC, primaryKey } from './platform';
+import { desktop, IS_MAC, primaryKey } from './platform';
 import { app } from './state.svelte';
 
 /**
@@ -252,7 +252,8 @@ function handlePaneKey(e: KeyboardEvent, mac: boolean): boolean {
  * key was the dictation's (the caller stops it there).
  */
 export function dictationKey(e: KeyboardEvent, mac = IS_MAC): boolean {
-  if (dictation.recording) return false;
+  // The dictation listens to this machine's microphone: the desktop app's alone.
+  if (dictation.recording || !desktop) return false;
   const spec = app.settings.voice?.shortcut || DEFAULT_SHORTCUT;
   if (e.type === 'keyup') {
     if (e.code !== parseShortcut(spec)?.code) return false;

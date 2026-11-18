@@ -7,7 +7,7 @@
 //   - the choice is kept in the page's storage as well, read before the first render (`earlyAppearance`, main.ts): the
 //     settings come from the backend a moment later, and a light app never flashes dark.
 
-import { getCurrentWindow } from '@tauri-apps/api/window';
+import { getCurrentWindow } from './platform';
 
 export const THEMES = ['system', 'light', 'dark'] as const;
 export type ThemeChoice = (typeof THEMES)[number];

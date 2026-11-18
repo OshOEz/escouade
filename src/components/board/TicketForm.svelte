@@ -7,7 +7,7 @@
   import { MAX_FILES, draftFiles, filesChanged, keptFile, ticketPlace, type FormFile } from '../../lib/ticket-files';
   import { NotImageError, draftImages, imagesChanged, readTicketImage, shownImage, type FormImage } from '../../lib/ticket-images';
   import { menu } from '../../lib/menu.svelte';
-  import { keyLabel, primaryKey } from '../../lib/platform';
+  import { desktop, keyLabel, primaryKey } from '../../lib/platform';
   import { ariaEnter } from '../../lib/shortcuts';
   import { app, type TicketFormDraft } from '../../lib/state.svelte';
   import type { EngineId, Ticket, TicketDraft } from '../../lib/types';
@@ -717,7 +717,7 @@
     <div class="fld desc">
       <div class="lab-row">
         <label for="{uid}-description">{t('board.form.description')}</label>
-        <MicButton target={dictated} below />
+        {#if desktop}<MicButton target={dictated} below />{/if}
       </div>
       <textarea
         bind:this={descriptionField}

@@ -1,6 +1,7 @@
 <script lang="ts">
   import Icon from '../Icon.svelte';
   import { openPath } from '../../lib/opener';
+  import { desktop } from '../../lib/platform';
   import { t } from '../../lib/i18n';
   import { choosesEngine, engineOptions } from '../../lib/engines';
   import { accountName, accountsOf, serves } from '../../lib/accounts';
@@ -72,9 +73,11 @@
     {#snippet extra()}
       <span class="more path mono" use:tip={{ text: project.path, cut: true }}>{project.path}</span>
     {/snippet}
-    <button class="btn" onclick={() => openPath(project.path).catch((err) => app.toast(String(err), 'error'))}
-      ><Icon name="folder" size={14} />{t('common.open')}</button
-    >
+    {#if desktop}
+      <button class="btn" onclick={() => openPath(project.path).catch((err) => app.toast(String(err), 'error'))}
+        ><Icon name="folder" size={14} />{t('common.open')}</button
+      >
+    {/if}
   </Row>
   <Row label={t('common.color')} desc={t('settings.project.colorDesc')}>
     <div class="swatches" role="group" aria-label={t('common.color')}>

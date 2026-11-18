@@ -7,6 +7,7 @@
 import { t } from './i18n';
 import { api } from './ipc';
 import { openUrl } from './opener';
+import { desktop } from './platform';
 import { app } from './state.svelte';
 import type { Agent, PageBounds, PageEvent, PagesOpen, Project } from './types';
 import { loadModes, nextMode, saveMode, type PageMode } from './devpage-key';
@@ -74,7 +75,8 @@ export function hostOf(url: string): string {
  * system's browser came to the front before; elsewhere its view « Page » waits for them.
  */
 export async function openLaunchPage(agent: Agent, address: string, named?: string): Promise<PagesOpen> {
-  const where = pagesOpenOf(app.projects.find((p) => p.id === agent.projectId));
+  // The pages are the desktop app's own webviews: a browser opens them in a tab of their own.
+  const where = desktop ? pagesOpenOf(app.projects.find((p) => p.id === agent.projectId)) : 'system';
   if (where === 'system') {
     await openUrl(address);
     return where;
@@ -104,7 +106,7 @@ export const projectPageKey = (projectId: string, commandId: string) => `run:${p
  * window, one per command (loaded again rather than doubled), or in the system's browser when the project says so.
  */
 export async function openProjectPage(project: Project, commandId: string, title: string, address: string): Promise<PagesOpen> {
-  if (pagesOpenOf(project) === 'system') {
+  if (!desktop || pagesOpenOf(project) === 'system') {
     await openUrl(address);
     return 'system';
   }

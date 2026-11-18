@@ -46,7 +46,7 @@
     speakerOf,
     engineName,
   } from '../lib/engines';
-  import { keyLabel } from '../lib/platform';
+  import { desktop, keyLabel } from '../lib/platform';
   import { observeWidth } from '../lib/resize';
   import { app, atWork } from '../lib/state.svelte';
   import type { Agent, QuestionItem } from '../lib/types';
@@ -921,8 +921,10 @@
           aria-label={t('composer.attach.label')}
           onclick={() => fileInput?.click()}><Icon name="clip" size={14} /></button
         >
-        <MicButton target={dictated} panel={false} />
-        <ConversationButton {agent} />
+        {#if desktop}
+          <MicButton target={dictated} panel={false} />
+          <ConversationButton {agent} />
+        {/if}
         <span class="c-sep" aria-hidden="true"></span>
         {#if busy}
           <button

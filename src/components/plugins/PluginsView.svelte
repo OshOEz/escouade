@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { t } from '../../lib/i18n';
-  import { openUrl } from '@tauri-apps/plugin-opener';
+  import { openUrl } from '../../lib/platform';
   import { categoriesOf, ofTheWorkspace } from '../../lib/plugins';
   import { plugins } from '../../lib/plugins-view.svelte';
   import Icon from '../Icon.svelte';

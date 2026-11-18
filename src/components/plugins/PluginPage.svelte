@@ -21,7 +21,7 @@
   import PluginSettings from './PluginSettings.svelte';
   import PluginTile from './PluginTile.svelte';
   import Seal from './Seal.svelte';
-  import { openUrl } from '@tauri-apps/plugin-opener';
+  import { openUrl } from '../../lib/platform';
   import { stateText } from './phase';
   import { tip } from '../../lib/tip';
 

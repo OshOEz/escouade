@@ -4,6 +4,7 @@
   import { copyImage, openSource, type ViewedImage } from '../../lib/gallery';
   import { t } from '../../lib/i18n';
   import { api } from '../../lib/ipc';
+  import { desktop } from '../../lib/platform';
   import { app } from '../../lib/state.svelte';
   import { tip } from '../../lib/tip';
   import Icon from '../Icon.svelte';
@@ -213,7 +214,8 @@
     <button class="round" aria-label={t('conv.sent.save')} use:tip={t('conv.sent.save')} onclick={save}
       ><Icon name="download" size={15} /></button
     >
-    {#if current?.source}
+    <!-- In a browser, a file is never opened nor shown on the core's machine: an image of the web alone opens. -->
+    {#if current?.source && (desktop || current.source.kind === 'remote')}
       {@const web = current.source.kind === 'remote'}
       <button
         class="round"

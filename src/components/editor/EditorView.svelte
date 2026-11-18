@@ -21,7 +21,7 @@
   import { t } from '../../lib/i18n';
   import { api } from '../../lib/ipc';
   import { menu, type MenuItem } from '../../lib/menu.svelte';
-  import { IS_MAC, keyLabel, OS } from '../../lib/platform';
+  import { desktop, IS_MAC, keyLabel, OS } from '../../lib/platform';
   import { clamp, observeWidth } from '../../lib/resize';
   import { app } from '../../lib/state.svelte';
   import { terminalIn } from '../../lib/term-actions';
@@ -491,7 +491,9 @@
       { label: t('editor.menu.newFile'), onClick: () => startNew(dir) },
       { label: t('editor.menu.newFolder'), onClick: () => startNew(dir, 'dir') },
       { label: t('editor.menu.openTerminal'), onClick: () => terminalHere(dir) },
-      { label: t(r ? `editor.menu.reveal.${OS}` : `editor.menu.revealRoot.${OS}`), onClick: () => showInFiles(r?.path ?? null) },
+      ...(desktop
+        ? [{ label: t(r ? `editor.menu.reveal.${OS}` : `editor.menu.revealRoot.${OS}`), onClick: () => showInFiles(r?.path ?? null) }]
+        : []),
     ];
     // The root of the source is neither renamed nor deleted.
     if (r) {

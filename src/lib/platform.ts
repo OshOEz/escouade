@@ -1,6 +1,51 @@
 // What differs between Windows, macOS and Linux in the interface: the main modifier key, how
-// shortcuts are written, the name of the file manager.
+// shortcuts are written, the name of the file manager. And what the interface asks of the system, the same in the
+// desktop app's window (Tauri's) and in a browser (docs/REMOTE.md, « La fondation commune », point 5).
+import type { Webview } from '@tauri-apps/api/webview';
+import type { Window } from '@tauri-apps/api/window';
 import { t } from './i18n';
+import { system } from './platform-tauri';
+import { desktop } from './transport';
+
+export { desktop };
+
+const done = () => Promise.resolve();
+
+/** A browser's tab has no window of the app's to drive: its controls do nothing, it is never maximized. */
+const tab = {
+  isMaximized: () => Promise.resolve(false),
+  onResized: () => Promise.resolve(() => {}),
+  minimize: done,
+  toggleMaximize: done,
+  hide: done,
+  setTheme: done,
+  innerSize: () => Promise.resolve({ width: 0, height: 0 }),
+  scaleFactor: () => Promise.resolve(1),
+} as unknown as Window;
+
+/** The page's zoom is the browser's own. */
+const page = { setZoom: done } as unknown as Webview;
+
+/** A folder or a file chosen in the system's dialog; in a browser, none (no one chose). */
+export const open: typeof system.open = (options) => (desktop ? system.open(options) : Promise.resolve(null as never));
+
+/** An address in the system's browser; in a browser, in a tab of its own. */
+export const openUrl: typeof system.openUrl = (url, openWith) => {
+  if (desktop) return system.openUrl(url, openWith);
+  // The core's rule and refusal for `open_url` (commands.rs): http, https, mailto and tel alone.
+  const scheme = String(url).split(':')[0].toLowerCase();
+  if (!['http', 'https', 'mailto', 'tel'].includes(scheme)) return Promise.reject(`not a link Escouade opens: ${scheme}:`);
+  window.open(String(url), '_blank', 'noopener');
+  return done();
+};
+
+export const getCurrentWindow = (): Window => (desktop ? system.getCurrentWindow() : tab);
+
+export const getCurrentWebview = (): Webview => (desktop ? system.getCurrentWebview() : page);
+
+/** An event of the window (the « Pages » window's); a browser has none. */
+export const listen: typeof system.listen = (event, handler, options) =>
+  desktop ? system.listen(event, handler, options) : Promise.resolve(() => {});
 
 /** A system the app runs on, for what the interface names after it (its file manager). */
 export type Os = 'windows' | 'mac' | 'linux';

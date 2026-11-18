@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount, tick } from 'svelte';
   import { t } from '../../lib/i18n';
-  import { keyLabel, primaryKey } from '../../lib/platform';
+  import { desktop, keyLabel, primaryKey } from '../../lib/platform';
   import { pageInfo, SETTINGS_PAGES, settingsForm, type SettingsPage } from '../../lib/settings.svelte';
   import { settingsAlerts } from '../../lib/settings-alerts.svelte';
   import { searchSettings, type SearchHit } from '../../lib/settings-search';
@@ -30,7 +30,9 @@
     projectId?: string;
   }
 
-  const APP = SETTINGS_PAGES.filter((p) => p.scope === 'app' && p.id !== 'about' && p.id !== 'allProjects');
+  const APP = SETTINGS_PAGES.filter(
+    (p) => p.scope === 'app' && p.id !== 'about' && p.id !== 'allProjects' && (desktop || p.id !== 'voice'),
+  );
   const PROJECT = SETTINGS_PAGES.filter((p) => p.scope === 'project');
   /** A project's pages: « Plugins » only while a plugin installed and on there declares a setting of each project (ESC-530). */
   const pagesOf = (id: string) => {

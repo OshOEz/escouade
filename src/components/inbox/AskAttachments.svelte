@@ -6,6 +6,7 @@
   import type { IconName } from '../../lib/icons';
   import { inbox } from '../../lib/inbox/inbox.svelte';
   import { api } from '../../lib/ipc';
+  import { desktop } from '../../lib/platform';
   import { opensOutside } from '../../lib/runnable';
   import { app } from '../../lib/state.svelte';
   import { tip } from '../../lib/tip';
@@ -108,17 +109,21 @@
             <button class="a" aria-pressed={reading === f.file} onclick={() => ((reading = f.file), looked(f))} data-testid="ask-pdf-read"
               >{t('inbox.files.read')}</button
             >
-          {:else if f.kind === 'markdown' || f.kind === 'image'}
-            <!-- Drawn in place: nothing to open. -->
-          {:else if runs(f)}
-            <span aria-hidden="true">·</span>
-            <button class="a" onclick={() => open(f, true)}>{t('inbox.files.reveal')}</button>
-          {:else}
-            <span aria-hidden="true">·</span>
-            <button class="a" onclick={() => open(f, false)} data-testid="ask-open">{t('inbox.files.open')}</button>
           {/if}
-          <span aria-hidden="true">·</span>
-          <button class="a" onclick={() => saveAs(f)} data-testid="ask-save">{t('inbox.files.saveAs')}</button>
+          <!-- In a browser, a file is never opened, shown nor saved on the core's machine. -->
+          {#if desktop}
+            {#if f.kind === 'pdf' || f.kind === 'markdown' || f.kind === 'image'}
+              <!-- Drawn in place: nothing to open. -->
+            {:else if runs(f)}
+              <span aria-hidden="true">·</span>
+              <button class="a" onclick={() => open(f, true)}>{t('inbox.files.reveal')}</button>
+            {:else}
+              <span aria-hidden="true">·</span>
+              <button class="a" onclick={() => open(f, false)} data-testid="ask-open">{t('inbox.files.open')}</button>
+            {/if}
+            <span aria-hidden="true">·</span>
+            <button class="a" onclick={() => saveAs(f)} data-testid="ask-save">{t('inbox.files.saveAs')}</button>
+          {/if}
         </span>
       </li>
     {/each}

@@ -2,7 +2,6 @@
   // The bar of a project's « Pages » window (ESC-311): a tab per worktree whose page was detached from its agent, and
   // the bar of the page shown. The pages themselves are webviews of the backend's, under this bar; this one is
   // Escouade's own interface, the only part of the window that may call its commands.
-  import { listen } from '@tauri-apps/api/event';
   import { onDestroy, onMount } from 'svelte';
   import {
     DEVICE_WIDTH,
@@ -18,7 +17,7 @@
   import { t } from '../lib/i18n';
   import { api } from '../lib/ipc';
   import { openUrl } from '../lib/opener';
-  import { IS_MAC } from '../lib/platform';
+  import { IS_MAC, listen } from '../lib/platform';
   import type { PageView } from '../lib/types';
   import { tip } from '../lib/tip';
   import Icon from './Icon.svelte';

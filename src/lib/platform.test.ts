@@ -1,4 +1,5 @@
-import { describe, expect, it } from 'vitest';
+import { clearMocks, mockIPC, mockWindows } from '@tauri-apps/api/mocks';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { setLang } from './i18n';
 import { keyLabel, osOf, primaryKey } from './platform';
 
@@ -48,5 +49,87 @@ describe('platform', () => {
     expect(keyLabel('Échap', false)).toBe('Esc');
     expect(keyLabel('Ctrl+Maj+Entrée', true)).toBe('⇧⌘Enter');
     expect(keyLabel('Alt+1', false)).toBe('Alt+1');
+  });
+});
+
+/** The module anew, in the window of the desktop app or in a browser: the façade chooses as it is loaded. */
+async function load(desktop: boolean) {
+  const w = window as { __TAURI_INTERNALS__?: unknown };
+  const internals = w.__TAURI_INTERNALS__;
+  if (!desktop) delete w.__TAURI_INTERNALS__;
+  vi.resetModules();
+  try {
+    return await import('./platform');
+  } finally {
+    w.__TAURI_INTERNALS__ = internals;
+  }
+}
+
+describe('what the interface asks of the system', () => {
+  afterEach(() => clearMocks());
+
+  it('in a browser: no dialog, no window to drive, a link in a tab of its own', async () => {
+    const platform = await load(false);
+    expect(platform.desktop).toBe(false);
+    const opened = vi.spyOn(window, 'open').mockReturnValue(null);
+    await platform.openUrl('https://example.com/a');
+    expect(opened).toHaveBeenCalledWith('https://example.com/a', '_blank', 'noopener');
+    // The core's rule: http, https, mailto and tel alone, refused with its words.
+    for (const ok of ['HTTP://example.com', 'mailto:a@b.c', 'tel:+33100000000']) await platform.openUrl(ok);
+    for (const [bad, scheme] of [
+      ['javascript:alert(1)', 'javascript'],
+      ['file:///etc/passwd', 'file'],
+      ['vscode://file/x', 'vscode'],
+    ])
+      await expect(platform.openUrl(bad)).rejects.toBe(`not a link Escouade opens: ${scheme}:`);
+    expect(opened).toHaveBeenCalledTimes(4);
+    expect(await platform.open({ directory: true, multiple: false })).toBeNull();
+    const win = platform.getCurrentWindow();
+    expect(await win.isMaximized()).toBe(false);
+    (await win.onResized(() => {}))();
+    await win.minimize();
+    await win.toggleMaximize();
+    await win.hide();
+    await win.setTheme('dark');
+    await platform.getCurrentWebview().setZoom(1.25);
+    (await platform.listen('devpages', () => {}))();
+  });
+
+  it('in the window: each one is Tauri’s, called with the same arguments', async () => {
+    const platform = await load(true);
+    expect(platform.desktop).toBe(true);
+    const calls: [string, unknown][] = [];
+    mockWindows('main');
+    mockIPC((cmd, args) => void calls.push([cmd, args]));
+    const { open } = await import('@tauri-apps/plugin-dialog');
+    const { openUrl } = await import('@tauri-apps/plugin-opener');
+    const { getCurrentWindow } = await import('@tauri-apps/api/window');
+    const { getCurrentWebview } = await import('@tauri-apps/api/webview');
+    const { listen } = await import('@tauri-apps/api/event');
+    const run = async (f: {
+      open: typeof open;
+      openUrl: typeof openUrl;
+      getCurrentWindow: typeof getCurrentWindow;
+      getCurrentWebview: typeof getCurrentWebview;
+      listen: typeof listen;
+    }) => {
+      await f.open({ directory: true, multiple: false, title: 'Dossier' });
+      await f.openUrl('https://example.com/a');
+      await f.getCurrentWindow().minimize();
+      await f.getCurrentWindow().setTheme('dark');
+      await f.getCurrentWebview().setZoom(1.25);
+      await f.listen('devpages', () => {});
+      return calls.splice(0).map(([cmd, args]) => [cmd, JSON.stringify(args).replace(/"handler":\d+/, '')]);
+    };
+    const theirs = await run({ open, openUrl, getCurrentWindow, getCurrentWebview, listen });
+    expect(await run(platform)).toEqual(theirs);
+    expect(theirs.map(([cmd]) => cmd)).toEqual([
+      'plugin:dialog|open',
+      'plugin:opener|open_url',
+      'plugin:window|minimize',
+      'plugin:window|set_theme',
+      'plugin:webview|set_webview_zoom',
+      'plugin:event|listen',
+    ]);
   });
 });

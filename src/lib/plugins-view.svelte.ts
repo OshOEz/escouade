@@ -1,6 +1,6 @@
 // The view Plugins (PLG-4, ESC-176; choices 213 to 218): the installed plugins as the core last gave them, the page shown,
 // and the install window — a plugin is read and set aside first (`inspect*`), installed only on the user's consent.
-import { open } from '@tauri-apps/plugin-dialog';
+import { open } from './platform';
 import { untrack } from 'svelte';
 import { fDayMonth, fTime } from './format';
 import { t } from './i18n';

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { open } from '@tauri-apps/plugin-dialog';
+  import { desktop, open } from '../../lib/platform';
   import { fDate, tildify } from '../../lib/format';
   import { t } from '../../lib/i18n';
   import { tip } from '../../lib/tip';
@@ -306,7 +306,7 @@
                 spellcheck="false"
                 autofocus
               />
-              <button class="btn" onclick={browse}><Icon name="folder" size={14} />{t('shell.newProject.browse')}</button>
+              {#if desktop}<button class="btn" onclick={browse}><Icon name="folder" size={14} />{t('shell.newProject.browse')}</button>{/if}
             </div>
             <span class="git" style:color={gitLine.color} use:tip={info?.repos?.length ? t('repos.wizard.foundHint') : undefined}
               ><span class="gd" style:background={gitLine.color}></span>{gitLine.text}</span

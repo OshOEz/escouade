@@ -9,6 +9,8 @@ export default {
     noAgent: 'Aucun agent dans ce projet.',
     newAgent: 'Nouvel agent',
     projectPrs: 'PR et CI du projet',
+    /** In a browser, a page to open the browser would block without a click: `{url}`, its address. */
+    pageToOpen: 'Une page à ouvrir : {url}',
   },
   welcome: {
     intro: 'Ajoute un projet pour y lancer des agents, suivre leurs questions et ouvrir des terminaux.',

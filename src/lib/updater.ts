@@ -7,6 +7,7 @@
 import { openUrl } from './opener';
 import { t } from './i18n';
 import { api } from './ipc';
+import { desktop } from './platform';
 import { check, UpdateTrouble, type FoundUpdate } from './update-check';
 import { app } from './state.svelte';
 
@@ -124,9 +125,10 @@ export function postponeRestart() {
 
 /**
  * Checks shortly after start, then five minutes after each check ends, so two never overlap.
- * Returns what stops the checks.
+ * Returns what stops the checks. A browser has no app to update: none there.
  */
 export function watchForUpdates(run: () => Promise<unknown> = () => checkForUpdate()): () => void {
+  if (!desktop) return () => {};
   let stopped = false;
   let timer: ReturnType<typeof setTimeout>;
   const tick = async () => {

@@ -5,6 +5,7 @@
   import { galleryOf } from '../../lib/gallery';
   import { t } from '../../lib/i18n';
   import { api } from '../../lib/ipc';
+  import { desktop } from '../../lib/platform';
   import { app } from '../../lib/state.svelte';
   import { tip } from '../../lib/tip';
   import type { EngineId, SentView, ToolItem } from '../../lib/types';
@@ -134,7 +135,7 @@
               {/if}
             </span>
           </span>
-          {#if there}
+          {#if there && desktop}
             <span class="acts">
               <!-- A program or a script the agent sent is never run from here: shown in its folder only. -->
               {#if !v.runnable}
