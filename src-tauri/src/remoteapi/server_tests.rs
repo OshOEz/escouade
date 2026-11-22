@@ -45,6 +45,7 @@ fn serve_table(loaded: &Loaded, entries: &'static [Entry]) -> Running {
     let config = Config {
         port: 0,
         token: TOKEN.into(),
+        web: None,
     };
     start(loaded.core.clone(), entries, config).unwrap()
 }
@@ -705,13 +706,19 @@ fn a_token_given_twice_is_refused() {
 }
 
 #[test]
-fn any_origin_is_refused() {
+fn a_foreign_origin_is_refused() {
     let loaded = load("remote-server-origin");
     let running = serve(&loaded);
+    let port = running.addr.port();
     for origin in [
-        format!("Origin: http://127.0.0.1:{}\r\n", running.addr.port()),
+        format!("Origin: http://127.0.0.1:{}\r\n", port.wrapping_add(1)),
+        format!("Origin: https://127.0.0.1:{port}\r\n"),
+        format!("Origin: http://127.0.0.1:{port}/\r\n"),
+        format!("Origin: http://evil.example:{port}\r\n"),
         "Origin: null\r\n".to_string(),
         "Origin:\r\n".to_string(),
+        // Given twice, whichever comes first.
+        format!("Origin: http://127.0.0.1:{port}\r\nOrigin: http://evil.example\r\n"),
     ] {
         let line = handshake(
             running.addr,
@@ -719,6 +726,272 @@ fn any_origin_is_refused() {
         );
         assert!(line.contains(" 403 "), "{origin:?}: {line}");
     }
+}
+
+#[test]
+fn the_servers_own_origin_is_let_in() {
+    let loaded = load("remote-server-own-origin");
+    let running = serve(&loaded);
+    let port = running.addr.port();
+    for origin in [
+        format!("http://127.0.0.1:{port}"),
+        format!("http://localhost:{port}"),
+    ] {
+        let headers = host(running.addr) + &format!("Origin: {origin}\r\n") + &bearer(TOKEN);
+        let line = handshake(running.addr, &headers);
+        assert!(line.contains(" 101 "), "{origin}: {line}");
+    }
+}
+
+#[test]
+fn the_bearer_header_still_works_without_an_origin() {
+    let loaded = load("remote-server-bearer");
+    let running = serve(&loaded);
+    rt::block_on(async {
+        let mut ws = connect(running.addr).await;
+        let a = call(&mut ws, 1, "data_dir", json!({})).await;
+        assert!(a["ok"].is_string(), "{a}");
+    });
+}
+
+/// The whole answer to the raw HTTP `request` (the server closes after it).
+fn http(addr: SocketAddr, request: &str) -> String {
+    let mut tcp = std::net::TcpStream::connect(addr).unwrap();
+    tcp.set_read_timeout(Some(Duration::from_secs(10))).unwrap();
+    tcp.write_all(request.as_bytes()).unwrap();
+    let mut got = Vec::new();
+    let _ = tcp.read_to_end(&mut got);
+    String::from_utf8_lossy(&got).into_owned()
+}
+
+/// `POST /session` with `body`, from the server's own page.
+fn post_session(addr: SocketAddr, body: &str) -> String {
+    let port = addr.port();
+    http(
+        addr,
+        &format!(
+            "POST /session HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nOrigin: http://127.0.0.1:{port}\r\n\
+             Content-Type: text/plain\r\nContent-Length: {}\r\n\r\n{body}",
+            body.len()
+        ),
+    )
+}
+
+/// The `Set-Cookie` header of `answer`, whole.
+fn set_cookie(answer: &str) -> Option<String> {
+    answer.lines().take_while(|l| !l.is_empty()).find_map(|l| {
+        let (name, value) = l.split_once(':')?;
+        name.eq_ignore_ascii_case("set-cookie")
+            .then(|| value.trim().to_string())
+    })
+}
+
+/// The `name=value` a browser sends back.
+fn cookie_of(answer: &str) -> String {
+    let cookie = set_cookie(answer).expect("a cookie");
+    cookie.split(';').next().unwrap().to_string()
+}
+
+#[test]
+fn the_cookie_is_httponly_and_samesite_strict() {
+    let loaded = load("remote-server-cookie-flags");
+    let running = serve(&loaded);
+    let answer = post_session(running.addr, TOKEN);
+    assert!(answer.starts_with("HTTP/1.1 204"), "{answer}");
+    let cookie = set_cookie(&answer).expect("a cookie");
+    let parts: Vec<&str> = cookie.split(';').map(str::trim).collect();
+    for flag in ["HttpOnly", "SameSite=Strict", "Path=/"] {
+        assert!(parts.contains(&flag), "{cookie}");
+    }
+    // The browser holds a session of its own, never the token.
+    assert!(!answer.contains(TOKEN), "{answer}");
+}
+
+#[test]
+fn a_wrong_token_gets_no_cookie() {
+    let loaded = load("remote-server-cookie-wrong");
+    let running = serve(&loaded);
+    for body in [TOKEN.replace('0', "1"), String::new()] {
+        let answer = post_session(running.addr, &body);
+        assert!(answer.starts_with("HTTP/1.1 401"), "{answer}");
+        assert_eq!(set_cookie(&answer), None, "{answer}");
+    }
+    // From a foreign page, not even the right token gets one.
+    let port = running.addr.port();
+    let answer = http(
+        running.addr,
+        &format!(
+            "POST /session HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nOrigin: http://evil.example\r\n\
+             Content-Length: {}\r\n\r\n{TOKEN}",
+            TOKEN.len()
+        ),
+    );
+    assert!(answer.starts_with("HTTP/1.1 403"), "{answer}");
+    assert_eq!(set_cookie(&answer), None, "{answer}");
+    // Asked of another host, not either.
+    let answer = http(
+        running.addr,
+        &format!(
+            "POST /session HTTP/1.1\r\nHost: evil.example:{port}\r\nOrigin: http://127.0.0.1:{port}\r\n\
+             Content-Length: {}\r\n\r\n{TOKEN}",
+            TOKEN.len()
+        ),
+    );
+    assert!(answer.starts_with("HTTP/1.1 403"), "{answer}");
+    assert_eq!(set_cookie(&answer), None, "{answer}");
+    // A body over 1 KiB is not read.
+    let answer = post_session(running.addr, &"x".repeat(1025));
+    assert!(answer.starts_with("HTTP/1.1 413"), "{answer}");
+    assert_eq!(set_cookie(&answer), None, "{answer}");
+}
+
+#[test]
+fn the_session_cookie_opens_the_socket() {
+    let loaded = load("remote-server-cookie-in");
+    let running = serve(&loaded);
+    let cookie = cookie_of(&post_session(running.addr, TOKEN));
+    let port = running.addr.port();
+    let headers = host(running.addr)
+        + &format!("Origin: http://127.0.0.1:{port}\r\nCookie: other=1; {cookie}\r\n");
+    let line = handshake(running.addr, &headers);
+    assert!(line.contains(" 101 "), "{line}");
+    // A made-up session, or none, opens nothing.
+    for cookie in [cookie.replace('=', "=x"), String::new()] {
+        let headers = host(running.addr) + &format!("Cookie: {cookie}\r\n");
+        let line = handshake(running.addr, &headers);
+        assert!(line.contains(" 401 "), "{cookie}: {line}");
+    }
+    // A wrong Bearer wins over the right cookie.
+    let headers =
+        host(running.addr) + &format!("Cookie: {cookie}\r\n") + &bearer(&TOKEN.replace('0', "1"));
+    let line = handshake(running.addr, &headers);
+    assert!(line.contains(" 401 "), "{line}");
+}
+
+#[test]
+fn a_foreign_origin_is_refused_even_with_the_cookie() {
+    let loaded = load("remote-server-cookie-foreign");
+    let running = serve(&loaded);
+    let cookie = cookie_of(&post_session(running.addr, TOKEN));
+    let headers =
+        host(running.addr) + &format!("Origin: http://evil.example\r\nCookie: {cookie}\r\n");
+    let line = handshake(running.addr, &headers);
+    assert!(line.contains(" 403 "), "{line}");
+}
+
+/// The server of `loaded` with a web build: an `index.html`, an asset, and a secret beside the build.
+fn serve_web(loaded: &Loaded) -> Running {
+    let web = loaded.dir.join("web");
+    std::fs::create_dir_all(web.join("assets")).unwrap();
+    std::fs::write(
+        web.join("index.html"),
+        "<!doctype html><title>Escouade</title>",
+    )
+    .unwrap();
+    std::fs::write(web.join("assets/app-1234.js"), "console.log(1)").unwrap();
+    std::fs::write(loaded.dir.join("Cargo.toml"), "secret").unwrap();
+    let config = Config {
+        port: 0,
+        token: TOKEN.into(),
+        web: Some(web),
+    };
+    start(loaded.core.clone(), table::entries(), config).unwrap()
+}
+
+/// `GET target` as the server's page asks it.
+fn get(addr: SocketAddr, target: &str) -> String {
+    http(
+        addr,
+        &format!(
+            "GET {target} HTTP/1.1\r\nHost: 127.0.0.1:{}\r\n\r\n",
+            addr.port()
+        ),
+    )
+}
+
+/// The value of the header `name` in `answer`.
+fn header_of(answer: &str, name: &str) -> Option<String> {
+    answer.lines().take_while(|l| !l.is_empty()).find_map(|l| {
+        let (n, v) = l.split_once(':')?;
+        n.eq_ignore_ascii_case(name).then(|| v.trim().to_string())
+    })
+}
+
+#[test]
+fn the_web_build_is_served() {
+    let loaded = load("remote-server-web");
+    let running = serve_web(&loaded);
+    let port = running.addr.port();
+    let page = get(running.addr, "/");
+    assert!(page.starts_with("HTTP/1.1 200"), "{page}");
+    assert!(
+        page.ends_with("<!doctype html><title>Escouade</title>"),
+        "{page}"
+    );
+    assert_eq!(
+        header_of(&page, "content-type").unwrap(),
+        "text/html; charset=utf-8"
+    );
+    assert_eq!(header_of(&page, "cache-control").unwrap(), "no-cache");
+    let csp = header_of(&page, "content-security-policy").unwrap();
+    assert!(csp.contains("default-src 'self'"), "{csp}");
+    assert!(
+        csp.contains(&format!("connect-src 'self' ws://127.0.0.1:{port}")),
+        "{csp}"
+    );
+    let asset = get(running.addr, "/assets/app-1234.js");
+    assert!(asset.starts_with("HTTP/1.1 200"), "{asset}");
+    assert!(asset.ends_with("console.log(1)"), "{asset}");
+    assert_eq!(
+        header_of(&asset, "content-type").unwrap(),
+        "text/javascript; charset=utf-8"
+    );
+    assert!(header_of(&asset, "cache-control")
+        .unwrap()
+        .contains("immutable"));
+    // Without a token: the files hold nothing of the core.
+    assert!(!page.contains(TOKEN));
+}
+
+#[test]
+fn nothing_outside_the_web_build_is_served() {
+    let loaded = load("remote-server-web-outside");
+    let running = serve_web(&loaded);
+    for target in [
+        "/absent.js",
+        "/assets",
+        "/assets/",
+        "/../Cargo.toml",
+        "/assets/../../Cargo.toml",
+        "/%2e%2e/Cargo.toml",
+        "/%2E%2E%2FCargo.toml",
+        "/..%2fCargo.toml",
+        "/..%5cCargo.toml",
+        "/.%2e/Cargo.toml",
+        "/assets/%2e%2e/%2e%2e/Cargo.toml",
+        "//etc/passwd",
+        "/index.html%00",
+    ] {
+        let answer = get(running.addr, target);
+        assert!(answer.starts_with("HTTP/1.1 404"), "{target}: {answer}");
+        assert!(!answer.contains("secret"), "{target}: {answer}");
+    }
+}
+
+#[test]
+fn without_a_web_build_only_the_socket_is_served() {
+    let loaded = load("remote-server-no-web");
+    let running = serve(&loaded);
+    let answer = get(running.addr, "/");
+    assert!(answer.starts_with("HTTP/1.1 404"), "{answer}");
+}
+
+#[test]
+fn a_file_asked_for_another_host_is_refused() {
+    let loaded = load("remote-server-web-host");
+    let running = serve_web(&loaded);
+    let answer = http(running.addr, "GET / HTTP/1.1\r\nHost: evil.example\r\n\r\n");
+    assert!(answer.starts_with("HTTP/1.1 403"), "{answer}");
 }
 
 #[test]
@@ -761,6 +1034,7 @@ fn the_calls_of_all_connections_stay_under_the_servers_cap() {
     let config = Config {
         port: 0,
         token: TOKEN.into(),
+        web: None,
     };
     // Two at once across the server, three asked on two connections.
     let running = start_with(loaded.core.clone(), SLOW_TABLE, config, 2).unwrap();
@@ -1045,6 +1319,7 @@ fn a_client_cut_while_an_attach_waits_for_room_frees_it_at_once() {
     let config = Config {
         port: 0,
         token: TOKEN.into(),
+        web: None,
     };
     // One call at a time across the server: the attach that waits holds it.
     let running = start_with(loaded.core.clone(), table::entries(), config, 1).unwrap();

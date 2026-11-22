@@ -1,17 +1,18 @@
 //! The core's commands served over a WebSocket on 127.0.0.1 (docs/REMOTE.md, « La fondation commune », points 2 and
 //! 6): off unless `ESCOUADE_REMOTE_PORT` and `ESCOUADE_REMOTE_TOKEN` are set, both taken out of the environment at
-//! start-up so that no child process inherits the token; release builds never read them nor listen. A connection
-//! brings the token, comes from no web page and names this server; its slot is taken before the handshake, so a local
-//! process may hold all 16 for up to 10 s each (acceptable for now). Its calls of one family keep their order, as the
-//! window's do (`windowthread`). The eight commands with a flow (`subscribe` and the terminals) are served here, the
-//! others by the table. A client's stream commands start one at a time, each waiting at most 10 s for half of its
-//! 16 MiB budget of terminal bytes, and give up when the connection ends; a client that does not read is closed: a
-//! queue that fills, or a socket write that hangs, closes it. A remote `subscribe` adds the connection to the hub's
+//! start-up so that no child process inherits the token; the desktop app reads them in debug builds only,
+//! `escouade-server` always. Every request names this server; one from a page comes from the page it serves (`--web`,
+//! `web`). A connection brings the token, or the session cookie `POST /session` gave a browser for it; its slot is
+//! taken before its request, so a local process may hold all 16 for up to 10 s each (acceptable for now). Its calls
+//! of one family keep their order, as the window's do (`windowthread`). The eight commands with a flow (`subscribe`
+//! and the terminals) are served here, the others by the table. A client's stream commands start one at a time, each
+//! waiting at most 10 s for half of its 16 MiB budget of terminal bytes, and give up when the connection ends; a
+//! client that does not read is closed: a queue that fills, or a socket write that hangs, closes it. A remote `subscribe` adds the connection to the hub's
 //! subscribers, the window keeping its own, until the connection ends; a second one takes the place of the first. A
 //! terminal's stream reads its output beside the window, from what it kept, until the connection ends. A remote
 //! `save_settings` retunes the desktop's conversation.
 use super::table::{self, CallError, Ctx, Entry, ResultTag};
-use super::wire;
+use super::{web, wire};
 use crate::commands::{self, CoreState};
 use crate::core::Core;
 use crate::hub::Subscription;
@@ -21,20 +22,32 @@ use crate::output::{Reader, Viewer};
 use crate::sink::{Closed, Sink};
 use escouade_base::rt;
 use futures_util::{SinkExt, StreamExt};
+use http_body_util::{BodyExt, Full, Limited};
+use hyper::body::{Bytes, Incoming};
+use hyper::server::conn::http1;
+use hyper::service::service_fn;
+use hyper::upgrade::OnUpgrade;
+use hyper_util::rt::{TokioIo, TokioTimer};
 use parking_lot::Mutex;
 use serde_json::Value;
 use std::collections::HashMap;
+use std::convert::Infallible;
 use std::net::{Ipv4Addr, SocketAddr};
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Weak};
 use std::time::Duration;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::mpsc::{self, error::TrySendError};
 use tokio::sync::{watch, Notify, OwnedSemaphorePermit, Semaphore};
-use tokio_tungstenite::tungstenite::handshake::server::{ErrorResponse, Request, Response};
-use tokio_tungstenite::tungstenite::http::{header, StatusCode};
-use tokio_tungstenite::tungstenite::protocol::WebSocketConfig;
+use tokio_tungstenite::tungstenite::handshake::derive_accept_key;
+use tokio_tungstenite::tungstenite::http::{header, HeaderMap, Method, StatusCode};
+use tokio_tungstenite::tungstenite::protocol::{Role, WebSocketConfig};
 use tokio_tungstenite::tungstenite::Message;
+use tokio_tungstenite::WebSocketStream;
+
+type Request = hyper::Request<Incoming>;
+type Response = hyper::Response<Full<Bytes>>;
 
 const PORT_VAR: &str = "ESCOUADE_REMOTE_PORT";
 const TOKEN_VAR: &str = "ESCOUADE_REMOTE_TOKEN";
@@ -60,8 +73,12 @@ const BYTES_BUDGET: usize = 4 * crate::output::OUTPUT_KEPT;
 const FRAME_COST: usize = 64;
 /// How long one frame may take to reach the socket before the connection is closed.
 const WRITE: Duration = Duration::from_secs(10);
-/// How long a connection has to make its handshake.
+/// How long a connection has to send its request's head.
 const HANDSHAKE: Duration = Duration::from_secs(10);
+/// How long a request may take, answer included (a file of the web build through a slow tunnel).
+const EXCHANGE: Duration = Duration::from_secs(60);
+/// The most `POST /session` reads: a token.
+const MAX_SESSION_BODY: usize = 1024;
 /// The commands with a flow, which this server serves itself.
 const STREAMS: [&str; 8] = [
     "subscribe",
@@ -74,10 +91,11 @@ const STREAMS: [&str; 8] = [
     "test_run_start",
 ];
 
-/// Where the server listens and the token its clients bring.
+/// Where the server listens, the token its clients bring, and the web build it serves, if any.
 pub struct Config {
     pub port: u16,
     pub token: String,
+    pub web: Option<PathBuf>,
 }
 
 impl std::fmt::Debug for Config {
@@ -85,6 +103,7 @@ impl std::fmt::Debug for Config {
         f.debug_struct("Config")
             .field("port", &self.port)
             .field("token", &"<hidden>")
+            .field("web", &self.web)
             .finish()
     }
 }
@@ -117,6 +136,7 @@ impl Config {
         Ok(Some(Config {
             port,
             token: token.to_string(),
+            web: None,
         }))
     }
 }
@@ -165,11 +185,15 @@ fn start_with(
     let addr = listener.local_addr()?;
     let tokens = escouade_mcp::Tokens::default();
     *tokens.external.write() = Some(config.token);
+    let sessions = escouade_mcp::Tokens::default();
+    *sessions.external.write() = Some(escouade_mcp::new_token());
     let server = Arc::new(Server {
         core,
         entries,
         port: addr.port(),
         tokens,
+        sessions,
+        web: config.web,
         calls: Arc::new(Semaphore::new(calls)),
     });
     let (stop, stopped) = watch::channel(false);
@@ -183,6 +207,10 @@ struct Server {
     port: u16,
     /// The one token, compared in constant time.
     tokens: escouade_mcp::Tokens,
+    /// The session a browser's cookie holds in place of the token, made at start: the token never sits in a browser.
+    sessions: escouade_mcp::Tokens,
+    /// The web build's folder.
+    web: Option<PathBuf>,
     /// The calls under way, all connections together.
     calls: Arc<Semaphore>,
 }
@@ -218,59 +246,217 @@ impl Server {
         }
     }
 
-    /// Whether the handshake `req` may open: one `Host`, this server's; no `Origin`; one `Authorization`, the token.
-    fn admit(&self, req: &Request) -> Result<(), StatusCode> {
+    /// Whether `headers` name this server: one `Host`, its own, and no `Origin` but its own page's.
+    fn mine(&self, uri: &hyper::Uri, headers: &HeaderMap) -> Result<(), StatusCode> {
         let port = self.port;
         let mine = |host: &str| {
             [format!("127.0.0.1:{port}"), format!("localhost:{port}")]
                 .iter()
                 .any(|h| h.eq_ignore_ascii_case(host))
         };
-        let headers = req.headers();
         // A header given twice could be read differently by another reader: refused.
         let once = |name| headers.get_all(name).iter().count() == 1;
         let host = headers
             .get(header::HOST)
             .filter(|_| once(header::HOST))
             .and_then(|h| h.to_str().ok());
-        let authority = req.uri().authority().map(|a| a.as_str());
+        let authority = uri.authority().map(|a| a.as_str());
         if !host.is_some_and(mine) || authority.is_some_and(|a| !mine(a)) {
             return Err(StatusCode::FORBIDDEN);
         }
         if headers.contains_key(header::ORIGIN) {
-            return Err(StatusCode::FORBIDDEN);
-        }
-        if !once(header::AUTHORIZATION) {
-            return Err(StatusCode::UNAUTHORIZED);
-        }
-        let token = headers
-            .get(header::AUTHORIZATION)
-            .and_then(|v| v.to_str().ok())
-            .and_then(|v| v.trim().split_once(' '))
-            .filter(|(scheme, _)| scheme.eq_ignore_ascii_case("bearer"))
-            .map_or("", |(_, token)| token.trim());
-        if self.tokens.caller(token).is_none() {
-            return Err(StatusCode::UNAUTHORIZED);
+            let own = [
+                format!("http://127.0.0.1:{port}"),
+                format!("http://localhost:{port}"),
+            ];
+            let origin = headers.get(header::ORIGIN).filter(|_| once(header::ORIGIN));
+            if !origin.is_some_and(|o| own.iter().any(|own| o.as_bytes() == own.as_bytes())) {
+                return Err(StatusCode::FORBIDDEN);
+            }
         }
         Ok(())
     }
 
-    async fn serve(self: Arc<Self>, tcp: TcpStream, mut stopped: watch::Receiver<bool>) {
-        #[allow(clippy::result_large_err)] // The shape of tungstenite's callback.
-        let check = |req: &Request, ok: Response| -> Result<Response, ErrorResponse> {
-            self.admit(req).map(|()| ok).map_err(|status| {
-                let mut refused = ErrorResponse::new(None);
-                *refused.status_mut() = status;
-                refused
-            })
+    /// Whether `headers` bring the token (one `Authorization`) or, without it, this server's session cookie.
+    fn admit(&self, headers: &HeaderMap) -> Result<(), StatusCode> {
+        if headers.contains_key(header::AUTHORIZATION) {
+            if headers.get_all(header::AUTHORIZATION).iter().count() != 1 {
+                return Err(StatusCode::UNAUTHORIZED);
+            }
+            let token = headers
+                .get(header::AUTHORIZATION)
+                .and_then(|v| v.to_str().ok())
+                .and_then(|v| v.trim().split_once(' '))
+                .filter(|(scheme, _)| scheme.eq_ignore_ascii_case("bearer"))
+                .map_or("", |(_, token)| token.trim());
+            return match self.tokens.caller(token) {
+                Some(_) => Ok(()),
+                None => Err(StatusCode::UNAUTHORIZED),
+            };
+        }
+        let name = self.cookie_name();
+        let session = headers
+            .get_all(header::COOKIE)
+            .iter()
+            .filter_map(|v| v.to_str().ok())
+            .flat_map(|v| v.split(';'))
+            .filter_map(|c| c.trim().split_once('='))
+            .any(|(n, v)| n == name && self.sessions.caller(v).is_some());
+        if session {
+            Ok(())
+        } else {
+            Err(StatusCode::UNAUTHORIZED)
+        }
+    }
+
+    /// The session cookie's name: a browser sends its cookies to every port of a host, each server has its own.
+    fn cookie_name(&self) -> String {
+        format!("escouade-{}", self.port)
+    }
+
+    /// One request per connection: a file, a session, or the WebSocket, which then holds the connection.
+    async fn serve(self: Arc<Self>, tcp: TcpStream, stopped: watch::Receiver<bool>) {
+        let upgrade: Arc<Mutex<Option<OnUpgrade>>> = Arc::default();
+        let (me, upgraded) = (self.clone(), upgrade.clone());
+        let service = service_fn(move |req| {
+            let (me, upgraded) = (me.clone(), upgraded.clone());
+            async move {
+                let mut answer = me.answer(req, &upgraded).await;
+                // The slot is held from the start: the next request comes on a connection of its own.
+                if answer.status() != StatusCode::SWITCHING_PROTOCOLS {
+                    let close = header::HeaderValue::from_static("close");
+                    answer.headers_mut().insert(header::CONNECTION, close);
+                }
+                Ok::<_, Infallible>(answer)
+            }
+        });
+        let conn = http1::Builder::new()
+            .timer(TokioTimer::new())
+            .header_read_timeout(HANDSHAKE)
+            .serve_connection(TokioIo::new(tcp), service)
+            .with_upgrades();
+        let Ok(Ok(())) = tokio::time::timeout(EXCHANGE, conn).await else {
+            return;
+        };
+        let Some(on_upgrade) = upgrade.lock().take() else {
+            return;
+        };
+        let Ok(Ok(io)) = tokio::time::timeout(HANDSHAKE, on_upgrade).await else {
+            return;
         };
         let config = WebSocketConfig::default()
             .max_message_size(Some(MAX_REQUEST))
             .max_frame_size(Some(MAX_REQUEST));
-        let handshake = tokio_tungstenite::accept_hdr_async_with_config(tcp, check, Some(config));
-        let Ok(Ok(ws)) = tokio::time::timeout(HANDSHAKE, handshake).await else {
-            return;
+        let ws =
+            WebSocketStream::from_raw_socket(TokioIo::new(io), Role::Server, Some(config)).await;
+        self.session(ws, stopped).await;
+    }
+
+    /// The answer to `req`; a WebSocket's leaves its connection in `upgrade`.
+    async fn answer(&self, req: Request, upgrade: &Mutex<Option<OnUpgrade>>) -> Response {
+        if let Err(status) = self.mine(req.uri(), req.headers()) {
+            return empty(status);
+        }
+        let wants_ws = req
+            .headers()
+            .get(header::UPGRADE)
+            .is_some_and(|v| v.as_bytes().eq_ignore_ascii_case(b"websocket"));
+        if wants_ws {
+            return self.upgrade(req, upgrade);
+        }
+        match (req.method(), req.uri().path()) {
+            (&Method::POST, "/session") => self.open_session(req).await,
+            (&Method::GET | &Method::HEAD, path) => self.file(&req, path.to_string()).await,
+            _ => empty(StatusCode::METHOD_NOT_ALLOWED),
+        }
+    }
+
+    /// The WebSocket's handshake, its token or session checked.
+    fn upgrade(&self, mut req: Request, upgrade: &Mutex<Option<OnUpgrade>>) -> Response {
+        if let Err(status) = self.admit(req.headers()) {
+            return empty(status);
+        }
+        let headers = req.headers();
+        let version = headers.get(header::SEC_WEBSOCKET_VERSION);
+        let key = headers.get(header::SEC_WEBSOCKET_KEY);
+        let (Some(key), true) = (key, version.is_some_and(|v| v == "13")) else {
+            return empty(StatusCode::BAD_REQUEST);
         };
+        if req.method() != Method::GET {
+            return empty(StatusCode::BAD_REQUEST);
+        }
+        let accept = derive_accept_key(key.as_bytes());
+        *upgrade.lock() = Some(hyper::upgrade::on(&mut req));
+        hyper::Response::builder()
+            .status(StatusCode::SWITCHING_PROTOCOLS)
+            .header(header::CONNECTION, "Upgrade")
+            .header(header::UPGRADE, "websocket")
+            .header(header::SEC_WEBSOCKET_ACCEPT, accept)
+            .body(Full::default())
+            .expect("a valid answer")
+    }
+
+    /// `POST /session`: the token in the body gives the browser its session cookie, which a script cannot read.
+    async fn open_session(&self, req: Request) -> Response {
+        let Ok(body) = Limited::new(req.into_body(), MAX_SESSION_BODY)
+            .collect()
+            .await
+        else {
+            return empty(StatusCode::PAYLOAD_TOO_LARGE);
+        };
+        let body = body.to_bytes();
+        let token = std::str::from_utf8(&body).unwrap_or_default().trim();
+        if self.tokens.caller(token).is_none() {
+            return empty(StatusCode::UNAUTHORIZED);
+        }
+        let session = self.sessions.external.read().clone().unwrap_or_default();
+        let cookie = format!(
+            "{}={session}; HttpOnly; SameSite=Strict; Path=/",
+            self.cookie_name()
+        );
+        hyper::Response::builder()
+            .status(StatusCode::NO_CONTENT)
+            .header(header::SET_COOKIE, cookie)
+            .header(header::CACHE_CONTROL, "no-store")
+            .body(Full::default())
+            .expect("a valid answer")
+    }
+
+    /// A file of the web build, none without one.
+    async fn file(&self, req: &Request, path: String) -> Response {
+        let Some(root) = self.web.clone() else {
+            return empty(StatusCode::NOT_FOUND);
+        };
+        let file = rt::spawn_blocking(move || web::read(&root, &path)).await;
+        let Ok(Some(file)) = file else {
+            return empty(StatusCode::NOT_FOUND);
+        };
+        // The page's own host (checked above), for its WebSocket.
+        let host = req
+            .headers()
+            .get(header::HOST)
+            .and_then(|h| h.to_str().ok())
+            .unwrap_or_default();
+        let csp = format!(
+            "default-src 'self'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; \
+             font-src 'self' data:; script-src 'self' 'wasm-unsafe-eval'; connect-src 'self' ws://{host}; \
+             frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
+        );
+        hyper::Response::builder()
+            .header(header::CONTENT_TYPE, file.mime)
+            .header(header::CACHE_CONTROL, file.cache)
+            .header(header::CONTENT_SECURITY_POLICY, csp)
+            .header(header::X_CONTENT_TYPE_OPTIONS, "nosniff")
+            .body(Full::new(Bytes::from(file.body)))
+            .expect("a valid answer")
+    }
+
+    /// A client's WebSocket, until it or the server ends.
+    async fn session(
+        self: Arc<Self>,
+        ws: WebSocketStream<TokioIo<hyper::upgrade::Upgraded>>,
+        mut stopped: watch::Receiver<bool>,
+    ) {
         let (mut out, mut input) = ws.split();
         let hello = Message::text(wire::hello(&self.core.host.version()));
         let Ok(Ok(())) = tokio::time::timeout(WRITE, out.send(hello)).await else {
@@ -635,6 +821,13 @@ impl Conn {
         streams.insert(stream, reader);
         Ok(viewer)
     }
+}
+
+/// An answer with no body.
+fn empty(status: StatusCode) -> Response {
+    let mut answer = hyper::Response::new(Full::default());
+    *answer.status_mut() = status;
+    answer
 }
 
 /// What a stream command gets once its connection has ended.

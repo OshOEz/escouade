@@ -1,8 +1,8 @@
 //! The core's remote API: the same commands as the window's, called with JSON without Tauri (docs/REMOTE.md,
-//! « La fondation commune », point 2), and served over a WebSocket on 127.0.0.1 (`server`, point 6).
+//! « La fondation commune », point 2), and served over a WebSocket on 127.0.0.1 (`server`, point 6), beside the files
+//! of the web build (`web`).
 
-// Served in debug builds only (`app.rs`): release builds compile it without starting it.
-#[cfg_attr(not(debug_assertions), allow(dead_code))]
 pub mod server;
 pub mod table;
+pub mod web;
 pub mod wire;

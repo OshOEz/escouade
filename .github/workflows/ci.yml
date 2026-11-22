@@ -703,10 +703,10 @@ jobs:
       # escouade-hook, the hook of the harnesses that run theirs as commands, and escouade-plugin, the command of the
       # plugins' authors (their conformance bench), ship beside the app; escouade-plugins left with ESC-355. On Linux no
       # signature is checked by the system: the packages are the updater's and the repository's.
-      - name: The packages hold escouade-hook and escouade-plugin, and no escouade-plugins
+      - name: The packages hold escouade-hook and escouade-plugin, and no escouade-plugins nor escouade-server
         run: |
           appimage=$(ls "$PWD"/src-tauri/target/debug/bundle/appimage/*.AppImage)
-          ! dpkg -c src-tauri/target/debug/bundle/deb/*.deb | grep -E "usr/bin/escouade-plugins$"
+          ! dpkg -c src-tauri/target/debug/bundle/deb/*.deb | grep -E "usr/bin/escouade-(plugins|server)$"
           for bin in escouade-hook escouade-plugin; do
             dpkg -c src-tauri/target/debug/bundle/deb/*.deb | grep -E "usr/bin/$bin$"
             (cd "$RUNNER_TEMP" && "$appimage" --appimage-extract "usr/bin/$bin" >/dev/null && test -x "squashfs-root/usr/bin/$bin")
@@ -801,7 +801,20 @@ jobs:
 
       - name: Clippy without the desktop
         run: |
-          cargo clippy --locked --no-default-features -p escouade --all-targets -- -D warnings || { echo "::error::A core module uses the desktop: put it under feature \"desktop\" (docs/CRATES.md § 16)"; exit 1; }
+          cargo clippy --locked --no-default-features --features server -p escouade --all-targets -- -D warnings || { echo "::error::A core module uses the desktop: put it under feature \"desktop\" (docs/CRATES.md § 16)"; exit 1; }
+
+      # The server built as it ships: no library of the desktop linked (the runner has them installed, so `ldd` is the proof).
+      # Only with feature `server`: the desktop's build, whose installers ship every bin, never builds it.
+      - name: escouade-server, with no desktop library linked
+        run: |
+          cargo build --locked --bin escouade-server 2>&1 | grep -q 'requires the features: `server`'
+          cargo build --locked --no-default-features --features server --bin escouade-server
+          libs=$(ldd target/debug/escouade-server)
+          printf '%s\n' "$libs"
+          if printf '%s\n' "$libs" | grep -Ei 'gtk|gdk|webkit|javascriptcore|soup|dbus|asound'; then
+            echo "::error::escouade-server links a library of the desktop"
+            exit 1
+          fi
 
       # What the tests play in the app's host (.config/nextest.toml).
       - name: The modules of the plugins, which the tests play
@@ -822,7 +835,7 @@ jobs:
           CARGO_PROFILE_DEV_DEBUG: 0
         run: |
           set +e
-          cargo nextest run --locked --no-default-features -p escouade --profile ci 2>&1 | tee nextest.log
+          cargo nextest run --locked --no-default-features --features server -p escouade --profile ci 2>&1 | tee nextest.log
           status=${PIPESTATUS[0]}
           node ../scripts/nextest-annotations.mjs nextest.log target/nextest/ci/junit.xml $status
           exit $status
@@ -1014,10 +1027,11 @@ jobs:
 
       # escouade-hook and escouade-plugin ship beside the app, each with a code signature that holds (ad hoc here, as the
       # Release signs without its certificate); escouade-plugins left with ESC-355.
-      - name: The app holds escouade-hook and escouade-plugin, signed, and no escouade-plugins
+      - name: The app holds escouade-hook and escouade-plugin, signed, and no escouade-plugins nor escouade-server
         run: |
           macos=src-tauri/target/debug/bundle/macos/Escouade.app/Contents/MacOS
           test ! -e "$macos/escouade-plugins"
+          test ! -e "$macos/escouade-server"
           for bin in escouade-hook escouade-plugin; do
             test -x "$macos/$bin"
             codesign --verify --strict --verbose=2 "$macos/$bin"

@@ -7,6 +7,8 @@ license = "GPL-3.0-or-later"
 edition = "2021"
 rust-version = "1.88"
 # The app; `escouade-hook` and `escouade-plugin` (src/bin) are the other programs the installers ship beside it.
+# `escouade-server` (src/bin) is the core without a window, built with feature `server` alone (`--no-default-features
+# --features server`): never with the desktop, so no installer of the app ships it.
 default-run = "escouade"
 
 [features]
@@ -36,6 +38,9 @@ voice = ["escouade-voice-local/native"]
 # ONNX Runtime loaded from a library at run time, as on Intel Macs and Linux: to try that path elsewhere
 # (`ESCOUADE_ORT_DYLIB` names the library, read by a build with this feature alone).
 ort-dynamic = ["escouade-ort/ort-dynamic"]
+# escouade-server and its tests (`--no-default-features --features server`): out of the desktop's builds, whose
+# installers ship every bin of the package.
+server = []
 
 [lib]
 name = "escouade_lib"
@@ -49,6 +54,16 @@ crate-type = ["rlib"]
 name = "escouade"
 path = "src/main.rs"
 required-features = ["desktop"]
+
+[[bin]]
+name = "escouade-server"
+path = "src/bin/escouade-server.rs"
+required-features = ["server"]
+
+[[test]]
+name = "escouade_server"
+path = "tests/escouade_server.rs"
+required-features = ["server"]
 
 [[example]]
 name = "devpage_probe"
@@ -73,7 +88,8 @@ semver = "1"
 tauri-plugin-window-state = { version = "2", optional = true }
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["raw_value"] }
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "process", "io-util", "sync", "time", "fs", "net"] }
+# `signal`: SIGINT and SIGTERM stop `escouade-server` (already built by a dependency: nothing new in the lock).
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "process", "io-util", "sync", "time", "fs", "net", "signal"] }
 anyhow = "1"
 glob = "0.3"
 parking_lot = "0.13"

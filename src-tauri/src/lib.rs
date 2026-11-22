@@ -1,5 +1,5 @@
-// shortcut: hides the headless build's dead code, to be removed when a server binary uses the core.
-#![cfg_attr(not(feature = "desktop"), allow(dead_code))]
+// Without the desktop, the window's and the voice's code in the modules marked `allow(dead_code)` below has no caller
+// (the commands of the window, the voice, the focus and the quit of the window): the rest is checked.
 // First: its macros (`tr!`, `tr_in!`) are then in scope in every module below.
 #[macro_use]
 extern crate escouade_plugin_cli;
@@ -22,6 +22,7 @@ mod alerts;
 mod app;
 #[cfg(feature = "desktop")]
 pub use app::{devpage_probe_cli, run};
+#[cfg_attr(not(feature = "desktop"), allow(dead_code))]
 mod asks;
 #[cfg(test)]
 mod asks_tests;
@@ -44,6 +45,7 @@ mod codesearch;
 mod codex_tests;
 #[cfg(test)]
 mod codex_tui_tests;
+#[cfg_attr(not(feature = "desktop"), allow(dead_code))]
 mod commands;
 mod conv;
 mod convsearch;
@@ -51,6 +53,7 @@ mod convsearch;
 mod copilot_tests;
 #[cfg(test)]
 mod copilot_tui_tests;
+#[cfg_attr(not(feature = "desktop"), allow(dead_code))]
 mod core;
 #[cfg(test)]
 mod core_tests;
@@ -120,6 +123,7 @@ mod fetch_tests;
 mod fileorigin;
 #[cfg(all(test, feature = "desktop"))]
 mod fileorigin_tests;
+#[cfg_attr(not(feature = "desktop"), allow(dead_code))]
 mod fileorigins;
 #[cfg(test)]
 mod first_message_tests;
@@ -141,6 +145,7 @@ mod harness_scope;
 mod harness_scope_tests;
 #[cfg(not(feature = "desktop"))]
 mod headless;
+mod headless_host;
 mod host;
 mod hub;
 mod inboxnotify;
@@ -153,13 +158,16 @@ mod integrations;
 #[cfg(test)]
 mod integrations_tests;
 mod isola;
+#[cfg_attr(not(feature = "desktop"), allow(dead_code))]
 mod lanes;
 mod launchenv;
 mod leftovers;
+#[cfg_attr(not(feature = "desktop"), allow(dead_code))]
 mod mcp;
 mod memory;
 #[cfg(feature = "desktop")]
 mod menus;
+#[cfg_attr(not(feature = "desktop"), allow(dead_code))]
 mod model;
 mod modes;
 #[cfg(test)]
@@ -175,6 +183,7 @@ mod opencode_tests;
 mod opening;
 #[cfg(test)]
 mod opening_tests;
+#[cfg_attr(not(feature = "desktop"), allow(dead_code))]
 mod output;
 #[cfg(feature = "desktop")]
 mod outside;
@@ -273,6 +282,7 @@ mod prreview;
 mod prview;
 #[cfg(test)]
 mod prview_tests;
+#[cfg_attr(not(feature = "desktop"), allow(dead_code))]
 mod pty;
 mod quarantine;
 mod repos;
@@ -281,6 +291,7 @@ mod repos_tests;
 mod resources;
 mod search;
 mod selfupdate;
+#[cfg_attr(not(feature = "desktop"), allow(dead_code))]
 mod sentfiles;
 #[cfg(test)]
 mod sentfiles_tests;
@@ -299,6 +310,7 @@ mod switching;
 mod switching_tests;
 mod syspath;
 mod taskout;
+#[cfg_attr(not(feature = "desktop"), allow(dead_code))]
 mod telemetry;
 #[cfg(test)]
 mod terminal_tests;
@@ -311,6 +323,7 @@ mod third_party;
 mod ticket_accounts_tests;
 mod ticketfiles;
 mod ticketimages;
+#[cfg_attr(not(feature = "desktop"), allow(dead_code))]
 mod ticketprs;
 mod tickets;
 #[cfg(test)]
@@ -327,6 +340,7 @@ mod vectors;
 mod vibe_tests;
 #[cfg(test)]
 mod vibe_tui_tests;
+#[cfg_attr(not(feature = "desktop"), allow(dead_code))]
 mod voice;
 use escouade_engines::which;
 #[cfg(feature = "desktop")]
@@ -408,6 +422,11 @@ fn init_logging() {
 /// for the plugins' authors (PLG-3). Gives the exit code.
 pub fn plugin_cli(args: Vec<String>) -> i32 {
     plugins::bench::cli::main(args)
+}
+
+/// `escouade-server` (src/bin): the core without a window, served on 127.0.0.1. Gives the exit code.
+pub fn server_cli(args: Vec<String>) -> i32 {
+    headless_host::run(args)
 }
 
 /// Every command, once: `commands` gives them to Tauri and to the remote table (`escouade_macros::handlers!`).
