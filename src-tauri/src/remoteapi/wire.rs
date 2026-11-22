@@ -13,7 +13,12 @@
 //!   resize);
 //! - a stream replays the kept bytes (up to 4 MiB, in pieces of at most 64 KiB, possibly from mid-screen), then the
 //!   live ones; it ends with its terminal (`terminalExit`, which may come before its last bytes) or with the
-//!   connection: there is no detach command.
+//!   connection: there is no detach command;
+//! - a client that reads slower than its terminals print loses their bytes past its budget: such a stream starts
+//!   again with a full reset (`ESC c`), the modes of an interface, then the replay, and follows from there; the
+//!   screen so drawn is the replay's, which may start mid-screen: a full-screen program in a shell (vim, htop), whose
+//!   modes are not followed, may lose those older than the replay (alternate screen, cursor keys, mouse) until it draws
+//!   or sets them again.
 
 use super::table::CallError;
 use crate::model::UiEvent;

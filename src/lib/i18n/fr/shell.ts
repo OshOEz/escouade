@@ -141,7 +141,11 @@ export default {
   connection: {
     lost: 'La connexion au serveur est perdue : nouvelle tentative en cours…',
     back: 'La connexion au serveur est rétablie.',
-    outdated: 'Le serveur ne parle plus la langue de cette page : rechargez-la.',
+    outdated: 'Le serveur ne parle plus la langue de cette page : recharge-la.',
+    /** On a view the return does not read again (an agent's interface, a launch's run): a button that does. */
+    stale: 'Reconnecté : recharger cette vue',
+    /** On such a view, when its agent's interface started anew meanwhile: the old one is gone. */
+    restarted: 'L’interface de l’agent a redémarré pendant la coupure : clique sur « Relancer ».',
   },
   /** The update downloaded, its notes once installed, and the toasts about it. */
   update: {

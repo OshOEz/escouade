@@ -184,8 +184,9 @@ enum ModeParse {
 }
 
 impl ViewState {
-    /// Follows the modes `data` sets or resets.
-    fn track_modes(&mut self, data: &[u8]) {
+    /// Follows the modes `data` sets or resets: true when one changed.
+    fn track_modes(&mut self, data: &[u8]) -> bool {
+        let mut changed = false;
         for &b in data {
             self.parse = match (std::mem::take(&mut self.parse), b) {
                 (_, ESC) => ModeParse::Esc,
@@ -204,7 +205,7 @@ impl ViewState {
                             .and_then(|n| n.parse::<u16>().ok());
                         if let Some(mode) = mode {
                             if self.modes.len() < MAX_MODES || self.modes.contains_key(&mode) {
-                                self.modes.insert(mode, b == b'h');
+                                changed |= self.modes.insert(mode, b == b'h') != Some(b == b'h');
                             }
                         }
                     }
@@ -213,6 +214,7 @@ impl ViewState {
                 _ => ModeParse::Ground,
             };
         }
+        changed
     }
 
     /// The sequences that set the modes again, as last seen.
@@ -265,9 +267,10 @@ impl TuiOutput {
     /// answers it, where a window would have (the same lock tells whether one does).
     pub(crate) fn push(&self, data: Vec<u8>) -> bool {
         let mut o = self.inner.lock();
-        o.track_modes(&data);
+        // What a reader that comes, or one caught up, is sent first: set with the bytes that set it, in one step.
+        let first = o.track_modes(&data).then(|| o.modes_again());
         let asked = o.query.feed(&data);
-        self.output.push(data);
+        self.output.push_with_first(data, first);
         asked && !o.shown
     }
 
@@ -284,8 +287,8 @@ impl TuiOutput {
     /// the answers typed into the interface.
     pub(crate) fn attach(&self, forward: Forward) {
         let mut o = self.inner.lock();
-        // The modes first: the start of the output, which set them, may be gone.
-        self.output.read_by_after(o.modes_again(), forward);
+        // The modes first (`push_with_first`): the start of the output, which set them, may be gone.
+        self.output.read_by(forward);
         o.shown = true;
     }
 

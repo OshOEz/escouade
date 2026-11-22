@@ -131,6 +131,10 @@ export default defineZone('shell', {
     lost: 'The connection to the server is lost: trying again…',
     back: 'The connection to the server is back.',
     outdated: 'The server no longer speaks this page’s language: reload it.',
+    /** On a view the return does not read again (an agent's interface, a launch's run): a button that does. */
+    stale: 'Reconnected: reload this view',
+    /** On such a view, when its agent's interface started anew meanwhile: the old one is gone. */
+    restarted: 'The agent’s interface started again while the connection was lost: click “Restart”.',
   },
   /** The update downloaded, its notes once installed, and the toasts about it. */
   update: {

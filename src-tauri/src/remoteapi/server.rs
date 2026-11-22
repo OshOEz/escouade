@@ -9,9 +9,13 @@
 //! by the WebSocket's subprotocol `bearer.<token>`: never a cookie, which a browser would send to every port of the
 //! host. A device revoked has its connections closed at once. A connection's slot is taken before its request, so a local process may hold all 16 for up to 10 s each (acceptable for now). Its calls
 //! of one family keep their order, as the window's do (`windowthread`). The eight commands with a flow (`subscribe`
-//! and the terminals) are served here, the others by the table. A client's stream commands start one at a time, each
-//! waiting at most 10 s for half of its 16 MiB budget of terminal bytes, and give up when the connection ends; a
-//! client that does not read is closed: a queue that fills, or a socket write that hangs, closes it. A remote `subscribe` adds the connection to the hub's
+//! and the terminals) are served here, the others by the table; `term_attach` on a lane of its own, apart from the keys.
+//! A client's stream commands start one at a time, each waiting at most 10 s for half of its 16 MiB budget of terminal
+//! bytes, and give up when the connection ends. A terminal's bytes that find the budget full are dropped for that
+//! client, whose stream falls behind and is caught up from the terminal's kept output (a full reset, then the replay)
+//! once half the budget is free: the server waits for no one and holds no more. A client is closed when its socket
+//! takes less than `IDLE_LEAST` in `IDLE` while something waits for it, or when its queue of answers and events fills.
+//! A remote `subscribe` adds the connection to the hub's
 //! subscribers, the window keeping its own, until the connection ends; a second one takes the place of the first. A
 //! terminal's stream reads its output beside the window, from what it kept, until the connection ends. A remote
 //! `save_settings` retunes the desktop's conversation. The bytes of files go beside the WebSocket, by HTTP (`files`).
@@ -35,11 +39,11 @@ use hyper::upgrade::OnUpgrade;
 use hyper_util::rt::{TokioIo, TokioTimer};
 use parking_lot::Mutex;
 use serde_json::Value;
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 use std::convert::Infallible;
 use std::net::{Ipv4Addr, SocketAddr};
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicUsize, Ordering};
 use std::sync::{Arc, Weak};
 use std::time::Duration;
 use tokio::net::TcpListener;
@@ -72,14 +76,19 @@ const MAX_CALLS: usize = 64;
 const MAX_STREAMS: usize = 256;
 /// Answers and events waiting for the socket; full, the connection is closed.
 const TEXT_QUEUE: usize = 1024;
-/// The terminals' bytes waiting for the socket (16 MiB, four full replays of a terminal's kept output); past it, the
-/// connection is closed. A client's stream commands start one at a time, each once half of it is free: a whole replay
+/// The terminals' bytes waiting for the socket (16 MiB, four full replays of a terminal's kept output); past it, a
+/// terminal's bytes are dropped for that client, its stream caught up later (`Conn::sent`). A client's stream commands start one at a time, each once half of it is free: a whole replay
 /// then fits, with as much again for the live output of its terminals.
 const BYTES_BUDGET: usize = 4 * crate::output::OUTPUT_KEPT;
 /// What a frame of a terminal's bytes counts for, beyond its bytes: tiny reads cannot queue without bound.
 const FRAME_COST: usize = 64;
-/// How long one frame may take to reach the socket before the connection is closed.
+/// How long the greeting and the close may take, and a stream command waits for room for its replay.
 const WRITE: Duration = Duration::from_secs(10);
+/// How long a client's socket may take (almost) no byte while a frame waits for it, before the connection is closed.
+const IDLE: Duration = Duration::from_secs(20);
+/// The least a socket takes in `IDLE` from a client that reads: one that reads nothing still takes some (the system's
+/// buffers grow and probe its window: some 2 KiB in 20 s, measured).
+const IDLE_LEAST: usize = 64 << 10;
 /// How long a connection has to send its request's head.
 const HANDSHAKE: Duration = Duration::from_secs(10);
 /// How long a request may take, answer included (a file of the web build through a slow tunnel).
@@ -674,9 +683,13 @@ impl Server {
         let config = WebSocketConfig::default()
             .max_message_size(Some(MAX_REQUEST))
             .max_frame_size(Some(MAX_REQUEST));
-        let ws =
-            WebSocketStream::from_raw_socket(TokioIo::new(io), Role::Server, Some(config)).await;
-        self.session(ws, stopped, device).await;
+        let took = Arc::new(AtomicUsize::new(0));
+        let io = Counted {
+            io: TokioIo::new(io),
+            took: took.clone(),
+        };
+        let ws = WebSocketStream::from_raw_socket(io, Role::Server, Some(config)).await;
+        self.session(ws, stopped, device, took).await;
     }
 
     /// The answer to `req`; a WebSocket's leaves its connection in `upgrade`.
@@ -865,9 +878,10 @@ impl Server {
     /// A client's WebSocket, until it or the server ends.
     async fn session(
         self: Arc<Self>,
-        ws: WebSocketStream<TokioIo<hyper::upgrade::Upgraded>>,
+        ws: WebSocketStream<Counted<TokioIo<hyper::upgrade::Upgraded>>>,
         mut stopped: watch::Receiver<bool>,
         device: Option<String>,
+        took: Arc<AtomicUsize>,
     ) {
         let (mut out, mut input) = ws.split();
         let hello = Message::text(wire::hello(&self.core.host.version()));
@@ -887,7 +901,7 @@ impl Server {
                 conn.close("was revoked: closed");
             }
         }
-        let writer = rt::spawn(conn.clone().write(out, text, bytes));
+        let writer = rt::spawn(conn.clone().write(out, text, bytes, took));
         let in_flight = Arc::new(Semaphore::new(MAX_IN_FLIGHT));
         let mut closed = conn.closed.subscribe();
         loop {
@@ -931,8 +945,12 @@ impl Server {
         permits: (OwnedSemaphorePermit, OwnedSemaphorePermit),
     ) {
         let entry = self.entries.iter().find(|e| e.name == request.cmd);
-        // An unknown name gets no lane of its own: the lanes are named by the table alone.
-        let lane = entry.map_or("", |e| lane_of(e.name));
+        // An unknown name gets no lane of its own: the lanes are named by the table alone. A terminal's replay, which may
+        // wait for room, holds back none of its keys.
+        let lane = entry.map_or("", |e| match e.name {
+            "term_attach" => e.name,
+            name => lane_of(name),
+        });
         let (me, conn, lanes) = (self.clone(), conn.clone(), conn.lanes.clone());
         lanes.submit(
             lane,
@@ -1074,13 +1092,18 @@ struct Conn {
     /// What `bytes` holds, each frame counted with `FRAME_COST`, and the most it may.
     bytes_queued: AtomicUsize,
     bytes_budget: usize,
+    /// How long its socket may take less than `idle_least` while a frame waits for it (`IDLE`, `IDLE_LEAST`).
+    idle: Duration,
+    idle_least: usize,
+    /// The stream caught up last: the next one behind after it is caught up next, each in turn.
+    caught: AtomicU32,
     /// Told when `bytes` gave some to the socket.
     room: Notify,
     /// Held by the stream command that starts, with its replay.
     streaming: tokio::sync::Mutex<()>,
     closed: watch::Sender<bool>,
     /// The stream numbers of its terminals still running, each with its place among the terminal's readers.
-    streams: Mutex<HashMap<u32, Reader>>,
+    streams: Mutex<BTreeMap<u32, Reader>>,
     lanes: Arc<Lanes>,
     /// Its place among the hub's subscribers, once it subscribed.
     subscription: Mutex<Option<Subscription>>,
@@ -1098,6 +1121,9 @@ impl Conn {
             bytes,
             bytes_queued: AtomicUsize::new(0),
             bytes_budget,
+            idle: IDLE,
+            idle_least: IDLE_LEAST,
+            caught: AtomicU32::new(0),
             room: Notify::new(),
             streaming: tokio::sync::Mutex::new(()),
             closed: watch::channel(false).0,
@@ -1119,39 +1145,47 @@ impl Conn {
         *self.closed.borrow()
     }
 
-    /// Sends what waits, the text first, until the connection ends.
+    /// Sends what waits, the text first, until the connection ends. `took` counts the bytes the socket took.
     async fn write(
         self: Arc<Self>,
         mut out: impl futures_util::Sink<Message> + Unpin,
         mut text: Queue,
         mut bytes: Queue,
+        took: Arc<AtomicUsize>,
     ) {
         let mut closed = self.closed.subscribe();
-        loop {
+        'frames: loop {
             let message = tokio::select! {
                 biased;
                 _ = closed.wait_for(|c| *c) => break,
                 Some(m) = text.recv() => m,
                 Some(m) = bytes.recv() => {
-                    // Its room given back once it leaves the queue.
-                    self.bytes_queued.fetch_sub(m.len() + FRAME_COST, Ordering::AcqRel);
-                    self.room.notify_waiters();
+                    self.sent(&m);
                     m
                 }
                 else => break,
             };
-            // A client that reads nothing is closed, never waited for.
-            let sent = tokio::select! {
-                _ = closed.wait_for(|c| *c) => break,
-                sent = tokio::time::timeout(WRITE, out.send(message)) => sent,
-            };
-            match sent {
-                Ok(Ok(())) => {}
-                Ok(Err(_)) => break,
-                Err(_) => {
-                    self.close("read too slowly: closed");
-                    break;
+            // A client that reads, however slowly, is waited for; one whose socket takes (almost) nothing for `IDLE` is
+            // closed.
+            let send = out.send(message);
+            tokio::pin!(send);
+            let mut seen = took.load(Ordering::Relaxed);
+            let sent = loop {
+                tokio::select! {
+                    _ = closed.wait_for(|c| *c) => break 'frames,
+                    sent = &mut send => break sent,
+                    _ = tokio::time::sleep(self.idle) => {
+                        let now = took.load(Ordering::Relaxed);
+                        if now.wrapping_sub(seen) < self.idle_least {
+                            self.close("read (almost) nothing for a while: closed");
+                            break 'frames;
+                        }
+                        seen = now;
+                    }
                 }
+            };
+            if sent.is_err() {
+                break;
             }
         }
         self.close("left");
@@ -1182,12 +1216,11 @@ impl Conn {
         }
     }
 
-    /// A terminal's frame queued without waiting: past the budget, the connection is closed.
+    /// A terminal's frame queued without waiting: past the budget, refused, and its stream falls behind (`output`).
     fn push_bytes(&self, message: Message) -> Result<(), Closed> {
         let cost = message.len() + FRAME_COST;
         if self.bytes_queued.fetch_add(cost, Ordering::AcqRel) + cost > self.bytes_budget {
             self.bytes_queued.fetch_sub(cost, Ordering::AcqRel);
-            self.close("read too slowly: closed");
             return Err(Closed);
         }
         let pushed = self.push(&self.bytes, message);
@@ -1197,8 +1230,36 @@ impl Conn {
         pushed
     }
 
-    /// Waits, up to `WRITE`, until half the bytes' budget is free: a whole replay fits; else the client is closed.
-    /// A connection that ends meanwhile ends the wait: its writer is gone, nothing would free room.
+    /// A frame of a terminal's bytes on its way to the socket: its room given back and, with half the budget free, one
+    /// stream that fell behind caught up.
+    fn sent(&self, message: &Message) {
+        let cost = message.len() + FRAME_COST;
+        let left = self.bytes_queued.fetch_sub(cost, Ordering::AcqRel) - cost;
+        self.room.notify_waiters();
+        if left > self.bytes_budget / 2 {
+            return;
+        }
+        // The first behind after the one caught up last, round the streams: a terminal that prints without end does not
+        // keep the others behind. Out of the streams' lock: a reader its output drops (`Open`) takes it under the output's.
+        let behind = {
+            use std::ops::Bound::{Excluded, Included, Unbounded};
+            let streams = self.streams.lock();
+            let last = self.caught.load(Ordering::Relaxed);
+            streams
+                .range((Excluded(last), Unbounded))
+                .chain(streams.range((Unbounded, Included(last))))
+                .find(|(_, r)| r.is_behind())
+                .map(|(n, r)| (*n, r.clone()))
+        };
+        // shortcut: a replay of up to 4 MiB copied on the writer's task; on a blocking thread if it shows in the lanes.
+        if let Some((stream, reader)) = behind {
+            self.caught.store(stream, Ordering::Relaxed);
+            reader.catch_up();
+        }
+    }
+
+    /// Waits, up to `WRITE`, until half the bytes' budget is free: a whole replay fits; past it, the replay starts
+    /// anyway, what does not fit caught up later (`sent`). A connection that ends meanwhile ends the wait.
     async fn room_for_a_replay(&self) -> Result<(), CallError> {
         let deadline = tokio::time::Instant::now() + WRITE;
         let mut closed = self.closed.subscribe();
@@ -1213,8 +1274,7 @@ impl Conn {
                 _ = closed.wait_for(|c| *c) => return Err(gone()),
                 woke = tokio::time::timeout_at(deadline, notified) => {
                     if woke.is_err() {
-                        self.close("read too slowly: closed");
-                        return Err(CallError::Failed("the client reads too slowly".into()));
+                        return Ok(());
                     }
                 }
             }
@@ -1301,6 +1361,50 @@ fn gone() -> CallError {
 /// The connection, while it lasts.
 fn live(conn: &Weak<Conn>) -> Result<Arc<Conn>, Closed> {
     conn.upgrade().filter(|c| !c.is_closed()).ok_or(Closed)
+}
+
+/// A client's socket, counting the bytes it takes: a client reads as long as the count moves (`IDLE`).
+struct Counted<T> {
+    io: T,
+    took: Arc<AtomicUsize>,
+}
+
+impl<T: tokio::io::AsyncRead + Unpin> tokio::io::AsyncRead for Counted<T> {
+    fn poll_read(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+        buf: &mut tokio::io::ReadBuf<'_>,
+    ) -> std::task::Poll<std::io::Result<()>> {
+        std::pin::Pin::new(&mut self.io).poll_read(cx, buf)
+    }
+}
+
+impl<T: tokio::io::AsyncWrite + Unpin> tokio::io::AsyncWrite for Counted<T> {
+    fn poll_write(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+        buf: &[u8],
+    ) -> std::task::Poll<std::io::Result<usize>> {
+        let wrote = std::pin::Pin::new(&mut self.io).poll_write(cx, buf);
+        if let std::task::Poll::Ready(Ok(n)) = wrote {
+            self.took.fetch_add(n, Ordering::Relaxed);
+        }
+        wrote
+    }
+
+    fn poll_flush(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<std::io::Result<()>> {
+        std::pin::Pin::new(&mut self.io).poll_flush(cx)
+    }
+
+    fn poll_shutdown(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<std::io::Result<()>> {
+        std::pin::Pin::new(&mut self.io).poll_shutdown(cx)
+    }
 }
 
 /// A stream number in use until its terminal's sink is dropped.

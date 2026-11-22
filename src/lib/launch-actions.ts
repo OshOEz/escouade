@@ -75,6 +75,10 @@ export async function startLaunch(project: Project, cmd: RunCommand): Promise<st
         ? await api.runStart({ projectId: project.id, commandId: wt.commandId, agentId: wt.agentId, ...size }, onData)
         : await api.runStart({ projectId: project.id, commandId: cmd.id, ...size }, onData);
     app.launchStarted(cmd.id, info.id);
+    x.reload = (write) => {
+      const pty = livePty(cmd.id);
+      return pty ? api.runAttach(pty, x.term.cols, x.term.rows, write) : null;
+    };
     // « Ouvrir à son lancement » (ESC-560): its address, once it answers.
     if (!test && cmd.url?.trim()) void openWhenUp(project, cmd, (text) => x.term.write(text));
     return null;

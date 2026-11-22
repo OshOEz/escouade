@@ -37,6 +37,11 @@ export interface XTerm {
   /** When (`performance.now()`) a key went to the terminal, and the WebView's paste reached it: what tells the user's input from xterm.js's own. */
   keyAt?: number;
   pasteAt?: number;
+  /**
+   * Reads its terminal again from the screen the backend kept (`write` takes its bytes), in a browser after a lost
+   * connection; none: nothing to read again. Its own stream is not resumed: `markStale` offers it.
+   */
+  reload?: (write: (d: ArrayBuffer) => void) => Promise<unknown> | null;
 }
 
 const xterms = new Map<string, XTerm>();
@@ -344,8 +349,51 @@ export function openAccountLogin(accountId: string): Promise<TermInfo> {
  */
 export async function openAgentTerminal(agentId: string, room?: Room | null, manual = false): Promise<TermInfo> {
   const info = await interactive((cols, rows, onData) => api.agentTerminal(agentId, cols, rows, onData, manual), room);
-  pasteImages(xterms.get(info.id)!, agentId);
+  const x = xterms.get(info.id)!;
+  pasteImages(x, agentId);
+  x.reload = (write) => {
+    // Held until the answer says which interface it read: one started anew meanwhile (another id) is not the one this
+    // view types to, and is not shown; « Relancer » opens it.
+    let held: ArrayBuffer[] | null = [];
+    let same = true;
+    const onData = (b: ArrayBuffer) => (held ? held.push(b) : same && write(b));
+    return api.agentTerminal(agentId, x.term.cols, x.term.rows, onData).then((again) => {
+      const bytes = held ?? [];
+      held = null;
+      same = again.id === info.id;
+      if (!same) throw new Error(t('shell.connection.restarted'));
+      for (const b of bytes) write(b);
+    });
+  };
   return info;
+}
+
+/**
+ * In a browser, the connection back: the views it does not read again (an agent's interface, a launch's run, whose
+ * streams were lost with it) say so, discreetly, with a button that reads them again (`XTerm.reload`). Their screen is
+ * cleared at the first byte read again, not before: a view that cannot be read again keeps what it showed.
+ */
+export function markStale() {
+  for (const x of xterms.values()) {
+    if (!x.reload || x.host.querySelector('.stale-note')) continue;
+    const note = document.createElement('button');
+    note.className = 'stale-note';
+    note.textContent = t('shell.connection.stale');
+    note.style.cssText =
+      'position:absolute;top:6px;right:10px;z-index:3;padding:2px 8px;font-size:11px;border-radius:4px;cursor:pointer;border:1px solid var(--line);background:var(--shade);color:var(--muted);';
+    note.onclick = () => {
+      note.remove();
+      let first = true;
+      const write = (b: ArrayBuffer) => {
+        if (first) x.term.reset();
+        first = false;
+        x.term.write(new Uint8Array(b));
+      };
+      x.reload?.(write)?.catch((e) => x.term.write(`\r\n\x1b[31m${e instanceof Error ? e.message : String(e)}\x1b[0m\r\n`));
+    };
+    x.host.style.position = 'relative';
+    x.host.appendChild(note);
+  }
 }
 
 /**

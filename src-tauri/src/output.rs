@@ -1,9 +1,12 @@
 //! A terminal's output (a shell, a launch, an agent's interface): its last bytes kept, and whoever
-//! reads it now, the window and the remote clients, each sent every byte once and in order.
+//! reads it now, the window and the remote clients, each sent every byte once and in order. A
+//! client that refuses a piece (it reads slower than the terminal prints) falls behind: it is sent
+//! nothing more until it is caught up, from a full reset then what a reader that comes is sent.
 
 use crate::sink::Sink;
 use parking_lot::Mutex;
 use std::collections::VecDeque;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Weak};
 
 /// The most an output keeps (bytes): its last screens, for a reader that comes later.
@@ -14,6 +17,8 @@ pub(crate) const REPLAY_PIECE: usize = 64 << 10;
 /// this many bytes, else at the first escape, so that what is kept does not begin in the middle of
 /// a sequence.
 const CUT_LOOKS_IN: usize = 4096;
+/// A terminal's full reset (RIS): what a client caught up starts again from.
+pub(crate) const RESET: &[u8] = b"\x1bc";
 
 /// The output of a terminal: its last bytes kept, and whoever reads it now.
 pub struct Output {
@@ -27,33 +32,47 @@ struct Inner {
     kept: VecDeque<u8>,
     /// The window's reader: a page that reloads takes its place; kept when a send fails, as before.
     window: Option<Sink<Vec<u8>>>,
-    /// The other readers, each while its `Reader` lives and its sink takes what it is sent.
-    clients: Vec<(Weak<()>, Sink<Vec<u8>>)>,
+    /// The other readers, each while its `Reader` lives.
+    clients: Vec<(Weak<Slot>, Sink<Vec<u8>>)>,
+    /// What a reader is sent before the kept bytes: the modes an interface set (`tui`).
+    first: Vec<u8>,
 }
 
-/// A client's place among an output's readers: dropped, it is sent nothing more.
+/// A client's place among an output's readers: dropped (all its clones), it is sent nothing more.
+#[derive(Clone, Default)]
 pub struct Reader {
-    _alive: Arc<()>,
+    slot: Arc<Slot>,
+}
+
+#[derive(Default)]
+struct Slot {
+    /// It refused a piece: sent nothing more until it is caught up.
+    behind: AtomicBool,
+    /// The output it reads, once it does.
+    output: Mutex<Weak<Output>>,
 }
 
 impl Reader {
     pub fn new() -> Self {
-        Reader {
-            _alive: Arc::new(()),
-        }
+        Self::default()
     }
-}
 
-impl Default for Reader {
-    fn default() -> Self {
-        Self::new()
+    /// It fell behind its output.
+    pub fn is_behind(&self) -> bool {
+        self.slot.behind.load(Ordering::Relaxed)
+    }
+
+    /// Sent a full reset then what a reader that comes is, it follows again; false when it still refuses.
+    pub fn catch_up(&self) -> bool {
+        let output = self.slot.output.lock().upgrade();
+        output.is_some_and(|o| o.catch_up(&self.slot))
     }
 }
 
 /// Who reads an output: the window, or a client while its `Reader` lives.
 pub struct Viewer {
     sink: Sink<Vec<u8>>,
-    client: Option<Weak<()>>,
+    client: Option<Weak<Slot>>,
 }
 
 impl Viewer {
@@ -66,7 +85,7 @@ impl Viewer {
     pub fn client(sink: Sink<Vec<u8>>, reader: &Reader) -> Self {
         Viewer {
             sink,
-            client: Some(Arc::downgrade(&reader._alive)),
+            client: Some(Arc::downgrade(&reader.slot)),
         }
     }
 
@@ -97,11 +116,27 @@ impl Output {
 
     /// Called by the terminal's reader, never waits: kept, then sent to every reader.
     pub fn push(&self, bytes: Vec<u8>) {
+        self.push_with_first(bytes, None);
+    }
+
+    /// The same, with what a reader is sent before the kept bytes from now on (`first`: an interface's modes, as last
+    /// set), in the same step: a reader caught up between the two would get the new modes before the old screen.
+    pub(crate) fn push_with_first(&self, bytes: Vec<u8>, first: Option<Vec<u8>>) {
         let mut o = self.inner.lock();
+        if let Some(first) = first {
+            o.first = first;
+        }
         keep(&mut o.kept, &bytes, self.max);
         // Readers called under the lock, each byte once and in order: a Sink never waits nor calls back.
-        o.clients
-            .retain(|(alive, sink)| alive.strong_count() > 0 && sink.send(bytes.clone()).is_ok());
+        o.clients.retain(|(slot, sink)| {
+            let Some(slot) = slot.upgrade() else {
+                return false;
+            };
+            if !slot.behind.load(Ordering::Relaxed) && sink.send(bytes.clone()).is_err() {
+                slot.behind.store(true, Ordering::Relaxed);
+            }
+            true
+        });
         if let Some(window) = &o.window {
             let _ = window.send(bytes);
         }
@@ -116,35 +151,42 @@ impl Output {
         reader
     }
 
-    /// `viewer` reads it from now on, sent what is kept first.
-    pub fn read_by(&self, viewer: Viewer) {
-        self.read_by_after(Vec::new(), viewer);
-    }
-
-    /// The same, sent `first` before what is kept (an interface's modes), in the same step.
-    pub(crate) fn read_by_after(&self, first: Vec<u8>, viewer: Viewer) {
+    /// `viewer` reads it from now on, sent the modes and what is kept first, in the same step.
+    pub fn read_by(self: &Arc<Self>, viewer: Viewer) {
         let mut o = self.inner.lock();
-        let kept: Vec<u8> = o.kept.iter().copied().collect();
-        let replay = without_terminal_queries(&kept);
-        let pieces = (!first.is_empty())
-            .then_some(first)
-            .into_iter()
-            .chain(replay.chunks(REPLAY_PIECE).map(<[u8]>::to_vec));
-        for piece in pieces {
-            // A client gone already is not added; the window's fails are not counted, as before.
-            if viewer.sink.send(piece).is_err() && viewer.client.is_some() {
-                return;
-            }
-        }
         match viewer.client {
+            // The window's fails are not counted, as before.
             None => {
+                replay_to(&mut o, &viewer.sink, false);
                 let _before = o.window.replace(viewer.sink);
             }
-            Some(alive) => {
+            Some(slot) => {
+                // A client gone already is not added.
+                let Some(alive) = slot.upgrade() else { return };
+                *alive.output.lock() = Arc::downgrade(self);
+                // One with no room for it starts behind: it is caught up once it has (`Reader::catch_up`).
+                if !replay_to(&mut o, &viewer.sink, false) {
+                    alive.behind.store(true, Ordering::Relaxed);
+                }
                 o.clients.retain(|(alive, _)| alive.strong_count() > 0);
-                o.clients.push((alive, viewer.sink));
+                o.clients.push((slot, viewer.sink));
             }
         }
+    }
+
+    /// `slot`'s client, behind, sent a full reset then what a reader that comes is: from then on, what follows.
+    fn catch_up(&self, slot: &Arc<Slot>) -> bool {
+        let mut o = self.inner.lock();
+        if !slot.behind.load(Ordering::Relaxed) {
+            return true;
+        }
+        let mine = |(s, _): &&(Weak<Slot>, Sink<Vec<u8>>)| Weak::as_ptr(s) == Arc::as_ptr(slot);
+        let Some(sink) = o.clients.iter().find(mine).map(|(_, sink)| sink.clone()) else {
+            return false;
+        };
+        let caught = replay_to(&mut o, &sink, true);
+        slot.behind.store(!caught, Ordering::Relaxed);
+        caught
     }
 
     /// How many bytes it keeps.
@@ -157,6 +199,20 @@ impl Output {
     pub(crate) fn kept(&self) -> Vec<u8> {
         self.inner.lock().kept.iter().copied().collect()
     }
+}
+
+/// Sends `sink` a full reset (`reset`), the modes, then what is kept from its safe point, in pieces; false at its
+/// first refusal.
+fn replay_to(o: &mut Inner, sink: &Sink<Vec<u8>>, reset: bool) -> bool {
+    let mut first = if reset { RESET.to_vec() } else { Vec::new() };
+    first.extend_from_slice(&o.first);
+    // One copy under the lock: the kept bytes made contiguous where they are, then filtered.
+    let replay = without_terminal_queries(o.kept.make_contiguous());
+    (!first.is_empty())
+        .then_some(first)
+        .into_iter()
+        .chain(replay.chunks(REPLAY_PIECE).map(<[u8]>::to_vec))
+        .all(|piece| sink.send(piece).is_ok())
 }
 
 /// `bytes` added to `kept`, which keeps its last `max` and, when its start was dropped, starts again
@@ -472,13 +528,13 @@ mod tests {
     }
 
     #[test]
-    fn a_reader_that_leaves_or_fails_is_forgotten() {
+    fn a_reader_that_leaves_is_forgotten_and_one_that_refuses_is_sent_nothing_more() {
         let out = Output::new(1024);
         let (sink, got) = collecting();
         let reader = out.attach(sink);
         let tries = Arc::new(Mutex::new(0));
         let counted = tries.clone();
-        let _failing = out.attach(Sink::new(move |_| {
+        let failing = out.attach(Sink::new(move |_| {
             *counted.lock() += 1;
             Err(Closed)
         }));
@@ -486,11 +542,47 @@ mod tests {
         drop(reader);
         out.push(b"b".to_vec());
         assert_eq!(*got.lock(), b"a");
+        // Behind: not called again, nor caught up while it refuses; gone with its reader.
         assert_eq!(*tries.lock(), 1);
+        assert!(failing.is_behind());
+        assert!(!failing.catch_up());
+        assert_eq!(out.inner.lock().clients.len(), 1);
+        drop(failing);
+        out.push(b"c".to_vec());
         assert!(out.inner.lock().clients.is_empty());
-        // One that fails as it is replayed is not added.
-        let _late = out.attach(Sink::new(|_| Err(Closed)));
-        assert!(out.inner.lock().clients.is_empty());
+    }
+
+    #[test]
+    fn a_reader_behind_is_caught_up_from_a_reset_with_the_modes_then_follows() {
+        let out = Output::new(1024);
+        // The modes an interface set, with the bytes that set them, in one step.
+        out.push_with_first(b"one ".to_vec(), Some(b"\x1b[?1049h".to_vec()));
+        // Room for its replay, then for nothing until the test says.
+        let room = Arc::new(Mutex::new(true));
+        let (open, got) = (room.clone(), Arc::new(Mutex::new(Vec::new())));
+        let to = got.clone();
+        let reader = out.attach(Sink::new(move |b: Vec<u8>| {
+            if !*open.lock() {
+                return Err(Closed);
+            }
+            to.lock().extend(b);
+            Ok(())
+        }));
+        *room.lock() = false;
+        out.push(b"two ".to_vec());
+        assert!(reader.is_behind());
+        *room.lock() = true;
+        out.push(b"three ".to_vec());
+        assert_eq!(*got.lock(), b"\x1b[?1049hone ", "nothing until caught up");
+        assert!(reader.catch_up());
+        out.push(b"four".to_vec());
+        assert_eq!(
+            String::from_utf8_lossy(&got.lock()),
+            "\x1b[?1049hone \x1bc\x1b[?1049hone two three four"
+        );
+        // A reader with no room for its first replay starts behind, and is caught up the same way.
+        let late = out.attach(Sink::new(|_| Err(Closed)));
+        assert!(late.is_behind());
     }
 
     #[test]
@@ -514,7 +606,7 @@ mod tests {
         let out = Output::new(1024);
         // A reader whose other end reads nothing: its queue fills, and it says so.
         let (tx, _rx) = std::sync::mpsc::sync_channel::<Vec<u8>>(2);
-        let _slow = out.attach(Sink::new(move |b| tx.try_send(b).map_err(|_| Closed)));
+        let slow = out.attach(Sink::new(move |b| tx.try_send(b).map_err(|_| Closed)));
         let (sink, got) = collecting();
         let _fast = out.attach(sink);
         let started = std::time::Instant::now();
@@ -523,7 +615,63 @@ mod tests {
         }
         assert!(started.elapsed() < std::time::Duration::from_secs(1));
         assert_eq!(got.lock().len(), 1000);
-        // The slow one was dropped at its first refusal.
-        assert_eq!(out.inner.lock().clients.len(), 1);
+        // The slow one fell behind at its first refusal: sent nothing more until caught up.
+        assert!(slow.is_behind());
+    }
+
+    #[test]
+    fn a_reader_caught_up_while_bytes_come_has_each_once_after_its_last_reset() {
+        use std::sync::atomic::AtomicU32;
+        // Lines printed by another thread while the reader refuses a piece now and then (a replay's too) and is caught
+        // up as soon as it is behind: where the replay meets what follows, nothing lost, nothing twice.
+        const N: u32 = 200_000;
+        let out = Output::new(8 << 20);
+        let (sends, got) = (
+            Arc::new(AtomicU32::new(0)),
+            Arc::new(Mutex::new(Vec::new())),
+        );
+        let (count, to) = (sends.clone(), got.clone());
+        let reader = out.attach(Sink::new(move |b: Vec<u8>| {
+            // One piece in 97 refused: a replay (some 30 pieces here) passes on a later try.
+            if count.fetch_add(1, Ordering::Relaxed) % 97 == 96 {
+                return Err(Closed);
+            }
+            to.lock().extend(b);
+            Ok(())
+        }));
+        let writer = {
+            let out = out.clone();
+            std::thread::spawn(move || {
+                for n in 1..=N {
+                    out.push(format!("{n}\r\n").into_bytes());
+                }
+            })
+        };
+        let mut caught = 0;
+        while !writer.is_finished() || reader.is_behind() {
+            if reader.is_behind() && reader.catch_up() {
+                caught += 1;
+            }
+            std::thread::yield_now();
+        }
+        writer.join().unwrap();
+        let want: Vec<u8> = (1..=N)
+            .flat_map(|n| format!("{n}\r\n").into_bytes())
+            .collect();
+        let got = got.lock();
+        let from = got
+            .windows(2)
+            .rposition(|w| w == RESET)
+            .map_or(0, |at| at + 2);
+        assert!(
+            caught > 0,
+            "never behind: {} sends",
+            sends.load(Ordering::Relaxed)
+        );
+        assert!(
+            got[from..] == want[..],
+            "{caught} catch-ups, {} bytes since the last reset",
+            got.len() - from
+        );
     }
 }

@@ -31,7 +31,7 @@ import { newCount, opened, readSeen, seenOf, type PrSeen } from './prnew';
 import { workflows } from './workflows.svelte';
 import { inboxViews } from './inbox/views.svelte';
 import { modeToAsk } from './first-mode';
-import { attachTerminal } from './terminals';
+import { attachTerminal, markStale } from './terminals';
 import { desktop, onClose, onReopen } from './transport';
 import { askOnFirstGesture, chime, notify } from './notifier';
 import {
@@ -893,6 +893,7 @@ class AppState {
       if (lost !== null) this.dismissToast(lost);
       lost = null;
       this.toast(t('shell.connection.back'), 'ok');
+      markStale();
       this.resubscribe().catch((e) => this.toast(errorText(e), 'error'));
     });
   }

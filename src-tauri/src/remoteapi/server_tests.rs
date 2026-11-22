@@ -1914,11 +1914,11 @@ fn a_slow_client_does_not_grow_the_queue_without_bound() {
     // Room for two frames of 1000 bytes (and their 4 of header), counted in bytes.
     let (conn, _text, mut bytes) = Conn::new(4, 2 * (1004 + FRAME_COST));
     let output = conn.open(9).unwrap();
-    // A terminal's reads never wait: past the budget, the client is closed.
+    // A terminal's reads never wait: past the budget, refused (its stream falls behind), the client left open.
     assert_eq!(output.send(vec![0; 1000]), Ok(()));
     assert_eq!(output.send(vec![1; 1000]), Ok(()));
     assert_eq!(output.send(vec![2]), Err(Closed));
-    assert!(conn.is_closed());
+    assert!(!conn.is_closed());
     assert_eq!(bytes.len(), 2);
     let first = bytes.blocking_recv().unwrap();
     assert_eq!(&first.into_data()[..5], [0, 0, 0, 9, 0]);
@@ -1932,6 +1932,301 @@ fn a_slow_client_does_not_grow_the_queue_without_bound() {
     assert_eq!(events.send(exit("x")), Err(Closed));
     assert!(conn.is_closed());
     assert_eq!(conn.open(10).unwrap().send(vec![1]), Err(Closed));
+}
+
+/// What `bytes` hold after their last full reset (a stream caught up starts from one).
+#[cfg(unix)]
+fn since_the_last_reset(bytes: &[u8]) -> &[u8] {
+    let from = bytes
+        .windows(2)
+        .rposition(|w| w == b"\x1bc")
+        .map_or(0, |at| at + 2);
+    &bytes[from..]
+}
+
+/// Where `screen` first parts from `lines` (from the `1` that starts a line), with 80 bytes each side, escaped.
+#[cfg(unix)]
+fn first_gap(screen: &[u8], lines: &[u8]) -> String {
+    let Some(start) = screen
+        .windows(6)
+        .position(|w| w == &lines[..6])
+        .filter(|&at| at == 0 || !screen[at - 1].is_ascii_digit())
+    else {
+        return "no line 1 then 2".into();
+    };
+    let got = &screen[start..];
+    let k = got
+        .iter()
+        .zip(lines)
+        .position(|(a, b)| a != b)
+        .unwrap_or(got.len().min(lines.len()));
+    let around = |b: &[u8]| {
+        b[k.saturating_sub(80)..(k + 80).min(b.len())]
+            .escape_ascii()
+            .to_string()
+    };
+    format!(
+        "first gap at byte {} (line 1 at {start}): got {} / wanted {}",
+        start + k,
+        around(got),
+        around(lines)
+    )
+}
+
+// Unix only: it compares `seq`'s bytes as printed, which ConPTY does not relay but paints again (cursor moves, erases).
+#[cfg(unix)]
+#[test]
+fn twenty_terminals_printing_at_once_do_not_cut_a_client_that_reads() {
+    // task-0-report.md, B2: twenty terminals printing together closed, after some 5 s, a client that read them.
+    const TERMS: u32 = 20;
+    const LINES: u32 = 500_000;
+    let loaded = load("remote-server-twenty");
+    let running = serve(&loaded);
+    rt::block_on(async {
+        let (project, shell) = project(&loaded).await;
+        let mut ws = connect(running.addr).await;
+        let mut terms = Vec::new();
+        for n in 1..=TERMS {
+            terms.push(spawn(&mut ws, n.into(), &project, &shell, n).await);
+        }
+        // All at once; `FI""NI` keeps the line typed, which the shell echoes, from counting as its end.
+        for (n, term) in (1..=TERMS).zip(&terms) {
+            let line = format!("seq 1 {LINES}; echo FI\"\"NI-{n}\n");
+            let args = json!({ "id": term, "data": line });
+            send(&mut ws, 100 + u64::from(n), "term_write", args, None).await;
+        }
+        // A client that reads all along, slower than twenty terminals print (some 13 MB/s): its end of each is the
+        // terminal's end, after a full reset when it fell behind.
+        let started = std::time::Instant::now();
+        let mut ended = std::collections::HashSet::new();
+        let mut unpaced = 0;
+        while ended.len() < TERMS as usize {
+            assert!(
+                started.elapsed() < Duration::from_secs(240),
+                "ended: {ended:?}"
+            );
+            let frame = tokio::time::timeout(Duration::from_secs(20), ws.ws.next())
+                .await
+                .expect("a frame in time")
+                .expect("the connection open")
+                .expect("the connection open");
+            let Message::Binary(b) = frame else { continue };
+            let n = u32::from_be_bytes(b[..4].try_into().unwrap());
+            let got = ws.bytes.entry(n).or_default();
+            if b[4..].starts_with(b"\x1bc") {
+                ended.remove(&n);
+            }
+            got.extend_from_slice(&b[4..]);
+            let tail = &got[got.len().saturating_sub(b.len() + 16)..];
+            let end = format!("FINI-{n}");
+            if tail.windows(end.len()).any(|w| w == end.as_bytes()) {
+                ended.insert(n);
+            }
+            unpaced += b.len();
+            if unpaced >= 64 << 10 {
+                unpaced = 0;
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+        }
+        // `seq`'s bytes whole and in order, compared as they are: the shell may write on the line of the first (bash's
+        // `ESC [ ? 2004 l`, a title…), which a line read number by number takes for a missing 1.
+        let lines: Vec<u8> = (1..=LINES)
+            .flat_map(|l| format!("{l}\r\n").into_bytes())
+            .collect();
+        for n in 1..=TERMS {
+            let screen = since_the_last_reset(&ws.bytes[&n]);
+            let at = screen
+                .windows(lines.len())
+                .position(|w| w == lines)
+                .filter(|&at| at == 0 || !screen[at - 1].is_ascii_digit());
+            let end = format!("FINI-{n}");
+            assert!(
+                at.is_some_and(|at| {
+                    let after = &screen[at + lines.len()..];
+                    after.windows(end.len()).any(|w| w == end.as_bytes())
+                }),
+                "terminal {n}: {} bytes since the last reset, from {}; {}",
+                screen.len(),
+                screen[..screen.len().min(300)].escape_ascii(),
+                first_gap(screen, &lines)
+            );
+        }
+        // Still connected.
+        let a = call(&mut ws, 999, "data_dir", json!({})).await;
+        assert!(a.get("ok").is_some(), "{a}");
+    });
+}
+
+#[test]
+fn a_client_that_reads_nothing_is_closed_once_its_socket_took_nothing_for_a_while() {
+    use futures_util::future::pending;
+    use futures_util::sink::unfold;
+    // The window of `IDLE` shortened to 2 s: one socket that takes nothing, one that takes 64 KiB a second.
+    let idle = Duration::from_secs(2);
+    let short = |conn: &mut Arc<Conn>| {
+        let c = Arc::get_mut(conn).unwrap();
+        c.idle = idle;
+    };
+    rt::block_on(async {
+        let (mut stuck, text, bytes) = Conn::new(4, BYTES_BUDGET);
+        short(&mut stuck);
+        let took = Arc::new(AtomicUsize::new(0));
+        let out = Box::pin(unfold((), |_, _: Message| pending::<Result<(), ()>>()));
+        let _writer = rt::spawn(stuck.clone().write(out, text, bytes, took));
+        stuck.push_bytes(Message::binary(vec![0; 10])).unwrap();
+
+        let (mut slow, text, bytes) = Conn::new(4, BYTES_BUDGET);
+        short(&mut slow);
+        let took = Arc::new(AtomicUsize::new(0));
+        let counted = took.clone();
+        let out = Box::pin(unfold((), move |_, _: Message| {
+            let counted = counted.clone();
+            async move {
+                for _ in 0..5 {
+                    tokio::time::sleep(Duration::from_secs(1)).await;
+                    counted.fetch_add(64 << 10, SeqCst);
+                }
+                Ok::<_, ()>(())
+            }
+        }));
+        let _slow_writer = rt::spawn(slow.clone().write(out, text, bytes, took));
+        slow.push_bytes(Message::binary(vec![0; 10])).unwrap();
+
+        let started = std::time::Instant::now();
+        let mut closed = stuck.closed.subscribe();
+        tokio::time::timeout(2 * idle + Duration::from_secs(1), closed.wait_for(|c| *c))
+            .await
+            .expect("closed in time")
+            .unwrap();
+        assert!(started.elapsed() >= idle);
+        // The one that reads slowly is waited for, its frame sent.
+        tokio::time::sleep(Duration::from_secs(4)).await;
+        assert!(!slow.is_closed());
+        assert_eq!(slow.bytes_queued.load(SeqCst), 0);
+    });
+}
+
+#[test]
+fn a_big_attach_holds_back_no_keystroke() {
+    use crate::output::{Output, OUTPUT_KEPT};
+    let loaded = load("remote-server-attach-lane");
+    let running = serve(&loaded);
+    for n in 1..=6u8 {
+        let id = format!("full-{n}");
+        loaded.core.pty.insert_fake(&id, Box::new(std::io::sink()));
+        let output = Output::new(OUTPUT_KEPT);
+        for _ in 0..OUTPUT_KEPT / (32 << 10) {
+            output.push(vec![b'a' + n; 32 << 10]);
+        }
+        assert!(loaded.core.pty.keep_output(&id, output));
+    }
+    rt::block_on(async {
+        let mut ws = connect(running.addr).await;
+        // Six screens to resume, more than the budget holds at once; then a key typed.
+        for n in 1..=6u32 {
+            let args = json!({ "id": format!("full-{n}") });
+            send(&mut ws, n.into(), "term_attach", args, Some(n)).await;
+        }
+        let key = json!({ "id": "full-1", "data": "x" });
+        send(&mut ws, 100, "term_write", key, None).await;
+        tokio::time::sleep(Duration::from_millis(500)).await;
+        let mut order = Vec::new();
+        while order.len() < 7 {
+            if let Some(v) = next(&mut ws).await {
+                assert!(v.get("ok").is_some(), "{v}");
+                order.push(v["id"].as_u64().unwrap());
+            }
+        }
+        let key = order.iter().position(|id| *id == 100).unwrap();
+        let last = order.iter().position(|id| *id == 6).unwrap();
+        assert!(key < last, "the key waited for the attaches: {order:?}");
+    });
+}
+
+#[test]
+fn a_stream_behind_is_caught_up_from_a_reset_once_half_the_budget_is_free() {
+    use crate::output::{Output, RESET};
+    // Room for five frames of 1000 bytes; the terminal keeps its last 2000.
+    let budget = 5 * (1004 + FRAME_COST);
+    let (conn, _text, mut bytes) = Conn::new(4, budget);
+    let output = Output::new(2000);
+    output.read_by(conn.open(1).unwrap());
+    for n in 0..10u8 {
+        output.push(vec![b'0' + n; 1000]);
+    }
+    // Five queued, five dropped: the queue stays in its budget, the client open.
+    assert!(!conn.is_closed());
+    assert_eq!(bytes.len(), 5);
+    assert!(conn.bytes_queued.load(SeqCst) <= budget);
+    // As the writer takes them: past half the budget, the stream is caught up.
+    let mut got = Vec::new();
+    while let Ok(m) = bytes.try_recv() {
+        conn.sent(&m);
+        got.extend_from_slice(&m.into_data()[4..]);
+    }
+    output.push(b"live".to_vec());
+    while let Ok(m) = bytes.try_recv() {
+        conn.sent(&m);
+        got.extend_from_slice(&m.into_data()[4..]);
+    }
+    let mut want = Vec::new();
+    for n in 0..5u8 {
+        want.extend(vec![b'0' + n; 1000]);
+    }
+    want.extend_from_slice(RESET);
+    want.extend(vec![b'8'; 1000]);
+    want.extend(vec![b'9'; 1000]);
+    want.extend_from_slice(b"live");
+    assert_eq!(got, want);
+    assert_eq!(conn.bytes_queued.load(SeqCst), 0);
+}
+
+#[test]
+fn a_shell_typed_in_is_caught_up_while_another_terminal_prints() {
+    use crate::output::Output;
+    // An agent that prints (stream 1) faster than the client reads, and a shell where the user types, whose screen of
+    // 1000 bytes changes at each key (stream 2): both fall behind, and are caught up in turn. Neither is left behind
+    // while the other prints (one caught up again and again froze the other: review-7a, I1).
+    let budget = 5 * (1004 + FRAME_COST);
+    let (conn, _text, mut bytes) = Conn::new(4, budget);
+    let (agent, shell) = (Output::new(2000), Output::new(2000));
+    agent.read_by(conn.open(1).unwrap());
+    shell.read_by(conn.open(2).unwrap());
+    let screen = |what: String| {
+        let mut b = format!("{what} ").into_bytes();
+        b.resize(1000, b'.');
+        b
+    };
+    // Each stream's last step seen by the client, and the most it lagged.
+    let (mut seen, mut lag) = ([None::<u32>; 2], [0u32; 2]);
+    for step in 0..200u32 {
+        for _ in 0..3 {
+            agent.push(screen(format!("a{step}")));
+        }
+        shell.push(screen(format!("k{step}")));
+        // The writer takes two frames while the agent prints three and the shell one.
+        for _ in 0..2 {
+            let Ok(m) = bytes.try_recv() else { break };
+            conn.sent(&m);
+            let data = m.into_data();
+            let n = u32::from_be_bytes(data[..4].try_into().unwrap()) as usize;
+            let mark = if n == 1 { 'a' } else { 'k' };
+            let text = String::from_utf8_lossy(&data[4..]);
+            for word in text.split(|c: char| !c.is_ascii_alphanumeric()) {
+                if let Some(at) = word.strip_prefix(mark).and_then(|d| d.parse().ok()) {
+                    seen[n - 1] = seen[n - 1].max(Some(at));
+                }
+            }
+        }
+        for n in 0..2 {
+            lag[n] = lag[n].max(step - seen[n].unwrap_or(0));
+        }
+    }
+    assert!(
+        lag.iter().all(|l| *l <= 20),
+        "steps behind at most: {lag:?}"
+    );
+    assert!(!conn.is_closed());
 }
 
 #[test]

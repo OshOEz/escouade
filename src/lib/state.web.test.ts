@@ -134,6 +134,6 @@ describe('AppState in a browser', () => {
     await start();
     hooks.close!('the server speaks protocol 2, this page protocol 1', true);
     hooks.close!('the server speaks protocol 2, this page protocol 1', false);
-    expect(app.toasts.map((x) => x.text)).toEqual(['Le serveur ne parle plus la langue de cette page : rechargez-la.']);
+    expect(app.toasts.map((x) => x.text)).toEqual(['Le serveur ne parle plus la langue de cette page : recharge-la.']);
   });
 });

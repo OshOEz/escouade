@@ -81,6 +81,10 @@ vi.mock('@xterm/xterm', () => ({
     input(data: string) {
       for (const handler of this.dataHandlers) handler(data);
     }
+    reset() {
+      this.resets++;
+    }
+    resets = 0;
     dispose() {}
   },
 }));
@@ -131,6 +135,7 @@ import {
   disposeTerminal,
   getXTerm,
   launchLog,
+  markStale,
   openAccountLogin,
   openAgentTerminal,
   openTerminal,
@@ -228,6 +233,65 @@ describe('starting Claude Code’s interface', () => {
       { id: 'a1', manual: true },
       { id: 'a1', manual: false },
     ]);
+  });
+});
+
+describe('a view the return of the connection does not read again (in a browser)', () => {
+  it('says so on its screen, and reads it again from the first byte on a click; a shell has nothing to say', async () => {
+    resetApp();
+    const outputs: { onmessage: (b: ArrayBuffer) => void }[] = [];
+    const backend = fakeBackend({
+      agent_terminal: ({ output }) => (outputs.push(output), { id: 'tui-stale', projectId: '', name: 'agent', shell: 'claude' }),
+      term_spawn: ({ output }) => (outputs.push(output), { id: 'sh-stale', projectId: 'p1', name: 'sh', shell: 'bash' }),
+    });
+    await openAgentTerminal('a1');
+    await openTerminal('p1', 'bash', 'sh');
+    const note = () => getXTerm('tui-stale')!.host.querySelector<HTMLButtonElement>('.stale-note');
+    expect(note()).toBeNull();
+    markStale();
+    markStale();
+    expect(getXTerm('tui-stale')!.host.querySelectorAll('.stale-note')).toHaveLength(1);
+    expect(note()!.textContent).toBe('Reconnecté : recharger cette vue');
+    // The shells are read again by the state itself (`attachTerminal`): no button.
+    expect(getXTerm('sh-stale')!.host.querySelector('.stale-note')).toBeNull();
+    const term = terms.at(-2) as FakeTerm & { resets: number };
+    note()!.click();
+    await new Promise((r) => setTimeout(r, 0));
+    expect(note()).toBeNull();
+    expect(backend.called('agent_terminal').map((c) => c.args.id)).toEqual(['a1', 'a1']);
+    // Cleared at the first byte read again, not before: one that cannot be read keeps its screen.
+    expect(term.resets).toBe(0);
+    outputs.at(-1)!.onmessage(new ArrayBuffer(4));
+    outputs.at(-1)!.onmessage(new ArrayBuffer(4));
+    expect(term.resets).toBe(1);
+    disposeTerminal('tui-stale');
+    disposeTerminal('sh-stale');
+  });
+  it('says to restart an agent’s interface started anew meanwhile, and shows none of it', async () => {
+    resetApp();
+    let n = 0;
+    const outputs: { onmessage: (b: ArrayBuffer) => void }[] = [];
+    fakeBackend({
+      agent_terminal: ({ output }) => {
+        outputs.push(output);
+        // The new interface prints before its answer comes.
+        if (n++) output.onmessage(new ArrayBuffer(4));
+        return { id: `tui-${n}`, projectId: '', name: 'agent', shell: 'claude' };
+      },
+    });
+    await openAgentTerminal('a1');
+    const x = getXTerm('tui-1')!;
+    const term = terms.at(-1) as FakeTerm & { resets: number };
+    const before = term.writes.length;
+    markStale();
+    x.host.querySelector<HTMLButtonElement>('.stale-note')!.click();
+    await new Promise((r) => setTimeout(r, 0));
+    outputs.at(-1)!.onmessage(new ArrayBuffer(4));
+    expect(term.resets).toBe(0);
+    const written = term.writes.slice(before).map((w) => String(w.data));
+    expect(written).toHaveLength(1);
+    expect(written[0]).toContain('Relancer');
+    disposeTerminal('tui-1');
   });
 });
 
