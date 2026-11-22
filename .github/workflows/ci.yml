@@ -786,11 +786,11 @@ jobs:
       - name: No Tauri, GTK, WebKit, D-Bus or sound stack in the dependencies
         run: |
           forbidden='^(tauri|tauri-[a-z0-9_-]+|wry|tao|muda|gtk|gdk|gio|glib|webkit2gtk|javascriptcore-rs|soup3|libappindicator|dbus|libdbus-sys|cpal|alsa|whisper-rs)(-sys)? v'
-          tree=$(cargo tree --locked --no-default-features -p escouade -e normal,build --target all --prefix none)
+          tree=$(cargo tree --locked --no-default-features --features server -p escouade -e normal,build --target all --prefix none)
           if printf '%s\n' "$tree" | grep -E "$forbidden"; then
             for p in $(printf '%s\n' "$tree" | grep -E "$forbidden" | awk '{ print $1 "@" substr($2, 2) }' | sort -u); do
               echo "::error::$p is in the dependencies of the core without a desktop, through:"
-              cargo tree --locked --no-default-features -p escouade -e normal,build --target all -i "$p"
+              cargo tree --locked --no-default-features --features server -p escouade -e normal,build --target all -i "$p"
             done
             exit 1
           fi
@@ -888,9 +888,12 @@ jobs:
       - name: The web build
         run: npm run build:web
 
+      # The version of the lockfile's @playwright/test (npm ci), the browser it pins.
       - name: Chrome for Testing and its system libraries
         run: npx playwright install --with-deps chromium
 
+      # Played whatever the browser links: it runs on the user's computer, not on the server, whose bareness
+      # linux-headless proves (ldd of escouade-server).
       - name: The course in the browser
         run: npm run test:web
 
