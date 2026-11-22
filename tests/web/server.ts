@@ -12,8 +12,8 @@ import type { Page } from '@playwright/test';
 const ROOT = path.resolve(import.meta.dirname, '..', '..');
 const SERVER = process.env.ESCOUADE_SERVER ?? path.join(ROOT, 'src-tauri', 'target', 'debug', 'escouade-server');
 const WEB = path.join(ROOT, 'dist-web');
-/** The desktop e2e's fake Claude Code (`exec node`): its scenarios answer « Bonjour », « question »… */
-const FAKE_CLAUDE = path.join(ROOT, 'tests', 'fixtures', 'fake-claude');
+/** The desktop e2e's fake Claude Code (`exec node`): its scenarios answer « Bonjour », « question »…; alone, a sign-in. */
+const FAKE_CLAUDE = path.join(ROOT, 'tests', 'web', 'fake-claude');
 
 export interface Server {
   url: string;
@@ -29,6 +29,8 @@ export interface Server {
   cut(off: boolean): void;
   /** Pairs the page's browser as a user does: `escouade-server pair` on the server, its code typed in the page. */
   pair(page: Page): Promise<void>;
+  /** `escouade-server <args>` run on the server, as its user: what it printed. */
+  cli(...args: string[]): string;
   /** What the server wrote: its log in the data folder. */
   log(): string;
   stop(): Promise<void>;
@@ -47,7 +49,14 @@ function freePort(): Promise<number> {
   });
 }
 
-export async function startServer(): Promise<Server> {
+export interface Options {
+  /** Served on a Unix socket, as the systemd unit does, reached by a tunnel to it (`ssh -L`): the page's port is the tunnel's. */
+  socket?: boolean;
+  /** The accounts of its settings: the machine's Claude Code (the fake one) by default; `[]`, none yet. */
+  accounts?: unknown[];
+}
+
+export async function startServer(options: Options = {}): Promise<Server> {
   for (const [what, file] of [
     ['the server', SERVER],
     ['the page', path.join(WEB, 'index.html')],
@@ -73,7 +82,7 @@ export async function startServer(): Promise<Server> {
       osNotifications: false,
       midTurnDelaySecs: 0,
       claudePath: FAKE_CLAUDE,
-      accounts: [{ id: 'principal', name: 'Principal', engine: 'claude', configDir: '', claudePath: '', active: true }],
+      accounts: options.accounts ?? [{ id: 'principal', name: 'Principal', engine: 'claude', configDir: '', claudePath: '', active: true }],
     }),
   );
   // In the home: a client's project folder stays there (the server's bound, as its browser of folders).
@@ -89,14 +98,18 @@ export async function startServer(): Promise<Server> {
     git(dir, 'commit', '-qm', 'init');
   }
 
-  const port = await freePort();
+  // On a socket, in a folder of the user's alone (as $XDG_RUNTIME_DIR): its tunnel listens on the page's port.
+  const socket = options.socket ? path.join(root, 'run', 'server.sock') : null;
+  if (socket) fs.mkdirSync(path.dirname(socket), { mode: 0o700 });
+  const tunnel = socket ? await tunnelTo(socket) : null;
+  const port = tunnel?.port ?? (await freePort());
   // No ESCOUADE_REMOTE_TOKEN: the devices paired by a code alone, as on a server.
-  const { ESCOUADE_REMOTE_TOKEN: _, ...inherited } = process.env;
+  const { ESCOUADE_REMOTE_TOKEN: _, ESCOUADE_REMOTE_PORT: __, ...inherited } = process.env;
   const env = { ...inherited, HOME: home, ESCOUADE_DATA_DIR: data };
-  const child: ChildProcess = spawn(SERVER, ['--web', WEB], {
+  const where = socket ? ['--socket', socket] : ['--port', String(port)];
+  const child: ChildProcess = spawn(SERVER, [...where, '--web', WEB], {
     env: {
       ...env,
-      ESCOUADE_REMOTE_PORT: String(port),
       // Never the machine's Claude Code: the fake one, its folders the test's.
       CLAUDE_CONFIG_DIR: path.join(root, 'claude'),
       FAKE_CLAUDE_LOG: path.join(root, 'fake-claude.jsonl'),
@@ -120,6 +133,7 @@ export async function startServer(): Promise<Server> {
     await new Promise((r) => setTimeout(r, 200));
   }
   const network = await proxyTo(port);
+  const cli = (...args: string[]) => execFileSync(SERVER, args, { env, encoding: 'utf8' });
   return {
     url,
     root,
@@ -127,10 +141,12 @@ export async function startServer(): Promise<Server> {
     home,
     proxy: { server: `http://127.0.0.1:${network.port}`, bypass: '<-loopback>' },
     cut: network.cut,
+    cli,
     async pair(page) {
-      const out = execFileSync(SERVER, ['pair'], { env, encoding: 'utf8' });
+      const out = cli('pair');
       const code = /\b[0-9A-Z]{4}-[0-9A-Z]{4}\b/.exec(out)?.[0];
-      if (!code || !out.includes(`${url}/`)) throw new Error(`escouade-server pair: ${out}`);
+      // On the socket, the tunnel it tells to open: `ssh -N -L 8765:<socket> <this server>`.
+      if (!code || !out.includes(socket ? `:${socket} ` : `${url}/`)) throw new Error(`escouade-server pair: ${out}`);
       await page.goto(url);
       await page.getByLabel('Code d’appairage').fill(code);
       await page.getByLabel('Nom de cet appareil').fill('Chrome des tests');
@@ -145,7 +161,33 @@ export async function startServer(): Promise<Server> {
         await ended;
       }
       network.close();
+      tunnel?.close();
       fs.rmSync(root, { recursive: true, force: true });
+    },
+  };
+}
+
+/** What `ssh -L <port>:<socket>` does on the user's computer: a port of 127.0.0.1 whose connections go to the socket. */
+async function tunnelTo(socket: string) {
+  const open = new Set<net.Socket>();
+  const tunnel = net.createServer((client) => {
+    const up = net.connect(socket);
+    for (const s of [client, up]) {
+      open.add(s);
+      s.on('close', () => open.delete(s));
+      s.on('error', () => s.destroy());
+    }
+    client.pipe(up);
+    up.pipe(client);
+    up.on('close', () => client.destroy());
+    client.on('close', () => up.destroy());
+  });
+  await new Promise<void>((resolve) => tunnel.listen(0, '127.0.0.1', resolve));
+  return {
+    port: (tunnel.address() as net.AddressInfo).port,
+    close() {
+      for (const s of open) s.destroy();
+      tunnel.close();
     },
   };
 }

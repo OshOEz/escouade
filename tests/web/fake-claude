@@ -1,0 +1,6 @@
+#!/bin/sh
+# The web e2e's `claude`: alone, with no argument, it is an account's sign-in (fake-login.mjs); anything else goes to the
+# desktop e2e's fake Claude Code.
+here=$(dirname "$0")
+[ $# -eq 0 ] && exec node "$here/fake-login.mjs"
+exec "$here/../fixtures/fake-claude" "$@"
