@@ -101,6 +101,15 @@ impl crate::core::Core {
         let real = Bounds::of(home, &self.project_fence(""))?.folder(path.trim())?;
         Ok(real.display().to_string())
     }
+
+    /// `url`, a repository a client gave to clone (a plugin's): any as on the desktop; under escouade-server, one that
+    /// `clone` takes (a path of the disk or `file://` in the folders its browser may see, never `x::`).
+    pub fn client_repository(&self, url: &str) -> Result<()> {
+        let Some(home) = self.folders_home.get() else {
+            return Ok(());
+        };
+        source(&Bounds::of(home, &self.project_fence(""))?, url.trim()).map(drop)
+    }
 }
 
 /// The folders of `path` (the home when none), which must be one the browser may see.

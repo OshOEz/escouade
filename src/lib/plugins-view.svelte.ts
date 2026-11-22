@@ -1,6 +1,6 @@
 // The view Plugins (PLG-4, ESC-176; choices 213 to 218): the installed plugins as the core last gave them, the page shown,
 // and the install window — a plugin is read and set aside first (`inspect*`), installed only on the user's consent.
-import { open } from './platform';
+import { desktop, open } from './platform';
 import { untrack } from 'svelte';
 import { fDayMonth, fTime } from './format';
 import { t } from './i18n';
@@ -224,6 +224,8 @@ class PluginsStore {
    * an install: that stays the user's gesture, from the page, with its permissions shown.
    */
   async takeLinks() {
+    // The system gives them to the desktop app alone.
+    if (!desktop) return;
     let links: DeepLink[] = [];
     try {
       links = (await storeApi.deepLinks()) ?? [];

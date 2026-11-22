@@ -583,6 +583,19 @@ fn a_sigterm_with_a_terminal_open_stops_it_within_ten_seconds() {
             let refused = ask(&mut ws, id, cmd, serde_json::json!({ "path": outside }), None).await;
             assert!(!refused["err"].is_null(), "{cmd}: {refused}");
         }
+        // A plugin's folder or repository too: refused as out of the bounds, not read.
+        let out_of_bounds = |r: &serde_json::Value| {
+            let r = r["err"].to_string();
+            r.contains("server shows") || r.contains("serveur montre") || r.contains("server clones") || r.contains("serveur clone")
+        };
+        for (id, cmd) in [(13, "plugin_inspect_folder"), (14, "plugin_inspect_dev")] {
+            let refused = ask(&mut ws, id, cmd, serde_json::json!({ "path": outside }), None).await;
+            assert!(out_of_bounds(&refused), "{cmd}: {refused}");
+        }
+        let url = format!("file://{}", outside.display());
+        let args = serde_json::json!({ "url": url, "tag": "v1.0.0" });
+        let refused = ask(&mut ws, 15, "plugin_inspect_git", args, None).await;
+        assert!(out_of_bounds(&refused), "plugin_inspect_git: {refused}");
         let project = ask(
             &mut ws,
             1,

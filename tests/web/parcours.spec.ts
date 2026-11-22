@@ -262,3 +262,10 @@ test('a project made from a folder chosen on the server, then from a repository 
   expect(fs.existsSync(path.join(projets, 'demo-api', 'README.md'))).toBe(true);
   expect(errors).toEqual([]);
 });
+
+test('the view Plugins from the rail: what the server installs, the store; no folder of the system', async () => {
+  await page.getByRole('button', { name: 'Plugins', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Depuis un dépôt git…' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Depuis un dossier…' })).toHaveCount(0);
+  expect(errors).toEqual([]);
+});

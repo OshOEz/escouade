@@ -476,11 +476,18 @@ pub async fn plugin_inspect_folder(
     core: CoreState<'_>,
     path: String,
 ) -> Result<crate::plugins::Preview, crate::plugins::Refusal> {
+    let path = bounded(&core, &path)?;
     let lang = crate::i18n::ui();
     let preview = core
         .plugins
         .inspect_folder(std::path::Path::new(path.trim()), lang)?;
     core.held_to_store(preview, lang).await
+}
+
+/// A plugin's folder a client gave: under escouade-server, one its browser of folders may see (`client_folder`).
+fn bounded(core: &crate::core::Core, path: &str) -> Result<String, crate::plugins::Refusal> {
+    core.client_folder(path)
+        .map_err(|e| crate::plugins::Refusal::other(e.to_string()))
 }
 
 /// The store as last read (STORE-9): its catalogue kept on this machine, when it was read, the
@@ -613,6 +620,8 @@ pub async fn plugin_inspect_git(
     url: String,
     tag: String,
 ) -> Result<crate::plugins::Preview, crate::plugins::Refusal> {
+    core.client_repository(&url)
+        .map_err(|e| crate::plugins::Refusal::other(e.to_string()))?;
     let lang = crate::i18n::ui();
     let preview = core.plugins.inspect_git(&url, &tag, lang).await?;
     core.held_to_store(preview, lang).await
@@ -625,6 +634,7 @@ pub fn plugin_inspect_dev(
     core: CoreState,
     path: String,
 ) -> Result<crate::plugins::Preview, crate::plugins::Refusal> {
+    let path = bounded(&core, &path)?;
     core.plugins
         .inspect_dev(std::path::Path::new(path.trim()), crate::i18n::ui())
 }

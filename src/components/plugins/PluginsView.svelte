@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { t } from '../../lib/i18n';
-  import { openUrl } from '../../lib/platform';
+  import { desktop, openUrl } from '../../lib/platform';
   import { categoriesOf, ofTheWorkspace } from '../../lib/plugins';
   import { plugins } from '../../lib/plugins-view.svelte';
   import Icon from '../Icon.svelte';
@@ -116,9 +116,14 @@
                 : t('plugins.updates.check')}</button
             >
           {:else if page.kind === 'dev'}
-            <button class="btn" onclick={() => plugins.fromFolder(true)}><Icon name="folder" size={14} />{t('plugins.loadDev')}</button>
+            <!-- A folder of the system's dialog: the desktop app's (a browser's folders are not the server's). -->
+            {#if desktop}<button class="btn" onclick={() => plugins.fromFolder(true)}
+                ><Icon name="folder" size={14} />{t('plugins.loadDev')}</button
+              >{/if}
           {:else}
-            <button class="btn" onclick={() => plugins.fromFolder()}><Icon name="folder" size={14} />{t('plugins.fromFolder')}</button>
+            {#if desktop}<button class="btn" onclick={() => plugins.fromFolder()}
+                ><Icon name="folder" size={14} />{t('plugins.fromFolder')}</button
+              >{/if}
             <button class="btn" onclick={() => plugins.fromGit()}><Icon name="branch" size={14} />{t('plugins.fromGit')}</button>
           {/if}
         </div>
