@@ -103,6 +103,17 @@ export default defineZone('shell', {
     open: 'Open the copies’ folder',
     close: 'Close',
   },
+  /** In a browser not paired yet with the server: the code `escouade-server pair` shows, and a name for this device. */
+  pair: {
+    title: 'Pair this browser',
+    intro: 'On the server, run “escouade-server pair”: enter the code it shows here.',
+    code: 'Pairing code',
+    name: 'Name of this device',
+    defaultName: 'Browser',
+    submit: 'Pair',
+    refused: 'Code refused: it was used already, expired or is wrong. Ask the server for a new code.',
+    failed: 'The server does not answer: try again.',
+  },
   /** In a browser, the connection to the server: lost, back, or refused (a server of another version of the wire). */
   connection: {
     lost: 'The connection to the server is lost: trying again…',

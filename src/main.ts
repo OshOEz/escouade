@@ -4,10 +4,13 @@ import { mount } from 'svelte';
 import './app.css';
 import App from './App.svelte';
 import PagesWindow from './components/PagesWindow.svelte';
+import Pair from './components/Pair.svelte';
 import { earlyAppearance } from './lib/appearance';
 import { guardFileDrops } from './lib/attachments';
 import { guardLinks } from './lib/links';
 import { earlyPluginTheme } from './lib/plugin-theme.svelte';
+import { desktop } from './lib/transport';
+import { deviceToken } from './lib/transport/device';
 import { markWebKit } from './lib/webkit';
 
 // The app is a desktop window: keep the browser's own context menu out of the way,
@@ -33,5 +36,7 @@ markWebKit();
 
 // A project's « Pages » window (ESC-311): its bar alone, above the launches' pages.
 const pages = new URLSearchParams(location.search).get('pages');
-if (pages) mount(PagesWindow, { target: document.getElementById('app')!, props: { projectId: pages } });
+// A browser not paired yet with its server: the code first (./lib/transport/device.ts).
+if (!desktop && !deviceToken()) mount(Pair, { target: document.getElementById('app')! });
+else if (pages) mount(PagesWindow, { target: document.getElementById('app')!, props: { projectId: pages } });
 else mount(App, { target: document.getElementById('app')! });

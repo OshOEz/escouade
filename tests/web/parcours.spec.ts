@@ -47,14 +47,33 @@ async function newTicket(p: Page, title: string) {
 
 test.beforeAll(async ({ browser }) => {
   server = await startServer();
-  context = await browser.newContext({ viewport: { width: 1400, height: 900 }, proxy: server.proxy });
-  await server.signIn(context);
+  context = await browser.newContext({ viewport: { width: 1400, height: 900 }, proxy: server.proxy, locale: 'fr-FR' });
   page = await tab();
 });
 
 test.afterAll(async () => {
   await context?.close();
   await server?.stop();
+});
+
+test('paired by a code, the token kept by the page and never in a cookie', async () => {
+  await page.goto(server.url);
+  await expect(page.getByRole('heading', { name: 'Appairer ce navigateur' })).toBeVisible();
+  // A wrong code is said, and pairs nothing.
+  await page.getByLabel('Code d’appairage').fill('0000-0000');
+  await page.getByRole('button', { name: 'Appairer' }).click();
+  await expect(page.getByRole('alert')).toContainText('Code refusé');
+  // Chrome writes the refusal (403) to the console: that one is expected.
+  expect(errors).toEqual([expect.stringContaining('403')]);
+  errors.length = 0;
+  await server.pair(page);
+  await expect(page.getByRole('button', { name: /Ajouter un projet/ }).first()).toBeVisible();
+  // Kept by this origin alone (its port included), presented by the WebSocket's subprotocol: no cookie at all, which the
+  // browser would send to every port of 127.0.0.1.
+  expect(await context.cookies()).toEqual([]);
+  const token = await page.evaluate(() => localStorage.getItem('escouade-device'));
+  expect(token).toMatch(/^[A-Za-z0-9_-]{43}$/);
+  expect(errors).toEqual([]);
 });
 
 test('a project, a terminal and the board, found again after a reload', async () => {

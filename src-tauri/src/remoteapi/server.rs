@@ -1,9 +1,12 @@
 //! The core's commands served over a WebSocket on 127.0.0.1 (docs/REMOTE.md, « La fondation commune », points 2 and
 //! 6): off unless `ESCOUADE_REMOTE_PORT` and `ESCOUADE_REMOTE_TOKEN` are set, both taken out of the environment at
-//! start-up so that no child process inherits the token; the desktop app reads them in debug builds only,
-//! `escouade-server` always. Every request names this server; one from a page comes from the page it serves (`--web`,
-//! `web`). A connection brings the token, or the session cookie `POST /session` gave a browser for it; its slot is
-//! taken before its request, so a local process may hold all 16 for up to 10 s each (acceptable for now). Its calls
+//! start-up so that no child process inherits the token; the desktop app reads them in debug builds only.
+//! `escouade-server` reads the port always and the token in debug builds only (its tests): its clients are the devices
+//! paired by a code (`devices`, `POST /pair`), each with its own token, and its own commands (`pair`, `devices`) come
+//! with the key it writes beside them (`CONTROL`, `/admin/…`). Every request names this server; one from a page comes
+//! from the page it serves (`--web`, `web`). A connection brings a token, by `Authorization: Bearer` or, from a page,
+//! by the WebSocket's subprotocol `bearer.<token>`: never a cookie, which a browser would send to every port of the
+//! host. A device revoked has its connections closed at once. A connection's slot is taken before its request, so a local process may hold all 16 for up to 10 s each (acceptable for now). Its calls
 //! of one family keep their order, as the window's do (`windowthread`). The eight commands with a flow (`subscribe`
 //! and the terminals) are served here, the others by the table. A client's stream commands start one at a time, each
 //! waiting at most 10 s for half of its 16 MiB budget of terminal bytes, and give up when the connection ends; a
@@ -11,6 +14,7 @@
 //! subscribers, the window keeping its own, until the connection ends; a second one takes the place of the first. A
 //! terminal's stream reads its output beside the window, from what it kept, until the connection ends. A remote
 //! `save_settings` retunes the desktop's conversation.
+use super::devices::{self, Devices};
 use super::table::{self, CallError, Ctx, Entry, ResultTag};
 use super::{web, wire};
 use crate::commands::{self, CoreState};
@@ -47,6 +51,8 @@ use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::WebSocketStream;
 
 type Request = hyper::Request<Incoming>;
+/// A WebSocket's connection once upgraded, and the device it comes from (none: the environment's token).
+type Upgrade = Mutex<Option<(OnUpgrade, Option<String>)>>;
 type Response = hyper::Response<Full<Bytes>>;
 
 const PORT_VAR: &str = "ESCOUADE_REMOTE_PORT";
@@ -77,8 +83,12 @@ const WRITE: Duration = Duration::from_secs(10);
 const HANDSHAKE: Duration = Duration::from_secs(10);
 /// How long a request may take, answer included (a file of the web build through a slow tunnel).
 const EXCHANGE: Duration = Duration::from_secs(60);
-/// The most `POST /session` reads: a token.
-const MAX_SESSION_BODY: usize = 1024;
+/// The most `POST /pair` and `/admin/…` read: a code and a name.
+const MAX_SMALL_BODY: usize = 1024;
+/// The subprotocol a page names, beside its token's (`bearer.<token>`): the one the server answers.
+const SUBPROTOCOL: &str = "escouade";
+/// The file, in the devices' folder, that tells `escouade-server`'s own commands the port and the key (`Control`).
+pub const CONTROL: &str = "server.json";
 /// The commands with a flow, which this server serves itself.
 const STREAMS: [&str; 8] = [
     "subscribe",
@@ -91,32 +101,85 @@ const STREAMS: [&str; 8] = [
     "test_run_start",
 ];
 
-/// Where the server listens, the token its clients bring, and the web build it serves, if any.
+/// Where the server listens, the tokens its clients bring, and the web build it serves, if any.
 pub struct Config {
     pub port: u16,
-    pub token: String,
+    /// `ESCOUADE_REMOTE_TOKEN`'s: the desktop app's and the tests'.
+    pub token: Option<String>,
     pub web: Option<PathBuf>,
+    /// The paired devices, `escouade-server`'s.
+    pub devices: Option<Arc<Devices>>,
+}
+
+/// What `escouade-server pair` and `devices` read to reach the server that runs: its port, and the key of `/admin/…`.
+#[derive(serde::Serialize, serde::Deserialize)]
+pub struct Control {
+    pub port: u16,
+    pub key: String,
 }
 
 impl std::fmt::Debug for Config {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Config")
             .field("port", &self.port)
-            .field("token", &"<hidden>")
+            .field("token", &self.token.as_ref().map(|_| "<hidden>"))
             .field("web", &self.web)
+            .field("devices", &self.devices.is_some())
             .finish()
     }
 }
 
-/// The two variables, read and removed from the environment before any thread starts: `Err` says which is wrong.
+/// The two variables, read and removed from the environment before any thread starts: `Err` says which is wrong. The
+/// desktop app's.
+#[cfg_attr(not(feature = "desktop"), allow(dead_code))]
 pub fn take_from_env() -> Result<Option<Config>, String> {
-    let port = std::env::var(PORT_VAR).ok();
-    let token = std::env::var(TOKEN_VAR).ok();
-    std::env::remove_var(PORT_VAR);
-    std::env::remove_var(TOKEN_VAR);
+    let (port, token) = take_vars();
     Config::parse(port.as_deref(), token.as_deref())
 }
 
+/// `escouade-server`'s: the port, which it needs; the token read in debug builds only (its tests), removed in all.
+pub fn take_port_from_env() -> Result<Config, String> {
+    let (port, token) = take_vars();
+    let token = env_token(token, cfg!(debug_assertions));
+    let port = port.ok_or(format!("{PORT_VAR} is not set"))?;
+    Ok(Config {
+        port: parse_port(&port)?,
+        token: token.as_deref().map(parse_token).transpose()?,
+        web: None,
+        devices: None,
+    })
+}
+
+/// `ESCOUADE_REMOTE_TOKEN`'s value kept by a `debug` build alone; another says it ignores it.
+fn env_token(token: Option<String>, debug: bool) -> Option<String> {
+    if token.is_some() && !debug {
+        eprintln!("escouade-server: {TOKEN_VAR} is for tests, read by debug builds only: ignored");
+    }
+    token.filter(|_| debug)
+}
+
+fn take_vars() -> (Option<String>, Option<String>) {
+    let vars = (std::env::var(PORT_VAR).ok(), std::env::var(TOKEN_VAR).ok());
+    std::env::remove_var(PORT_VAR);
+    std::env::remove_var(TOKEN_VAR);
+    vars
+}
+
+/// A port from 1 to 65535; `Err` names the variable, never its value.
+fn parse_port(port: &str) -> Result<u16, String> {
+    let port = port.trim().parse::<u16>().ok().filter(|p| *p != 0);
+    port.ok_or(format!("{PORT_VAR} is not a port from 1 to 65535"))
+}
+
+/// A token of 32 characters or more.
+fn parse_token(token: &str) -> Result<String, String> {
+    if token.chars().count() < MIN_TOKEN {
+        return Err(format!("{TOKEN_VAR} is shorter than 32 characters"));
+    }
+    Ok(token.to_string())
+}
+
+#[cfg_attr(not(feature = "desktop"), allow(dead_code))]
 impl Config {
     /// `Ok(None)` without either value; `Err` names the variable that is wrong, never its value.
     pub fn parse(port: Option<&str>, token: Option<&str>) -> Result<Option<Config>, String> {
@@ -127,16 +190,11 @@ impl Config {
             (Some(_), None) => return wrong(TOKEN_VAR, "is not set"),
             (Some(port), Some(token)) => (port, token),
         };
-        let Some(port) = port.trim().parse::<u16>().ok().filter(|p| *p != 0) else {
-            return wrong(PORT_VAR, "is not a port from 1 to 65535");
-        };
-        if token.chars().count() < MIN_TOKEN {
-            return wrong(TOKEN_VAR, "is shorter than 32 characters");
-        }
         Ok(Some(Config {
-            port,
-            token: token.to_string(),
+            port: parse_port(port)?,
+            token: Some(parse_token(token)?),
             web: None,
+            devices: None,
         }))
     }
 }
@@ -145,12 +203,25 @@ impl Config {
 pub struct Running {
     pub addr: SocketAddr,
     stop: watch::Sender<bool>,
+    /// `CONTROL`'s path and the key written in it, if any.
+    control: Option<(PathBuf, String)>,
 }
 
 impl Running {
-    /// Stops listening and closes the connections; the core goes on.
+    /// Stops listening and closes the connections; the core goes on. `CONTROL` goes with it, unless another server
+    /// started since on the same folder wrote its own: `pair` then finds no stale port and key to send to whoever
+    /// listens there next.
     pub fn stop(&self) {
         self.stop.send_replace(true);
+        if let Some((path, key)) = &self.control {
+            let ours = std::fs::read(path)
+                .ok()
+                .and_then(|b| serde_json::from_slice::<Control>(&b).ok())
+                .is_some_and(|c| c.key == *key);
+            if ours {
+                let _ = std::fs::remove_file(path);
+            }
+        }
     }
 }
 
@@ -184,31 +255,53 @@ fn start_with(
     };
     let addr = listener.local_addr()?;
     let tokens = escouade_mcp::Tokens::default();
-    *tokens.external.write() = Some(config.token);
-    let sessions = escouade_mcp::Tokens::default();
-    *sessions.external.write() = Some(escouade_mcp::new_token());
+    *tokens.external.write() = config.token;
+    let admin = escouade_mcp::Tokens::default();
+    let mut written = None;
+    if let Some(devices) = &config.devices {
+        let key = escouade_mcp::new_token();
+        let control = Control {
+            port: addr.port(),
+            key: key.clone(),
+        };
+        let bytes = serde_json::to_vec(&control).expect("plain data");
+        let path = devices.dir().join(CONTROL);
+        crate::paths::write_private(&path, &bytes)?;
+        written = Some((path, key.clone()));
+        *admin.external.write() = Some(key);
+    }
     let server = Arc::new(Server {
         core,
         entries,
         port: addr.port(),
         tokens,
-        sessions,
+        devices: config.devices,
+        admin,
+        conns: Mutex::default(),
         web: config.web,
         calls: Arc::new(Semaphore::new(calls)),
     });
     let (stop, stopped) = watch::channel(false);
     rt::spawn(server.accept(listener, stopped));
-    Ok(Running { addr, stop })
+    Ok(Running {
+        addr,
+        stop,
+        control: written,
+    })
 }
 
 struct Server {
     core: Arc<Core>,
     entries: &'static [Entry],
     port: u16,
-    /// The one token, compared in constant time.
+    /// `ESCOUADE_REMOTE_TOKEN`'s, if any, compared in constant time.
     tokens: escouade_mcp::Tokens,
-    /// The session a browser's cookie holds in place of the token, made at start: the token never sits in a browser.
-    sessions: escouade_mcp::Tokens,
+    /// The paired devices, if any.
+    devices: Option<Arc<Devices>>,
+    /// The key of `/admin/…`, written in `CONTROL`, with the devices only.
+    admin: escouade_mcp::Tokens,
+    /// The devices' connections, closed when their device is revoked.
+    conns: Mutex<Vec<(String, Weak<Conn>)>>,
     /// The web build's folder.
     web: Option<PathBuf>,
     /// The calls under way, all connections together.
@@ -277,46 +370,41 @@ impl Server {
         Ok(())
     }
 
-    /// Whether `headers` bring the token (one `Authorization`) or, without it, this server's session cookie.
-    fn admit(&self, headers: &HeaderMap) -> Result<(), StatusCode> {
-        if headers.contains_key(header::AUTHORIZATION) {
-            if headers.get_all(header::AUTHORIZATION).iter().count() != 1 {
-                return Err(StatusCode::UNAUTHORIZED);
-            }
-            let token = headers
-                .get(header::AUTHORIZATION)
-                .and_then(|v| v.to_str().ok())
-                .and_then(|v| v.trim().split_once(' '))
-                .filter(|(scheme, _)| scheme.eq_ignore_ascii_case("bearer"))
-                .map_or("", |(_, token)| token.trim());
-            return match self.tokens.caller(token) {
-                Some(_) => Ok(()),
-                None => Err(StatusCode::UNAUTHORIZED),
-            };
-        }
-        let name = self.cookie_name();
-        let session = headers
-            .get_all(header::COOKIE)
-            .iter()
-            .filter_map(|v| v.to_str().ok())
-            .flat_map(|v| v.split(';'))
-            .filter_map(|c| c.trim().split_once('='))
-            .any(|(n, v)| n == name && self.sessions.caller(v).is_some());
-        if session {
-            Ok(())
+    /// Who `headers` come from: the environment's token (`None`) or a device (its id). A token comes by one
+    /// `Authorization: Bearer`, else, for a WebSocket, by one subprotocol `bearer.<token>`.
+    fn admit(&self, headers: &HeaderMap) -> Result<Option<String>, StatusCode> {
+        let token = if headers.contains_key(header::AUTHORIZATION) {
+            bearer(headers).ok_or(StatusCode::UNAUTHORIZED)?
         } else {
-            Err(StatusCode::UNAUTHORIZED)
+            let mut offered = subprotocols(headers).filter_map(|p| p.strip_prefix("bearer."));
+            match (offered.next(), offered.next()) {
+                (Some(token), None) => token.to_string(),
+                _ => return Err(StatusCode::UNAUTHORIZED),
+            }
+        };
+        if self.tokens.caller(&token).is_some() {
+            return Ok(None);
         }
+        let device = self.devices.as_ref().and_then(|d| d.check(&token));
+        device.map(Some).ok_or(StatusCode::UNAUTHORIZED)
     }
 
-    /// The session cookie's name: a browser sends its cookies to every port of a host, each server has its own.
-    fn cookie_name(&self) -> String {
-        format!("escouade-{}", self.port)
+    /// Closes the connections of `id`, revoked.
+    fn cut(&self, id: &str) {
+        self.conns.lock().retain(|(device, conn)| {
+            let Some(conn) = conn.upgrade() else {
+                return false;
+            };
+            if device == id {
+                conn.close("was revoked: closed");
+            }
+            device != id
+        });
     }
 
     /// One request per connection: a file, a session, or the WebSocket, which then holds the connection.
     async fn serve(self: Arc<Self>, tcp: TcpStream, stopped: watch::Receiver<bool>) {
-        let upgrade: Arc<Mutex<Option<OnUpgrade>>> = Arc::default();
+        let upgrade: Arc<Upgrade> = Arc::default();
         let (me, upgraded) = (self.clone(), upgrade.clone());
         let service = service_fn(move |req| {
             let (me, upgraded) = (me.clone(), upgraded.clone());
@@ -338,7 +426,7 @@ impl Server {
         let Ok(Ok(())) = tokio::time::timeout(EXCHANGE, conn).await else {
             return;
         };
-        let Some(on_upgrade) = upgrade.lock().take() else {
+        let Some((on_upgrade, device)) = upgrade.lock().take() else {
             return;
         };
         let Ok(Ok(io)) = tokio::time::timeout(HANDSHAKE, on_upgrade).await else {
@@ -349,11 +437,11 @@ impl Server {
             .max_frame_size(Some(MAX_REQUEST));
         let ws =
             WebSocketStream::from_raw_socket(TokioIo::new(io), Role::Server, Some(config)).await;
-        self.session(ws, stopped).await;
+        self.session(ws, stopped, device).await;
     }
 
     /// The answer to `req`; a WebSocket's leaves its connection in `upgrade`.
-    async fn answer(&self, req: Request, upgrade: &Mutex<Option<OnUpgrade>>) -> Response {
+    async fn answer(&self, req: Request, upgrade: &Upgrade) -> Response {
         if let Err(status) = self.mine(req.uri(), req.headers()) {
             return empty(status);
         }
@@ -365,17 +453,23 @@ impl Server {
             return self.upgrade(req, upgrade);
         }
         match (req.method(), req.uri().path()) {
-            (&Method::POST, "/session") => self.open_session(req).await,
+            (&Method::POST, "/pair") => self.pair(req).await,
+            (&Method::GET, "/device") => match self.admit(req.headers()) {
+                Ok(_) => empty(StatusCode::NO_CONTENT),
+                Err(status) => empty(status),
+            },
+            (_, path) if path.starts_with("/admin/") => self.control(req).await,
             (&Method::GET | &Method::HEAD, path) => self.file(&req, path.to_string()).await,
             _ => empty(StatusCode::METHOD_NOT_ALLOWED),
         }
     }
 
     /// The WebSocket's handshake, its token or session checked.
-    fn upgrade(&self, mut req: Request, upgrade: &Mutex<Option<OnUpgrade>>) -> Response {
-        if let Err(status) = self.admit(req.headers()) {
-            return empty(status);
-        }
+    fn upgrade(&self, mut req: Request, upgrade: &Upgrade) -> Response {
+        let device = match self.admit(req.headers()) {
+            Ok(device) => device,
+            Err(status) => return empty(status),
+        };
         let headers = req.headers();
         let version = headers.get(header::SEC_WEBSOCKET_VERSION);
         let key = headers.get(header::SEC_WEBSOCKET_KEY);
@@ -386,40 +480,82 @@ impl Server {
             return empty(StatusCode::BAD_REQUEST);
         }
         let accept = derive_accept_key(key.as_bytes());
-        *upgrade.lock() = Some(hyper::upgrade::on(&mut req));
-        hyper::Response::builder()
+        // A page that names subprotocols is answered with ours, never with its token's.
+        let named = subprotocols(req.headers()).any(|p| p == SUBPROTOCOL);
+        *upgrade.lock() = Some((hyper::upgrade::on(&mut req), device));
+        let mut answer = hyper::Response::builder()
             .status(StatusCode::SWITCHING_PROTOCOLS)
             .header(header::CONNECTION, "Upgrade")
             .header(header::UPGRADE, "websocket")
-            .header(header::SEC_WEBSOCKET_ACCEPT, accept)
-            .body(Full::default())
-            .expect("a valid answer")
+            .header(header::SEC_WEBSOCKET_ACCEPT, accept);
+        if named {
+            answer = answer.header(header::SEC_WEBSOCKET_PROTOCOL, SUBPROTOCOL);
+        }
+        answer.body(Full::default()).expect("a valid answer")
     }
 
-    /// `POST /session`: the token in the body gives the browser its session cookie, which a script cannot read.
-    async fn open_session(&self, req: Request) -> Response {
-        let Ok(body) = Limited::new(req.into_body(), MAX_SESSION_BODY)
-            .collect()
-            .await
-        else {
+    /// `POST /pair`, `{code, name}`: the new device's token, which the page keeps (`{token, id}`).
+    async fn pair(&self, req: Request) -> Response {
+        #[derive(serde::Deserialize)]
+        struct Asked {
+            code: String,
+            name: String,
+        }
+        let Some(devices) = self.devices.clone() else {
+            return empty(StatusCode::NOT_FOUND);
+        };
+        let Some(body) = small_body(req).await else {
             return empty(StatusCode::PAYLOAD_TOO_LARGE);
         };
-        let body = body.to_bytes();
-        let token = std::str::from_utf8(&body).unwrap_or_default().trim();
-        if self.tokens.caller(token).is_none() {
+        let Ok(asked) = serde_json::from_slice::<Asked>(&body) else {
+            return empty(StatusCode::BAD_REQUEST);
+        };
+        if devices::clean(&asked.name).is_empty() {
+            return empty(StatusCode::BAD_REQUEST);
+        }
+        let redeemed = rt::spawn_blocking(move || {
+            let token = devices.redeem(&asked.code, &asked.name).ok()?;
+            Some((devices.check(&token)?, token))
+        })
+        .await;
+        match redeemed {
+            Ok(Some((id, token))) => json(serde_json::json!({ "token": token, "id": id })),
+            _ => empty(StatusCode::FORBIDDEN),
+        }
+    }
+
+    /// `escouade-server`'s own commands, with the key of `CONTROL`: a code, the devices, a revocation.
+    async fn control(&self, req: Request) -> Response {
+        let (Some(devices), Some(key)) = (self.devices.clone(), bearer(req.headers())) else {
+            return empty(StatusCode::UNAUTHORIZED);
+        };
+        if self.admin.caller(&key).is_none() {
             return empty(StatusCode::UNAUTHORIZED);
         }
-        let session = self.sessions.external.read().clone().unwrap_or_default();
-        let cookie = format!(
-            "{}={session}; HttpOnly; SameSite=Strict; Path=/",
-            self.cookie_name()
-        );
-        hyper::Response::builder()
-            .status(StatusCode::NO_CONTENT)
-            .header(header::SET_COOKIE, cookie)
-            .header(header::CACHE_CONTROL, "no-store")
-            .body(Full::default())
-            .expect("a valid answer")
+        match (req.method(), req.uri().path()) {
+            (&Method::POST, "/admin/pair") => {
+                let code = devices.pair_code();
+                let minutes = code.expires_in.as_secs() / 60;
+                json(serde_json::json!({ "code": code.code, "minutes": minutes }))
+            }
+            (&Method::GET, "/admin/devices") => json(serde_json::json!(devices.list())),
+            (&Method::POST, "/admin/revoke") => {
+                let Some(body) = small_body(req).await else {
+                    return empty(StatusCode::PAYLOAD_TOO_LARGE);
+                };
+                let id = String::from_utf8_lossy(&body).trim().to_string();
+                // Not written, it is cut all the same, and the answer says it would come back at the next start.
+                let (revoked, unwritten) = match devices.revoke(&id) {
+                    Ok(revoked) => (revoked, None),
+                    Err(why) => (true, Some(why)),
+                };
+                if revoked {
+                    self.cut(&id);
+                }
+                json(serde_json::json!({ "revoked": revoked, "unwritten": unwritten }))
+            }
+            _ => empty(StatusCode::NOT_FOUND),
+        }
     }
 
     /// A file of the web build, none without one.
@@ -456,6 +592,7 @@ impl Server {
         self: Arc<Self>,
         ws: WebSocketStream<TokioIo<hyper::upgrade::Upgraded>>,
         mut stopped: watch::Receiver<bool>,
+        device: Option<String>,
     ) {
         let (mut out, mut input) = ws.split();
         let hello = Message::text(wire::hello(&self.core.host.version()));
@@ -464,6 +601,17 @@ impl Server {
         };
         log::info!("remote API: a client connected");
         let (conn, text, bytes) = Conn::new(TEXT_QUEUE, BYTES_BUDGET);
+        if let (Some(id), Some(devices)) = (device, &self.devices) {
+            let mut conns = self.conns.lock();
+            // The connections gone since: each reconnection would leave its own otherwise.
+            conns.retain(|(_, c)| c.strong_count() > 0);
+            conns.push((id.clone(), Arc::downgrade(&conn)));
+            drop(conns);
+            // Revoked since its handshake: `cut` came before it was listed.
+            if !devices.known(&id) {
+                conn.close("was revoked: closed");
+            }
+        }
         let writer = rt::spawn(conn.clone().write(out, text, bytes));
         let in_flight = Arc::new(Semaphore::new(MAX_IN_FLIGHT));
         let mut closed = conn.closed.subscribe();
@@ -821,6 +969,46 @@ impl Conn {
         streams.insert(stream, reader);
         Ok(viewer)
     }
+}
+
+/// The token of the one `Authorization: Bearer` of `headers`.
+fn bearer(headers: &HeaderMap) -> Option<String> {
+    if headers.get_all(header::AUTHORIZATION).iter().count() != 1 {
+        return None;
+    }
+    headers
+        .get(header::AUTHORIZATION)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.trim().split_once(' '))
+        .filter(|(scheme, _)| scheme.eq_ignore_ascii_case("bearer"))
+        .map(|(_, token)| token.trim().to_string())
+}
+
+/// The subprotocols a WebSocket's handshake names.
+fn subprotocols(headers: &HeaderMap) -> impl Iterator<Item = &str> {
+    headers
+        .get_all(header::SEC_WEBSOCKET_PROTOCOL)
+        .iter()
+        .filter_map(|v| v.to_str().ok())
+        .flat_map(|v| v.split(','))
+        .map(str::trim)
+}
+
+/// A body of `MAX_SMALL_BODY` at most; `None` past it.
+async fn small_body(req: Request) -> Option<Bytes> {
+    let body = Limited::new(req.into_body(), MAX_SMALL_BODY)
+        .collect()
+        .await;
+    body.ok().map(|b| b.to_bytes())
+}
+
+/// A JSON answer that no cache keeps.
+fn json(value: Value) -> Response {
+    hyper::Response::builder()
+        .header(header::CONTENT_TYPE, "application/json")
+        .header(header::CACHE_CONTROL, "no-store")
+        .body(Full::new(Bytes::from(value.to_string())))
+        .expect("a valid answer")
 }
 
 /// An answer with no body.

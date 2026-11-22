@@ -1,6 +1,7 @@
 // Every call to the core goes through here: Tauri's IPC in the desktop app's window, the core's WebSocket server in a
 // browser (docs/REMOTE.md, « La fondation commune », point 5).
 
+import { deviceToken, protocols, stillPaired } from './device';
 import * as tauri from './tauri';
 import { PATH, wsTransport } from './ws';
 
@@ -18,7 +19,15 @@ export interface Flow<T> {
 /** True in the window of the desktop app (its IPC is there); false in a browser. */
 export const desktop = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
 
-const ws = desktop ? null : wsTransport(() => new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}${PATH}`));
+/** The page's own server, the device's token presented by the subprotocol (./device.ts). */
+const ws = desktop
+  ? null
+  : wsTransport(
+      () => new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}${PATH}`, protocols(deviceToken() ?? '')),
+    );
+
+// A device revoked is refused at each try: the page asks to be paired again rather than trying for ever.
+ws?.onClose(() => void stillPaired().then((paired) => paired || location.reload()));
 
 export const transport: Transport = ws ?? tauri.transport;
 export const invoke: Transport['invoke'] = transport.invoke;

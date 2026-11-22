@@ -2,13 +2,12 @@
 // the page (dist-web) and its WebSocket on 127.0.0.1. Built first: `cargo build --no-default-features --features
 // server --bin escouade-server` (src-tauri) and `npm run build:web`.
 import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
-import { randomBytes } from 'node:crypto';
 import fs from 'node:fs';
 import http from 'node:http';
 import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
-import type { BrowserContext } from '@playwright/test';
+import type { Page } from '@playwright/test';
 
 const ROOT = path.resolve(import.meta.dirname, '..', '..');
 const SERVER = process.env.ESCOUADE_SERVER ?? path.join(ROOT, 'src-tauri', 'target', 'debug', 'escouade-server');
@@ -26,8 +25,8 @@ export interface Server {
   proxy: { server: string; bypass: string };
   /** The network of the page cut (its connections closed, none opened again) or given back. */
   cut(off: boolean): void;
-  /** Gives the browser's context its session (`POST /session` with the token): its cookie opens the WebSocket. */
-  signIn(context: BrowserContext): Promise<void>;
+  /** Pairs the page's browser as a user does: `escouade-server pair` on the server, its code typed in the page. */
+  pair(page: Page): Promise<void>;
   /** What the server wrote: its log in the data folder. */
   log(): string;
   stop(): Promise<void>;
@@ -85,14 +84,13 @@ export async function startServer(): Promise<Server> {
   git(repo, 'commit', '-qm', 'init');
 
   const port = await freePort();
-  const token = randomBytes(24).toString('hex');
+  // No ESCOUADE_REMOTE_TOKEN: the devices paired by a code alone, as on a server.
+  const { ESCOUADE_REMOTE_TOKEN: _, ...inherited } = process.env;
+  const env = { ...inherited, HOME: home, ESCOUADE_DATA_DIR: data };
   const child: ChildProcess = spawn(SERVER, ['--web', WEB], {
     env: {
-      ...process.env,
-      HOME: home,
-      ESCOUADE_DATA_DIR: data,
+      ...env,
       ESCOUADE_REMOTE_PORT: String(port),
-      ESCOUADE_REMOTE_TOKEN: token,
       // Never the machine's Claude Code: the fake one, its folders the test's.
       CLAUDE_CONFIG_DIR: path.join(root, 'claude'),
       FAKE_CLAUDE_LOG: path.join(root, 'fake-claude.jsonl'),
@@ -122,9 +120,15 @@ export async function startServer(): Promise<Server> {
     repo,
     proxy: { server: `http://127.0.0.1:${network.port}`, bypass: '<-loopback>' },
     cut: network.cut,
-    async signIn(context) {
-      const r = await context.request.post(`${url}/session`, { data: token, headers: { 'content-type': 'text/plain' } });
-      if (r.status() !== 204) throw new Error(`POST /session: ${r.status()}`);
+    async pair(page) {
+      const out = execFileSync(SERVER, ['pair'], { env, encoding: 'utf8' });
+      const code = /\b[0-9A-Z]{4}-[0-9A-Z]{4}\b/.exec(out)?.[0];
+      if (!code || !out.includes(`${url}/`)) throw new Error(`escouade-server pair: ${out}`);
+      await page.goto(url);
+      await page.getByLabel('Code d’appairage').fill(code);
+      await page.getByLabel('Nom de cet appareil').fill('Chrome des tests');
+      await page.getByRole('button', { name: 'Appairer' }).click();
+      await page.waitForURL(url + '/');
     },
     log: () => fs.readFileSync(path.join(data, 'app.log'), 'utf8'),
     async stop() {

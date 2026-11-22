@@ -1,5 +1,5 @@
-//! `escouade-server` (`src/bin/escouade-server.rs`) as a process: its port and token in its environment, a data folder
-//! and a home of its own, stopped by a signal.
+//! `escouade-server` (`src/bin/escouade-server.rs`) as a process: its port (and a debug build's token) in its
+//! environment, a data folder and a home of its own, stopped by a signal; a device paired with `pair` and revoked.
 #![cfg(unix)]
 
 use futures_util::{SinkExt, StreamExt};
@@ -58,14 +58,133 @@ fn exit_within(child: &mut Child, limit: Duration) -> Option<i32> {
 }
 
 #[test]
-fn it_will_not_start_without_a_token() {
-    let dir = folder("no-token");
-    let port = free_port().to_string();
-    let mut child = program(&dir, &[("ESCOUADE_REMOTE_PORT", port)])
+fn it_will_not_start_without_a_port() {
+    let dir = folder("no-port");
+    let mut child = program(&dir, &[("ESCOUADE_REMOTE_TOKEN", TOKEN.into())])
         .spawn()
         .unwrap();
     let code = exit_within(&mut child, Duration::from_secs(30));
     assert_eq!(code, Some(2));
+}
+
+/// `escouade-server <args>` beside the server of `dir`: its exit code and what it printed.
+fn command(dir: &Path, args: &[&str]) -> (Option<i32>, String) {
+    let out = program(dir, &[])
+        .args(args)
+        .stdout(Stdio::piped())
+        .output()
+        .unwrap();
+    (
+        out.status.code(),
+        String::from_utf8_lossy(&out.stdout).into_owned(),
+    )
+}
+
+/// The whole answer to the raw HTTP `request` on `port`.
+fn http(port: u16, request: &str) -> String {
+    use std::io::{Read, Write};
+    let mut tcp = std::net::TcpStream::connect(("127.0.0.1", port)).unwrap();
+    tcp.write_all(request.as_bytes()).unwrap();
+    let mut got = String::new();
+    let _ = tcp.read_to_string(&mut got);
+    got
+}
+
+#[test]
+fn a_device_paired_by_the_command_is_listed_then_revoked() {
+    let dir = folder("pair");
+    let (code, out) = command(&dir, &["pair"]);
+    assert_eq!(code, Some(1), "no server runs yet: {out}");
+    let port = free_port();
+    // No token: the devices alone.
+    let mut child = program(&dir, &[("ESCOUADE_REMOTE_PORT", port.to_string())])
+        .spawn()
+        .unwrap();
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    runtime.block_on(async {
+        let until = Instant::now() + Duration::from_secs(120);
+        while tokio::net::TcpStream::connect(("127.0.0.1", port))
+            .await
+            .is_err()
+        {
+            assert!(Instant::now() < until, "no server on {port}");
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+    });
+    let (code, out) = command(&dir, &["pair"]);
+    assert_eq!(code, Some(0), "{out}");
+    assert!(out.contains(&format!("http://127.0.0.1:{port}/")), "{out}");
+    assert!(
+        out.contains("pair` again"),
+        "the five tries are not told: {out}"
+    );
+    let pairing = out
+        .split_whitespace()
+        .find(|w| w.len() == 9 && w.as_bytes()[4] == b'-')
+        .unwrap_or_else(|| panic!("no code in {out}"));
+    let body = format!(r#"{{"code":"{pairing}","name":"portable"}}"#);
+    let answer = http(
+        port,
+        &format!(
+            "POST /pair HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nContent-Length: {}\r\n\r\n{body}",
+            body.len()
+        ),
+    );
+    assert!(answer.starts_with("HTTP/1.1 200"), "{answer}");
+    let paired: serde_json::Value =
+        serde_json::from_str(answer.split_once("\r\n\r\n").unwrap().1).unwrap();
+    let token = paired["token"].as_str().unwrap().to_string();
+    let id = paired["id"].as_str().unwrap().to_string();
+    let (code, out) = command(&dir, &["devices"]);
+    assert_eq!(code, Some(0), "{out}");
+    assert!(out.contains(&id) && out.contains("portable"), "{out}");
+    let closed = runtime.block_on(async {
+        let tcp = tokio::net::TcpStream::connect(("127.0.0.1", port))
+            .await
+            .unwrap();
+        let mut req = format!("ws://127.0.0.1:{port}/")
+            .into_client_request()
+            .unwrap();
+        let protocols = format!("escouade, bearer.{token}").parse().unwrap();
+        req.headers_mut()
+            .insert("sec-websocket-protocol", protocols);
+        let (mut ws, _) = tokio_tungstenite::client_async(req, tcp).await.unwrap();
+        // The greeting, then the revocation by the command closes it.
+        ws.next().await.unwrap().unwrap();
+        let revoke = tokio::task::spawn_blocking({
+            let (dir, id) = (dir.clone(), id.clone());
+            move || command(&dir, &["devices", "revoke", &id])
+        });
+        let closed = tokio::time::timeout(Duration::from_secs(10), async {
+            loop {
+                match ws.next().await {
+                    None | Some(Err(_)) | Some(Ok(Message::Close(_))) => break,
+                    Some(Ok(_)) => {}
+                }
+            }
+        })
+        .await
+        .is_ok();
+        let (code, out) = revoke.await.unwrap();
+        assert_eq!(code, Some(0), "{out}");
+        assert!(out.contains("revoked"), "{out}");
+        closed
+    });
+    assert!(closed, "the revoked device's connection stays open");
+    let (_, out) = command(&dir, &["devices"]);
+    assert!(!out.contains(&id), "{out}");
+    let kept = std::fs::read_to_string(dir.join("data/devices.json")).unwrap();
+    assert!(!kept.contains(&token), "{kept}");
+    unsafe { libc::kill(child.id() as i32, libc::SIGTERM) };
+    assert_eq!(exit_within(&mut child, Duration::from_secs(60)), Some(0));
+    // Stopped: no port and key left for `pair` to send to whoever listens there next.
+    assert!(!dir.join("data/server.json").exists());
+    let log = std::fs::read_to_string(dir.join("data/app.log")).unwrap();
+    assert!(!log.contains(&token) && !log.contains(pairing), "{log}");
+    let _ = std::fs::remove_dir_all(&dir);
 }
 
 /// The program held in its start-up: its login shell (`SHELL`, run before the core loads) waits for `go` beside it,

@@ -1,11 +1,14 @@
 //! `escouade-server`: the core without a window (docs/REMOTE.md, « Le mode serveur »), its commands and the web build
-//! served on 127.0.0.1 (`remoteapi::server`), stopped by SIGINT or SIGTERM. `Headless` is its host.
+//! served on 127.0.0.1 (`remoteapi::server`) to the paired devices (`remoteapi::devices`), stopped by SIGINT or SIGTERM.
+//! `Headless` is its host. `pair` and `devices` ask the server that runs on the same data folder (`server::Control`).
 
 use crate::core::Core;
 use crate::host::Host;
 use crate::i18n::Lang;
 use crate::integrations::secrets::SecretStore;
 use crate::model::{Settings, UiEvent};
+use crate::remoteapi::devices::{Device, Devices};
+use crate::remoteapi::server::{Control, CONTROL};
 use crate::{paths, remoteapi};
 use escouade_base::rt;
 use escouade_model::agentgroups;
@@ -60,27 +63,27 @@ impl Host for Headless {
     fn tune_conversation(&self, _: &Settings, _: &dyn SecretStore) {}
 }
 
-const USAGE: &str = "usage: escouade-server [--web <folder>]\n\
-                     ESCOUADE_REMOTE_PORT and ESCOUADE_REMOTE_TOKEN (32 characters or more) must be set.";
+const USAGE: &str = "usage: escouade-server [--web <folder>]   serve, on 127.0.0.1 at ESCOUADE_REMOTE_PORT\n\
+                     \x20      escouade-server pair                  a code to pair a browser\n\
+                     \x20      escouade-server devices               the paired devices\n\
+                     \x20      escouade-server devices revoke <id>   forget one, its connections closed";
 
 /// The program: the exit code.
 pub fn run(args: Vec<String>) -> i32 {
     // First, before any thread: no child process may inherit the token.
-    let remote = remoteapi::server::take_from_env();
+    let remote = remoteapi::server::take_port_from_env();
+    let args: Vec<&str> = args.iter().map(String::as_str).collect();
     let web = match args.as_slice() {
         [] => None,
-        [flag, dir] if flag == "--web" => Some(PathBuf::from(dir)),
+        ["--web", dir] => Some(PathBuf::from(dir)),
+        ["pair"] | ["devices"] | ["devices", "revoke", _] => return command(&args),
         _ => {
             eprintln!("{USAGE}");
             return 2;
         }
     };
     let mut config = match remote {
-        Ok(Some(config)) => config,
-        Ok(None) => {
-            eprintln!("escouade-server: no token\n{USAGE}");
-            return 2;
-        }
+        Ok(config) => config,
         Err(why) => {
             eprintln!("escouade-server: {why}");
             return 2;
@@ -107,6 +110,7 @@ pub fn run(args: Vec<String>) -> i32 {
     }
     log::info!("escouade-server {} starting", env!("CARGO_PKG_VERSION"));
     let data = paths::DataDir::new(paths::default_data_dir());
+    config.devices = Some(Arc::new(Devices::open(data.root())));
     // The process groups of agents a killed run left behind, stopped before any agent starts.
     agentgroups::start(data.root().join("agent-groups.json"));
     let host = Arc::new(Headless::default());
@@ -222,4 +226,103 @@ impl Caught {
         });
         rx
     }
+}
+
+/// `pair`, `devices`, `devices revoke <id>`: asked of the server that runs on this data folder.
+fn command(args: &[&str]) -> i32 {
+    let dir = paths::default_data_dir();
+    let asked = match args {
+        ["pair"] => ask(&dir, "POST", "/admin/pair", "").map(|(port, answer)| {
+            let code = answer["code"].as_str().unwrap_or_default();
+            let minutes = answer["minutes"].as_u64().unwrap_or_default();
+            println!("Open http://127.0.0.1:{port}/ and enter the code:\n\n    {code}\n");
+            println!("It pairs one device, once, within {minutes} minutes.");
+            println!("Five wrong codes cancel it: then run `escouade-server pair` again.");
+        }),
+        ["devices"] => ask(&dir, "GET", "/admin/devices", "").map(|(_, answer)| {
+            let devices: Vec<Device> = serde_json::from_value(answer).unwrap_or_default();
+            if devices.is_empty() {
+                println!("No device paired: `escouade-server pair` gives a code.");
+            }
+            let day = |t: chrono::DateTime<chrono::Utc>| t.format("%Y-%m-%d %H:%M UTC").to_string();
+            for d in devices {
+                let seen = d.last_seen.map_or("never".into(), day);
+                println!(
+                    "{}  {}  paired {}, last seen {seen}",
+                    d.id,
+                    d.name,
+                    day(d.paired_at)
+                );
+            }
+        }),
+        ["devices", "revoke", id] => {
+            ask(&dir, "POST", "/admin/revoke", id).and_then(|(_, answer)| {
+                if let Some(why) = answer["unwritten"].as_str() {
+                    return Err(format!(
+                        "{id} is cut until the server restarts only ({why}): fix it and revoke again"
+                    ));
+                }
+                if answer["revoked"] == true {
+                    println!("{id} revoked: its connections are closed.");
+                } else {
+                    println!("No device {id}: `escouade-server devices` lists them.");
+                }
+                Ok(())
+            })
+        }
+        _ => unreachable!("the commands `run` lets through"),
+    };
+    match asked {
+        Ok(()) => 0,
+        Err(why) => {
+            eprintln!("escouade-server: {why}");
+            1
+        }
+    }
+}
+
+/// `method path` with `body`, asked of the server of `dir` with its key: its port and its answer.
+// shortcut: plain HTTP/1.1 by hand, the server answers one request and closes; a client crate if this grows.
+fn ask(
+    dir: &std::path::Path,
+    method: &str,
+    path: &str,
+    body: &str,
+) -> Result<(u16, serde_json::Value), String> {
+    use std::io::{Read, Write};
+    let down = || {
+        format!(
+            "no escouade-server runs on {}: start it first",
+            dir.display()
+        )
+    };
+    let control = std::fs::read(dir.join(CONTROL)).map_err(|_| down())?;
+    let control: Control = serde_json::from_slice(&control).map_err(|_| down())?;
+    let port = control.port;
+    let addr = std::net::SocketAddr::from(([127, 0, 0, 1], port));
+    let mut tcp = std::net::TcpStream::connect_timeout(&addr, std::time::Duration::from_secs(5))
+        .map_err(|_| down())?;
+    let _ = tcp.set_read_timeout(Some(std::time::Duration::from_secs(30)));
+    let request = format!(
+        "{method} {path} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nAuthorization: Bearer {}\r\n\
+         Content-Length: {}\r\nConnection: close\r\n\r\n{body}",
+        control.key,
+        body.len()
+    );
+    let mut answer = Vec::new();
+    tcp.write_all(request.as_bytes())
+        .and_then(|()| tcp.read_to_end(&mut answer))
+        .map_err(|e| format!("the server on port {port} did not answer: {e}"))?;
+    let answer = String::from_utf8_lossy(&answer);
+    let (head, json) = answer.split_once("\r\n\r\n").unwrap_or((&answer, ""));
+    let status = head.split(' ').nth(1).unwrap_or_default();
+    if status != "200" {
+        // Another program on that port, or a server started since with another key.
+        return Err(format!(
+            "the server on port {port} refused ({status}): is it this data folder's?"
+        ));
+    }
+    let json = serde_json::from_str(json)
+        .map_err(|e| format!("the server on port {port} answered badly: {e}"))?;
+    Ok((port, json))
 }

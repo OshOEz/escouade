@@ -44,7 +44,8 @@ fn serve(loaded: &Loaded) -> Running {
 fn serve_table(loaded: &Loaded, entries: &'static [Entry]) -> Running {
     let config = Config {
         port: 0,
-        token: TOKEN.into(),
+        token: Some(TOKEN.into()),
+        devices: Some(Arc::new(Devices::open(&loaded.dir))),
         web: None,
     };
     start(loaded.core.clone(), entries, config).unwrap()
@@ -764,119 +765,389 @@ fn http(addr: SocketAddr, request: &str) -> String {
     String::from_utf8_lossy(&got).into_owned()
 }
 
-/// `POST /session` with `body`, from the server's own page.
-fn post_session(addr: SocketAddr, body: &str) -> String {
+/// `POST /pair` with `body`, from the server's own page.
+fn post_pair(addr: SocketAddr, body: &str) -> String {
     let port = addr.port();
     http(
         addr,
         &format!(
-            "POST /session HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nOrigin: http://127.0.0.1:{port}\r\n\
-             Content-Type: text/plain\r\nContent-Length: {}\r\n\r\n{body}",
+            "POST /pair HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nOrigin: http://127.0.0.1:{port}\r\n\
+             Content-Type: application/json\r\nContent-Length: {}\r\n\r\n{body}",
             body.len()
         ),
     )
 }
 
-/// The `Set-Cookie` header of `answer`, whole.
-fn set_cookie(answer: &str) -> Option<String> {
-    answer.lines().take_while(|l| !l.is_empty()).find_map(|l| {
-        let (name, value) = l.split_once(':')?;
-        name.eq_ignore_ascii_case("set-cookie")
-            .then(|| value.trim().to_string())
-    })
+/// The body of an answer, as JSON.
+fn body_of(answer: &str) -> Value {
+    serde_json::from_str(answer.split_once("\r\n\r\n").unwrap().1).unwrap()
 }
 
-/// The `name=value` a browser sends back.
-fn cookie_of(answer: &str) -> String {
-    let cookie = set_cookie(answer).expect("a cookie");
-    cookie.split(';').next().unwrap().to_string()
-}
-
-#[test]
-fn the_cookie_is_httponly_and_samesite_strict() {
-    let loaded = load("remote-server-cookie-flags");
-    let running = serve(&loaded);
-    let answer = post_session(running.addr, TOKEN);
-    assert!(answer.starts_with("HTTP/1.1 204"), "{answer}");
-    let cookie = set_cookie(&answer).expect("a cookie");
-    let parts: Vec<&str> = cookie.split(';').map(str::trim).collect();
-    for flag in ["HttpOnly", "SameSite=Strict", "Path=/"] {
-        assert!(parts.contains(&flag), "{cookie}");
-    }
-    // The browser holds a session of its own, never the token.
-    assert!(!answer.contains(TOKEN), "{answer}");
-}
-
-#[test]
-fn a_wrong_token_gets_no_cookie() {
-    let loaded = load("remote-server-cookie-wrong");
-    let running = serve(&loaded);
-    for body in [TOKEN.replace('0', "1"), String::new()] {
-        let answer = post_session(running.addr, &body);
-        assert!(answer.starts_with("HTTP/1.1 401"), "{answer}");
-        assert_eq!(set_cookie(&answer), None, "{answer}");
-    }
-    // From a foreign page, not even the right token gets one.
-    let port = running.addr.port();
-    let answer = http(
-        running.addr,
+/// `method path` of `escouade-server`'s own commands, with the key the server wrote beside the devices.
+fn admin(loaded: &Loaded, addr: SocketAddr, method: &str, path: &str, body: &str) -> String {
+    let control: Control =
+        serde_json::from_slice(&std::fs::read(loaded.dir.join(CONTROL)).unwrap()).unwrap();
+    assert_eq!(control.port, addr.port());
+    http(
+        addr,
         &format!(
-            "POST /session HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nOrigin: http://evil.example\r\n\
-             Content-Length: {}\r\n\r\n{TOKEN}",
-            TOKEN.len()
+            "{method} {path} HTTP/1.1\r\nHost: 127.0.0.1:{}\r\nAuthorization: Bearer {}\r\n\
+             Content-Length: {}\r\n\r\n{body}",
+            addr.port(),
+            control.key,
+            body.len()
         ),
+    )
+}
+
+/// A code asked as `escouade-server pair` asks it.
+fn pair_code(loaded: &Loaded, addr: SocketAddr) -> String {
+    let answer = admin(loaded, addr, "POST", "/admin/pair", "");
+    assert!(answer.starts_with("HTTP/1.1 200"), "{answer}");
+    let code = body_of(&answer);
+    assert_eq!(code["minutes"], 10);
+    code["code"].as_str().unwrap().to_string()
+}
+
+/// A device paired through the server: its token and its id.
+fn pair(loaded: &Loaded, addr: SocketAddr, name: &str) -> (String, String) {
+    let code = pair_code(loaded, addr);
+    let answer = post_pair(addr, &json!({ "code": code, "name": name }).to_string());
+    assert!(answer.starts_with("HTTP/1.1 200"), "{answer}");
+    assert_eq!(header_of(&answer, "cache-control").unwrap(), "no-store");
+    let body = body_of(&answer);
+    (
+        body["token"].as_str().unwrap().to_string(),
+        body["id"].as_str().unwrap().to_string(),
+    )
+}
+
+/// The headers of a page's handshake that presents `token` by the subprotocol.
+fn page_handshake(addr: SocketAddr, token: &str) -> String {
+    host(addr)
+        + &format!(
+            "Origin: http://127.0.0.1:{}\r\nSec-WebSocket-Protocol: escouade, bearer.{token}\r\n",
+            addr.port()
+        )
+}
+
+/// A client of a device: its token by the subprotocol, as the page gives it, past the greeting.
+async fn connect_device(addr: SocketAddr, token: &str) -> Ws {
+    let tcp = TcpStream::connect(addr).await.unwrap();
+    let mut req = format!("ws://127.0.0.1:{}/", addr.port())
+        .into_client_request()
+        .unwrap();
+    let protocols = format!("escouade, bearer.{token}").parse().unwrap();
+    req.headers_mut()
+        .insert(header::SEC_WEBSOCKET_PROTOCOL, protocols);
+    let (ws, answer) = tokio_tungstenite::client_async(req, tcp).await.unwrap();
+    // Answered with the protocol, never with the token.
+    assert_eq!(
+        answer
+            .headers()
+            .get(header::SEC_WEBSOCKET_PROTOCOL)
+            .unwrap(),
+        "escouade"
     );
-    assert!(answer.starts_with("HTTP/1.1 403"), "{answer}");
-    assert_eq!(set_cookie(&answer), None, "{answer}");
-    // Asked of another host, not either.
-    let answer = http(
-        running.addr,
-        &format!(
-            "POST /session HTTP/1.1\r\nHost: evil.example:{port}\r\nOrigin: http://127.0.0.1:{port}\r\n\
-             Content-Length: {}\r\n\r\n{TOKEN}",
-            TOKEN.len()
-        ),
-    );
-    assert!(answer.starts_with("HTTP/1.1 403"), "{answer}");
-    assert_eq!(set_cookie(&answer), None, "{answer}");
-    // A body over 1 KiB is not read.
-    let answer = post_session(running.addr, &"x".repeat(1025));
-    assert!(answer.starts_with("HTTP/1.1 413"), "{answer}");
-    assert_eq!(set_cookie(&answer), None, "{answer}");
+    let mut ws = Ws {
+        ws,
+        bytes: Default::default(),
+    };
+    let hello = text(&mut ws).await;
+    assert!(hello.get("hello").is_some(), "{hello}");
+    ws
 }
 
 #[test]
-fn the_session_cookie_opens_the_socket() {
-    let loaded = load("remote-server-cookie-in");
+fn a_code_pairs_a_device_whose_token_opens_the_socket() {
+    let loaded = load("remote-server-pair");
     let running = serve(&loaded);
-    let cookie = cookie_of(&post_session(running.addr, TOKEN));
-    let port = running.addr.port();
-    let headers = host(running.addr)
-        + &format!("Origin: http://127.0.0.1:{port}\r\nCookie: other=1; {cookie}\r\n");
-    let line = handshake(running.addr, &headers);
+    let (token, id) = pair(&loaded, running.addr, "téléphone");
+    assert_eq!(token.len(), 43);
+    let line = handshake(running.addr, &page_handshake(running.addr, &token));
     assert!(line.contains(" 101 "), "{line}");
-    // A made-up session, or none, opens nothing.
-    for cookie in [cookie.replace('=', "=x"), String::new()] {
-        let headers = host(running.addr) + &format!("Cookie: {cookie}\r\n");
-        let line = handshake(running.addr, &headers);
-        assert!(line.contains(" 401 "), "{cookie}: {line}");
-    }
-    // A wrong Bearer wins over the right cookie.
-    let headers =
-        host(running.addr) + &format!("Cookie: {cookie}\r\n") + &bearer(&TOKEN.replace('0', "1"));
-    let line = handshake(running.addr, &headers);
-    assert!(line.contains(" 401 "), "{line}");
+    // By `Authorization` too, as a download asked by `fetch` will be.
+    let line = handshake(running.addr, &(host(running.addr) + &bearer(&token)));
+    assert!(line.contains(" 101 "), "{line}");
+    let answer = http(
+        running.addr,
+        &format!(
+            "GET /device HTTP/1.1\r\n{}{}\r\n",
+            host(running.addr),
+            bearer(&token)
+        ),
+    );
+    assert!(answer.starts_with("HTTP/1.1 204"), "{answer}");
+    let listed = body_of(&admin(&loaded, running.addr, "GET", "/admin/devices", ""));
+    assert_eq!(listed[0]["id"], id.as_str());
+    assert_eq!(listed[0]["name"], "téléphone");
+    assert!(!listed.to_string().contains(&token));
+    rt::block_on(async {
+        let mut ws = connect_device(running.addr, &token).await;
+        let a = call(&mut ws, 1, "data_dir", json!({})).await;
+        assert!(a["ok"].is_string(), "{a}");
+    });
 }
 
 #[test]
-fn a_foreign_origin_is_refused_even_with_the_cookie() {
-    let loaded = load("remote-server-cookie-foreign");
+fn a_code_is_refused_once_used_wrong_or_guessed() {
+    let loaded = load("remote-server-pair-refused");
     let running = serve(&loaded);
-    let cookie = cookie_of(&post_session(running.addr, TOKEN));
-    let headers =
-        host(running.addr) + &format!("Origin: http://evil.example\r\nCookie: {cookie}\r\n");
-    let line = handshake(running.addr, &headers);
-    assert!(line.contains(" 403 "), "{line}");
+    let pair_with = |code: &str| {
+        post_pair(
+            running.addr,
+            &json!({ "code": code, "name": "pc" }).to_string(),
+        )
+    };
+    // None asked.
+    assert!(pair_with("0000-0000").starts_with("HTTP/1.1 403"));
+    let code = pair_code(&loaded, running.addr);
+    assert!(pair_with(&code).starts_with("HTTP/1.1 200"));
+    assert!(pair_with(&code).starts_with("HTTP/1.1 403"));
+    // Five wrong: the right one no longer pairs. Wrong for sure: its first character changed.
+    let code = pair_code(&loaded, running.addr);
+    let wrong = format!(
+        "{}{}",
+        if code.starts_with('0') { '1' } else { '0' },
+        &code[1..]
+    );
+    for _ in 0..5 {
+        assert!(pair_with(&wrong).starts_with("HTTP/1.1 403"));
+    }
+    assert!(pair_with(&code).starts_with("HTTP/1.1 403"));
+    // A body that is no pairing, or too big, or a name left empty.
+    let code = pair_code(&loaded, running.addr);
+    for body in [
+        "not json".to_string(),
+        json!({ "code": code }).to_string(),
+        json!({ "code": code, "name": " " }).to_string(),
+        // Nothing left once cleaned.
+        json!({ "code": code, "name": "\u{202E}\u{7}\u{200B}" }).to_string(),
+    ] {
+        assert!(
+            post_pair(running.addr, &body).starts_with("HTTP/1.1 400"),
+            "{body}"
+        );
+    }
+    assert!(post_pair(running.addr, &"x".repeat(1025)).starts_with("HTTP/1.1 413"));
+    // From a foreign page, not even the right code pairs.
+    let body = json!({ "code": code, "name": "pc" }).to_string();
+    let port = running.addr.port();
+    let answer = http(
+        running.addr,
+        &format!(
+            "POST /pair HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nOrigin: http://evil.example\r\n\
+             Content-Length: {}\r\n\r\n{body}",
+            body.len()
+        ),
+    );
+    assert!(answer.starts_with("HTTP/1.1 403"), "{answer}");
+    assert!(pair_with(&code).starts_with("HTTP/1.1 200"));
+}
+
+#[test]
+fn the_servers_own_commands_need_its_key() {
+    let loaded = load("remote-server-admin");
+    let running = serve(&loaded);
+    let (token, _) = pair(&loaded, running.addr, "pc");
+    let port = running.addr.port();
+    for auth in [String::new(), bearer(&token), bearer(TOKEN), bearer("x")] {
+        for (method, path) in [
+            ("POST", "/admin/pair"),
+            ("GET", "/admin/devices"),
+            ("POST", "/admin/revoke"),
+        ] {
+            let answer = http(
+                running.addr,
+                &format!("{method} {path} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\n{auth}Content-Length: 0\r\n\r\n"),
+            );
+            assert!(
+                answer.starts_with("HTTP/1.1 401"),
+                "{auth} {path}: {answer}"
+            );
+        }
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = std::fs::metadata(loaded.dir.join(CONTROL))
+            .unwrap()
+            .permissions()
+            .mode();
+        assert_eq!(mode & 0o777, 0o600);
+    }
+}
+
+#[test]
+fn a_revoked_device_is_refused_and_its_open_connection_closed() {
+    let loaded = load("remote-server-revoke");
+    let running = serve(&loaded);
+    let (token, id) = pair(&loaded, running.addr, "pc");
+    let (other, _) = pair(&loaded, running.addr, "téléphone");
+    rt::block_on(async {
+        let mut ws = connect_device(running.addr, &token).await;
+        let mut kept = connect_device(running.addr, &other).await;
+        let a = call(&mut ws, 1, "data_dir", json!({})).await;
+        assert!(a["ok"].is_string(), "{a}");
+        let answer = admin(&loaded, running.addr, "POST", "/admin/revoke", &id);
+        assert_eq!(body_of(&answer)["revoked"], true);
+        // Closed at once, not at its next request.
+        let end = tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                match ws.ws.next().await {
+                    None | Some(Err(_)) | Some(Ok(Message::Close(_))) => break,
+                    Some(Ok(_)) => {}
+                }
+            }
+        })
+        .await;
+        assert!(end.is_ok(), "the revoked device's connection stays open");
+        // The other device goes on.
+        let a = call(&mut kept, 2, "data_dir", json!({})).await;
+        assert!(a["ok"].is_string(), "{a}");
+    });
+    let line = handshake(running.addr, &page_handshake(running.addr, &token));
+    assert!(line.contains(" 401 "), "{line}");
+    let answer = admin(&loaded, running.addr, "POST", "/admin/revoke", &id);
+    assert_eq!(body_of(&answer)["revoked"], false);
+}
+
+#[test]
+fn a_revoked_device_is_cut_in_the_middle_of_its_streams() {
+    let loaded = load("remote-server-revoke-streams");
+    let running = serve(&loaded);
+    let (token, id) = pair(&loaded, running.addr, "pc");
+    rt::block_on(async {
+        let (project, shell) = project(&loaded).await;
+        let mut ws = connect_device(running.addr, &token).await;
+        call(&mut ws, 1, "subscribe", json!({})).await;
+        let term = spawn(&mut ws, 2, &project, &shell, 1).await;
+        write(
+            &mut ws,
+            3,
+            &term,
+            "while :; do echo flowing; sleep 0.05; done\n",
+        )
+        .await;
+        read_stream(&mut ws, 1, |s| s.matches("flowing").count() >= 3).await;
+        let answer = admin(&loaded, running.addr, "POST", "/admin/revoke", &id);
+        assert_eq!(body_of(&answer)["revoked"], true);
+        let end = tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                match ws.ws.next().await {
+                    None | Some(Err(_)) | Some(Ok(Message::Close(_))) => break,
+                    Some(Ok(_)) => {}
+                }
+            }
+        })
+        .await;
+        assert!(
+            end.is_ok(),
+            "the revoked device's streams keep its connection open"
+        );
+    });
+}
+
+#[test]
+fn the_token_of_the_environment_is_read_by_a_debug_build_alone() {
+    assert_eq!(env_token(Some(TOKEN.into()), true), Some(TOKEN.into()));
+    assert_eq!(env_token(Some(TOKEN.into()), false), None);
+    assert_eq!(env_token(None, false), None);
+}
+
+#[test]
+fn the_servers_file_goes_with_it_unless_another_wrote_its_own() {
+    let loaded = load("remote-server-control-file");
+    let file = loaded.dir.join(CONTROL);
+    let running = serve(&loaded);
+    assert!(file.exists());
+    running.stop();
+    assert!(!file.exists(), "server.json stays after the server");
+    // A second server on the same folder: the first one's stop leaves its file.
+    let first = serve(&loaded);
+    let second = serve(&loaded);
+    drop(first);
+    let control: Control = serde_json::from_slice(&std::fs::read(&file).unwrap()).unwrap();
+    assert_eq!(control.port, second.addr.port());
+    drop(second);
+    assert!(!file.exists());
+}
+
+#[test]
+fn no_answer_sets_a_cookie() {
+    let loaded = load("remote-server-no-cookie");
+    let running = serve_web(&loaded);
+    let (token, _) = pair(&loaded, running.addr, "pc");
+    let port = running.addr.port();
+    let answers = [
+        post_pair(
+            running.addr,
+            &json!({ "code": "0000-0000", "name": "pc" }).to_string(),
+        ),
+        get(running.addr, "/"),
+        get(running.addr, "/assets/app-1234.js"),
+        http(
+            running.addr,
+            &format!(
+                "GET /device HTTP/1.1\r\n{}{}\r\n",
+                host(running.addr),
+                bearer(&token)
+            ),
+        ),
+    ];
+    for answer in answers {
+        assert!(
+            !answer.to_ascii_lowercase().contains("set-cookie"),
+            "{answer}"
+        );
+    }
+    // The session of the previous version is gone.
+    let answer = http(
+        running.addr,
+        &format!(
+            "POST /session HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nContent-Length: 32\r\n\r\n{TOKEN}"
+        ),
+    );
+    assert!(answer.starts_with("HTTP/1.1 405"), "{answer}");
+    // Paired, then the handshake: no cookie either; and a cookie is never taken for a token.
+    let mut tcp = std::net::TcpStream::connect(running.addr).unwrap();
+    tcp.set_read_timeout(Some(Duration::from_secs(10))).unwrap();
+    let request = format!(
+        "GET / HTTP/1.1\r\nConnection: Upgrade\r\nUpgrade: websocket\r\nSec-WebSocket-Version: 13\r\n\
+         Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n{}\r\n",
+        page_handshake(running.addr, &token)
+    );
+    tcp.write_all(request.as_bytes()).unwrap();
+    let mut head = vec![0u8; 1024];
+    let n = tcp.read(&mut head).unwrap();
+    let head = String::from_utf8_lossy(&head[..n]).to_ascii_lowercase();
+    assert!(
+        head.contains(" 101 ") && !head.contains("set-cookie"),
+        "{head}"
+    );
+    assert!(!head.contains(&token.to_ascii_lowercase()), "{head}");
+    for cookie in [format!("escouade-{port}={token}"), format!("token={token}")] {
+        let line = handshake(
+            running.addr,
+            &(host(running.addr) + &format!("Cookie: {cookie}\r\n")),
+        );
+        assert!(line.contains(" 401 "), "{line}");
+    }
+}
+
+#[test]
+fn a_token_offered_twice_or_beside_a_wrong_bearer_is_refused() {
+    let loaded = load("remote-server-protocols");
+    let running = serve(&loaded);
+    let (token, _) = pair(&loaded, running.addr, "pc");
+    let twice = host(running.addr)
+        + &format!("Sec-WebSocket-Protocol: escouade, bearer.{token}, bearer.{token}\r\n");
+    assert!(handshake(running.addr, &twice).contains(" 401 "));
+    let other = if token.starts_with('x') { "y" } else { "x" };
+    let wrong = page_handshake(running.addr, &token) + &bearer(&format!("{other}{}", &token[1..]));
+    assert!(handshake(running.addr, &wrong).contains(" 401 "));
+    let made_up = page_handshake(running.addr, &token[1..]);
+    assert!(handshake(running.addr, &made_up).contains(" 401 "));
 }
 
 /// The server of `loaded` with a web build: an `index.html`, an asset, and a secret beside the build.
@@ -892,7 +1163,8 @@ fn serve_web(loaded: &Loaded) -> Running {
     std::fs::write(loaded.dir.join("Cargo.toml"), "secret").unwrap();
     let config = Config {
         port: 0,
-        token: TOKEN.into(),
+        token: Some(TOKEN.into()),
+        devices: Some(Arc::new(Devices::open(&loaded.dir))),
         web: Some(web),
     };
     start(loaded.core.clone(), table::entries(), config).unwrap()
@@ -1033,7 +1305,8 @@ fn the_calls_of_all_connections_stay_under_the_servers_cap() {
     let loaded = load("remote-server-cap");
     let config = Config {
         port: 0,
-        token: TOKEN.into(),
+        token: Some(TOKEN.into()),
+        devices: Some(Arc::new(Devices::open(&loaded.dir))),
         web: None,
     };
     // Two at once across the server, three asked on two connections.
@@ -1318,7 +1591,8 @@ fn a_client_cut_while_an_attach_waits_for_room_frees_it_at_once() {
     let loaded = load("remote-server-cut-mid-resume");
     let config = Config {
         port: 0,
-        token: TOKEN.into(),
+        token: Some(TOKEN.into()),
+        devices: Some(Arc::new(Devices::open(&loaded.dir))),
         web: None,
     };
     // One call at a time across the server: the attach that waits holds it.
@@ -1408,4 +1682,14 @@ fn the_variables_are_taken_out_of_the_environment() {
     assert_eq!(config.port, 4000);
     assert!(std::env::vars().all(|(k, _)| k != PORT_VAR && k != TOKEN_VAR));
     assert_eq!(take_from_env().map(|c| c.is_some()), Ok(false));
+    // `escouade-server`'s: the port it needs, the token of a debug build (this one), both taken out.
+    std::env::set_var(PORT_VAR, "4001");
+    std::env::set_var(TOKEN_VAR, "y".repeat(40));
+    let config = take_port_from_env().unwrap();
+    assert_eq!((config.port, config.token.unwrap().len()), (4001, 40));
+    assert!(std::env::vars().all(|(k, _)| k != PORT_VAR && k != TOKEN_VAR));
+    std::env::set_var(PORT_VAR, "4001");
+    let config = take_port_from_env().unwrap();
+    assert_eq!((config.port, config.token), (4001, None));
+    assert!(take_port_from_env().unwrap_err().starts_with(PORT_VAR));
 }

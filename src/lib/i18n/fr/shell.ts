@@ -112,6 +112,17 @@ export default {
     open: 'Ouvrir le dossier des copies',
     close: 'Fermer',
   },
+  /** In a browser not paired yet with the server: the code `escouade-server pair` shows, and a name for this device. */
+  pair: {
+    title: 'Appairer ce navigateur',
+    intro: 'Sur le serveur, lance « escouade-server pair » : saisis ici le code qu’il affiche.',
+    code: 'Code d’appairage',
+    name: 'Nom de cet appareil',
+    defaultName: 'Navigateur',
+    submit: 'Appairer',
+    refused: 'Code refusé : il a déjà servi, a expiré ou est faux. Demande un nouveau code au serveur.',
+    failed: 'Le serveur ne répond pas : réessaie.',
+  },
   /** In a browser, the connection to the server: lost, back, or refused (a server of another version of the wire). */
   connection: {
     lost: 'La connexion au serveur est perdue : nouvelle tentative en cours…',
