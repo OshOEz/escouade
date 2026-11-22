@@ -5,6 +5,7 @@ import { fBytes } from './format';
 import { t } from './i18n';
 import { api } from './ipc';
 import { desktop } from './transport';
+import { send } from './transport/files';
 import type { AttachedFile, Attachment, Settings } from './types';
 
 /** What the message itself can carry of a file. */
@@ -57,8 +58,11 @@ const MB = 1024 * KB;
 const LIMITS = { image: 5 * MB, pdf: 18 * MB, text: 256 * KB };
 /** The most an image weighs to go in a message, or to be an image of a ticket. */
 export const MAX_IMAGE = LIMITS.image;
-/** All the files of a message: sent in base64 (4/3 bigger), under the API's 32 MB a request. */
-export const MAX_TOTAL = 18 * MB;
+/**
+ * All the files of a message: sent in base64 (4/3 bigger), under the API's 32 MB a request; from a browser, under what
+ * its server reads of a request (2 MiB, `server.rs`): the others go by their path.
+ */
+export const MAX_TOTAL = desktop ? 18 * MB : MB;
 
 /** A size, rounded down: « 5 Mo », « 256 Ko ». */
 export function sizeLabel(bytes: number): string {
@@ -227,8 +231,20 @@ function stopped(signal?: AbortSignal) {
  * sits whole in memory. What is half written is erased when it fails or is cancelled.
  */
 export async function copyToDisk(f: File, owner: string, { signal, onProgress }: CopyOptions = {}): Promise<AttachedFile> {
+  // From a browser, the file is sent whole as the body of one request (its server's machine keeps the copy).
+  const copy = desktop
+    ? await copyByChunks(f, owner, { signal, onProgress })
+    : await send<AttachedFile>('/files/attach', { agent: owner, name: f.name }, f, { signal, onProgress });
+  // Cancelled as it was finishing: the copy exists, nothing keeps it.
+  if (signal?.aborted) {
+    await api.attachDiscard(owner, copy.path).catch(() => {});
+    stopped(signal);
+  }
+  return copy;
+}
+
+async function copyByChunks(f: File, owner: string, { signal, onProgress }: CopyOptions): Promise<AttachedFile> {
   const handle = await api.attachOpen(owner, f.name, f.size);
-  let copy: AttachedFile;
   try {
     for (let at = 0; at < f.size; at += CHUNK) {
       stopped(signal);
@@ -238,17 +254,11 @@ export async function copyToDisk(f: File, owner: string, { signal, onProgress }:
       onProgress?.(Math.min(at + CHUNK, f.size));
     }
     stopped(signal);
-    copy = await api.attachFinish(handle);
+    return await api.attachFinish(handle);
   } catch (e) {
     await api.attachCancel(handle).catch(() => {});
     throw e;
   }
-  // Cancelled as it was finishing: the copy exists, nothing keeps it.
-  if (signal?.aborted) {
-    await api.attachDiscard(owner, copy.path).catch(() => {});
-    stopped(signal);
-  }
-  return copy;
 }
 
 /**

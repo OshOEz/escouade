@@ -1,7 +1,8 @@
 // The projects' logos (ESC-167), as `data:` URLs for their tiles: asked of the backend once per logo file (a new logo
 // is a new file), kept for the rest of the run. Shown in an `<img>`: an SVG's scripts never run.
 
-import { open } from './platform';
+import { copyToDisk } from './attachments';
+import { desktop, open, pickFile } from './platform';
 import { t } from './i18n';
 import { api } from './ipc';
 import { app } from './state.svelte';
@@ -42,14 +43,22 @@ export const LOGO_EXTENSIONS = ['png', 'jpg', 'jpeg', 'webp', 'svg', 'ico'];
  * heavy, unreadable, of another format), which a toast says.
  */
 export async function pickLogo(): Promise<{ path: string; url: string } | null> {
-  const path = await open({
-    multiple: false,
-    title: t('settings.project.logoTitle'),
-    filters: [{ name: t('settings.project.logoFilter'), extensions: LOGO_EXTENSIONS }],
-  });
+  const path = desktop
+    ? await open({
+        multiple: false,
+        title: t('settings.project.logoTitle'),
+        filters: [{ name: t('settings.project.logoFilter'), extensions: LOGO_EXTENSIONS }],
+      })
+    : await uploadLogo();
   if (typeof path !== 'string') return null;
   const url = await app.run(api.readLogo(path));
   return url ? { path, url } : null;
+}
+
+/** From a browser: the image chosen on this device, sent to the server as a draft's file (its path there). */
+async function uploadLogo(): Promise<string | null> {
+  const f = await pickFile(LOGO_EXTENSIONS.map((e) => `.${e}`).join(','));
+  return f && ((await app.run(copyToDisk(f, 'draft')))?.path ?? null);
 }
 
 /** For the tests: nothing known. */

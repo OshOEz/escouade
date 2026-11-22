@@ -12,7 +12,7 @@ import { echoWatch, type InputKind } from './echo-watch';
 import { t } from './i18n';
 import { api } from './ipc';
 import { openOutside, terminalLinks } from './links';
-import { IS_MAC } from './platform';
+import { IS_MAC, desktop } from './platform';
 import { isAppShortcut } from './shortcuts';
 import { engineName } from './engines';
 import { app } from './state.svelte';
@@ -478,7 +478,8 @@ async function paste(term: Terminal, agentId: string, pasted: Pasted) {
  */
 async function pastedPath(f: File, agentId: string): Promise<string | null> {
   const type = imageType(f);
-  if (!type) {
+  // From a browser, an image is sent as any file: its server's request would not carry it in base64.
+  if (!type || !desktop) {
     // As the composer's: a text over what a message carries, refused when the settings say so.
     const plan = planByPath(f, app.settings);
     if ('refusal' in plan) {

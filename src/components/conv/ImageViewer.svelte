@@ -7,6 +7,7 @@
   import { desktop } from '../../lib/platform';
   import { app } from '../../lib/state.svelte';
   import { tip } from '../../lib/tip';
+  import { save as saveFile } from '../../lib/transport/files';
   import Icon from '../Icon.svelte';
 
   // The images of a conversation seen full size (ESC-171): one at a time, fitted to the window as it changes; zoomed by
@@ -155,6 +156,8 @@
     }
   }
   async function save() {
+    // In a browser, its own download: the image is in the page already.
+    if (current && !desktop) return saveFile(current.url, current.name);
     if (current && (await app.run(api.saveImage(current.url, current.name)))) app.toast(t('conv.sent.saved'));
   }
   const open = (reveal: boolean) => current?.source && app.run(openSource(current.source, reveal));

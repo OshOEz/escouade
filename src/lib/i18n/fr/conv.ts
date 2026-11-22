@@ -178,6 +178,8 @@ export default {
     reveal: 'Afficher dans le dossier',
     revealName: 'Afficher {name} dans le dossier',
     openName: 'Ouvrir {name}',
+    /** In a browser, « Ouvrir » of a file the agent sent: it comes from the server to this device. */
+    downloadName: 'Télécharger {name}',
     missing: 'Fichier introuvable',
     missingHint: 'Effacé ou déplacé depuis son envoi',
     fenced: 'Fichier d’un projet privé, non affiché',

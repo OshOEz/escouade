@@ -2191,3 +2191,417 @@ fn a_socket_given_by_hand_is_bound_only_where_no_other_user_can_change_its_path(
     }
     let _ = std::fs::remove_dir_all(&base);
 }
+
+/// A request of the files' routes from the server's own page, with `token` if any, its `Content-Length` if given: the
+/// head of the answer, and its body.
+fn files_request(
+    addr: SocketAddr,
+    method: &str,
+    target: &str,
+    token: Option<&str>,
+    length: Option<u64>,
+    body: &[u8],
+) -> (String, Vec<u8>) {
+    let port = addr.port();
+    let mut head = format!(
+        "{method} {target} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nOrigin: http://127.0.0.1:{port}\r\n"
+    );
+    if let Some(token) = token {
+        head += &format!("Authorization: Bearer {token}\r\n");
+    }
+    if let Some(n) = length {
+        head += &format!("Content-Length: {n}\r\n");
+    }
+    head += "\r\n";
+    let mut tcp = std::net::TcpStream::connect(addr).unwrap();
+    tcp.set_read_timeout(Some(Duration::from_secs(10))).unwrap();
+    tcp.write_all(head.as_bytes()).unwrap();
+    // Refused before its body is read, the server may close first.
+    let _ = tcp.write_all(body);
+    let mut got = Vec::new();
+    let _ = tcp.read_to_end(&mut got);
+    let end = got
+        .windows(4)
+        .position(|w| w == b"\r\n\r\n")
+        .map_or(got.len(), |i| i + 4);
+    let body = got.split_off(end);
+    (String::from_utf8_lossy(&got).into_owned(), body)
+}
+
+/// What a folder holds, all the way down; nothing when it is not there.
+fn everything_in(dir: &std::path::Path) -> Vec<PathBuf> {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return Vec::new();
+    };
+    entries
+        .flatten()
+        .flat_map(|e| {
+            let p = e.path();
+            let mut below = everything_in(&p);
+            below.insert(0, p);
+            below
+        })
+        .collect()
+}
+
+#[test]
+fn a_file_sent_by_a_browser_is_kept_whole_under_a_safe_name_and_never_without_a_token() {
+    let loaded = load("remote-files-attach");
+    let running = serve(&loaded);
+    let drafts = loaded.core.data.drafts_files();
+    let send = |target: &str, token: Option<&str>, body: &[u8]| {
+        let n = body.len() as u64;
+        files_request(running.addr, "POST", target, token, Some(n), body)
+    };
+
+    // Without a token, with a wrong one, from another page: nothing written.
+    let target = "/files/attach?agent=draft&name=a.txt";
+    let wrong = "x".repeat(43);
+    for token in [None, Some(wrong.as_str())] {
+        let (head, _) = send(target, token, b"hello");
+        assert!(head.starts_with("HTTP/1.1 401"), "{head}");
+    }
+    let port = running.addr.port();
+    let foreign = http(
+        running.addr,
+        &format!(
+            "POST {target} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nOrigin: http://127.0.0.1:1\r\n\
+             Authorization: Bearer {TOKEN}\r\nContent-Length: 5\r\n\r\nhello"
+        ),
+    );
+    assert!(foreign.starts_with("HTTP/1.1 403"), "{foreign}");
+    assert_eq!(everything_in(&drafts), Vec::<PathBuf>::new());
+
+    // A hostile name: a way up, a NUL, a mark that writes backwards, a separator of Windows.
+    let target = "/files/attach?agent=draft&name=..%2F..%2Fx%5Cy%00%E2%80%AEfdp.sh";
+    let (head, body) = send(target, Some(TOKEN), b"hello");
+    assert!(head.starts_with("HTTP/1.1 200"), "{head}");
+    assert!(head.contains("application/json"), "{head}");
+    let file: Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(file["size"], 5);
+    assert_eq!(file["origin"], false);
+    let name = file["name"].as_str().unwrap();
+    assert!(!name.contains(['/', '\\', '\0', '\u{202e}']), "{name}");
+    let path = PathBuf::from(file["path"].as_str().unwrap());
+    // In a folder of its own under the drafts', nowhere else.
+    assert_eq!(path.parent().unwrap().parent().unwrap(), drafts);
+    assert_eq!(std::fs::read(&path).unwrap(), b"hello");
+
+    // An owner that is no agent: refused, said why.
+    let (head, body) = send("/files/attach?agent=nobody&name=a.txt", Some(TOKEN), b"x");
+    assert!(head.starts_with("HTTP/1.1 400"), "{head}");
+    assert!(!body.is_empty(), "the reason is said");
+    // No size said, or no name: refused.
+    let (head, _) = files_request(
+        running.addr,
+        "POST",
+        "/files/attach?agent=draft&name=a",
+        Some(TOKEN),
+        None,
+        b"",
+    );
+    assert!(head.starts_with("HTTP/1.1 411"), "{head}");
+    let (head, _) = send("/files/attach?agent=draft", Some(TOKEN), b"x");
+    assert!(head.starts_with("HTTP/1.1 400"), "{head}");
+    // Only the one file was kept.
+    assert_eq!(
+        everything_in(&drafts).len(),
+        2,
+        "{:?}",
+        everything_in(&drafts)
+    );
+}
+
+#[test]
+fn a_file_too_big_or_cut_half_way_leaves_nothing() {
+    let loaded = load("remote-files-cut");
+    let running = serve(&loaded);
+    let drafts = loaded.core.data.drafts_files();
+    let target = "/files/attach?agent=draft&name=big.bin";
+
+    // Over the server's own bound, the settings having none: refused on its size, before a byte is read.
+    loaded.core.settings.write().attach_max_mb = 0;
+    let over = files::MAX_UPLOAD + 1;
+    let (head, _) = files_request(running.addr, "POST", target, Some(TOKEN), Some(over), b"");
+    assert!(head.starts_with("HTTP/1.1 413"), "{head}");
+    // Over the settings' cap.
+    loaded.core.settings.write().attach_max_mb = 1;
+    let (head, body) = files_request(
+        running.addr,
+        "POST",
+        target,
+        Some(TOKEN),
+        Some(2 << 20),
+        b"",
+    );
+    assert!(head.starts_with("HTTP/1.1 413"), "{head}");
+    assert!(String::from_utf8_lossy(&body).contains("big.bin"));
+    assert_eq!(everything_in(&drafts), Vec::<PathBuf>::new());
+
+    // Cut half way: what was written goes, its mark with it.
+    let port = running.addr.port();
+    let mut tcp = std::net::TcpStream::connect(running.addr).unwrap();
+    let head = format!(
+        "POST {target} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nAuthorization: Bearer {TOKEN}\r\n\
+         Content-Length: 100000\r\n\r\n"
+    );
+    tcp.write_all(head.as_bytes()).unwrap();
+    tcp.write_all(&[7; 5000]).unwrap();
+    let until = std::time::Instant::now() + Duration::from_secs(10);
+    while everything_in(&drafts).is_empty() {
+        assert!(std::time::Instant::now() < until, "the copy never started");
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    drop(tcp);
+    while !everything_in(&drafts).is_empty() {
+        assert!(
+            std::time::Instant::now() < until,
+            "left: {:?}",
+            everything_in(&drafts)
+        );
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    // The server goes on: a whole file after it is kept.
+    let (head, _) = files_request(running.addr, "POST", target, Some(TOKEN), Some(3), b"abc");
+    assert!(head.starts_with("HTTP/1.1 200"), "{head}");
+}
+
+/// A file being sent whose last bytes have not come: its head and `part` of a body of `size` bytes.
+fn sending(addr: SocketAddr, size: usize, part: usize) -> std::net::TcpStream {
+    let port = addr.port();
+    let mut tcp = std::net::TcpStream::connect(addr).unwrap();
+    tcp.set_read_timeout(Some(Duration::from_secs(20))).unwrap();
+    let head = format!(
+        "POST /files/attach?agent=draft&name=f.bin HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\n\
+         Origin: http://127.0.0.1:{port}\r\nAuthorization: Bearer {TOKEN}\r\nContent-Length: {size}\r\n\r\n"
+    );
+    tcp.write_all(head.as_bytes()).unwrap();
+    tcp.write_all(&vec![1; part]).unwrap();
+    tcp
+}
+
+/// The answer to a request on `tcp`, its head and body.
+fn reply_of(mut tcp: std::net::TcpStream) -> (String, String) {
+    let mut got = Vec::new();
+    let _ = tcp.read_to_end(&mut got);
+    let got = String::from_utf8_lossy(&got).into_owned();
+    let (head, body) = got.split_once("\r\n\r\n").unwrap_or((&got, ""));
+    (head.to_string(), body.to_string())
+}
+
+/// Waits until `drafts` holds `n` copies under way (a mark, a folder and a file each).
+fn copies_under_way(drafts: &std::path::Path, n: usize) {
+    let until = std::time::Instant::now() + Duration::from_secs(10);
+    while everything_in(drafts).len() < 3 * n {
+        assert!(
+            std::time::Instant::now() < until,
+            "{:?}",
+            everything_in(drafts)
+        );
+        std::thread::sleep(Duration::from_millis(20));
+    }
+}
+
+/// Waits until `drafts` holds nothing.
+fn nothing_left(drafts: &std::path::Path) {
+    let until = std::time::Instant::now() + Duration::from_secs(10);
+    while !everything_in(drafts).is_empty() {
+        assert!(
+            std::time::Instant::now() < until,
+            "{:?}",
+            everything_in(drafts)
+        );
+        std::thread::sleep(Duration::from_millis(20));
+    }
+}
+
+#[test]
+fn five_files_sent_at_once_are_all_kept() {
+    let loaded = load("remote-files-five");
+    let running = serve(&loaded);
+    // All started, none ended: the fifth comes while the first four are written.
+    let mut tcps: Vec<_> = (0..5).map(|_| sending(running.addr, 10, 5)).collect();
+    copies_under_way(&loaded.core.data.drafts_files(), files::MAX_UPLOADS);
+    std::thread::sleep(Duration::from_millis(200));
+    for tcp in &mut tcps {
+        let _ = tcp.write_all(&[2; 5]);
+    }
+    for tcp in tcps {
+        let (head, body) = reply_of(tcp);
+        assert!(head.starts_with("HTTP/1.1 200"), "{head}\n{body}");
+    }
+}
+
+#[test]
+fn a_file_waits_its_turn_then_is_refused_with_why() {
+    let loaded = load("remote-files-queue");
+    let running = serve(&loaded);
+    let drafts = loaded.core.data.drafts_files();
+    let stalled: Vec<_> = (0..files::MAX_UPLOADS)
+        .map(|_| sending(running.addr, 10, 5))
+        .collect();
+    copies_under_way(&drafts, files::MAX_UPLOADS);
+    let start = std::time::Instant::now();
+    let (head, body) = reply_of(sending(running.addr, 3, 3));
+    assert!(head.starts_with("HTTP/1.1 503"), "{head}");
+    assert!(!body.is_empty(), "the page says why");
+    assert!(start.elapsed() >= files::QUEUE / 2, "{:?}", start.elapsed());
+    // The ones stalled, gone: nothing of them left.
+    drop(stalled);
+    nothing_left(&drafts);
+}
+
+#[test]
+fn files_under_way_leave_room_for_the_interface() {
+    let loaded = load("remote-files-room");
+    let running = serve(&loaded);
+    let stalled: Vec<_> = (0..files::MAX_UPLOADS)
+        .map(|_| sending(running.addr, 10, 5))
+        .collect();
+    copies_under_way(&loaded.core.data.drafts_files(), files::MAX_UPLOADS);
+    // Waiting their turn; past `MAX_TRANSFERS`, a request of files is refused at once.
+    let waiting: Vec<_> = (0..files::MAX_TRANSFERS - files::MAX_UPLOADS)
+        .map(|_| sending(running.addr, 3, 0))
+        .collect();
+    std::thread::sleep(Duration::from_millis(200));
+    let start = std::time::Instant::now();
+    for _ in 0..MAX_CONNECTIONS {
+        let (head, _) = reply_of(sending(running.addr, 3, 3));
+        assert!(head.starts_with("HTTP/1.1 503"), "{head}");
+    }
+    assert!(start.elapsed() < files::QUEUE, "{:?}", start.elapsed());
+    // The interface still connects.
+    rt::block_on(async {
+        let mut ws = connect(running.addr).await;
+        let _ = ws.ws.close(None).await;
+    });
+    drop((stalled, waiting));
+}
+
+#[test]
+fn a_file_said_chunked_after_its_length_is_not_kept() {
+    let loaded = load("remote-files-chunked");
+    let running = serve(&loaded);
+    let port = running.addr.port();
+    let answer = http(
+        running.addr,
+        &format!(
+            "POST /files/attach?agent=draft&name=c.bin HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\n\
+             Origin: http://127.0.0.1:{port}\r\nAuthorization: Bearer {TOKEN}\r\nContent-Length: 3\r\n\
+             Transfer-Encoding: chunked\r\n\r\na\r\n0123456789\r\n0\r\n\r\n"
+        ),
+    );
+    assert!(!answer.starts_with("HTTP/1.1 200"), "{answer}");
+    nothing_left(&loaded.core.data.drafts_files());
+}
+
+#[test]
+fn a_file_an_agent_sent_is_fetched_as_a_download_of_its_own_agent_alone() {
+    let h = crate::core_tests::harness("remote-files-sent");
+    let loaded = Loaded {
+        core: h.core.clone(),
+        dir: h.dir.clone(),
+    };
+    let running = serve(&loaded);
+    // A PDF that a browser shown it in line would run as a page.
+    let bytes = b"%PDF-1.7\n<html><script>alert(1)</script></html>".to_vec();
+    // The PDF itself serves the Unix-only symlink case below.
+    #[cfg_attr(not(unix), allow(unused_variables))]
+    let (id, other, pdf) = rt::block_on(async {
+        let (p, repo) = h.project(false).await;
+        let id = h.core.create_agent(&p.id, None).await.unwrap().meta.id;
+        let other = h.core.create_agent(&p.id, None).await.unwrap().meta.id;
+        h.turn(&id, "Bonjour").await;
+        let pdf = repo.join("out").join("contrat.pdf");
+        std::fs::create_dir_all(pdf.parent().unwrap()).unwrap();
+        std::fs::write(&pdf, &bytes).unwrap();
+        let file = pdf.to_string_lossy().replace('\\', "/");
+        let input = json!({ "files": [file], "caption": "Le contrat", "status": "normal" });
+        h.feed(
+            &id,
+            json!({"type":"assistant","message":{"id":"m-f1","content":[{"type":"tool_use","id":"toolu_f1","name":"SendUserFile","input":input}]},"parent_tool_use_id":null}),
+        );
+        let result = format!("1 files delivered to user.\n{file} → file_uuid: 0000");
+        h.feed(
+            &id,
+            json!({"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_f1","content":result}]},"parent_tool_use_id":null}),
+        );
+        h.wait("the file delivered", |h| {
+            h.items(&id)
+                .iter()
+                .any(|i| i["id"] == "toolu_f1" && i.get("sent").is_some())
+        })
+        .await;
+        (id, other, pdf)
+    });
+    let get = |agent: &str, item: &str, index: &str, token: Option<&str>| {
+        let target = format!("/files/sent?agent={agent}&item={item}&index={index}");
+        files_request(running.addr, "GET", &target, token, None, b"")
+    };
+
+    let (head, body) = get(&id, "toolu_f1", "0", Some(TOKEN));
+    assert!(head.starts_with("HTTP/1.1 200"), "{head}");
+    let head = head.to_ascii_lowercase();
+    // A download, never a page: no type a browser shows, nothing sniffed, sandboxed if opened all the same.
+    assert!(
+        head.contains("content-disposition: attachment; filename=\"contrat.pdf\""),
+        "{head}"
+    );
+    assert!(
+        head.contains("content-type: application/octet-stream"),
+        "{head}"
+    );
+    assert!(head.contains("x-content-type-options: nosniff"), "{head}");
+    assert!(head.contains("sandbox"), "{head}");
+    assert_eq!(body, bytes);
+
+    // Without a token; under another agent; an unknown call or index.
+    let (head, _) = get(&id, "toolu_f1", "0", None);
+    assert!(head.starts_with("HTTP/1.1 401"), "{head}");
+    for (agent, item, index) in [
+        (other.as_str(), "toolu_f1", "0"),
+        (id.as_str(), "toolu_none", "0"),
+        (id.as_str(), "toolu_f1", "1"),
+        ("nobody", "toolu_f1", "0"),
+    ] {
+        let (head, _) = get(agent, item, index, Some(TOKEN));
+        assert!(
+            head.starts_with("HTTP/1.1 404"),
+            "{agent} {item} {index}: {head}"
+        );
+    }
+    let (head, _) = get(&id, "toolu_f1", "x", Some(TOKEN));
+    assert!(head.starts_with("HTTP/1.1 400"), "{head}");
+
+    // The file made a link to a private project's, after it was sent: not given.
+    #[cfg(unix)]
+    {
+        let vault = crate::core_tests::repo(&h.dir.join("vault"));
+        let secret = vault.join("secret.txt");
+        std::fs::write(&secret, "secret").unwrap();
+        let p = rt::block_on(h.core.create_project(
+            &vault.to_string_lossy(),
+            "vault",
+            "oklch(0.7 0.1 200)",
+            false,
+            None,
+            true,
+        ))
+        .unwrap();
+        let mut projects = h.core.projects.write();
+        projects.iter_mut().find(|x| x.id == p.id).unwrap().private = true;
+        drop(projects);
+        std::fs::remove_file(&pdf).unwrap();
+        std::os::unix::fs::symlink(&secret, &pdf).unwrap();
+        let (head, body) = get(&id, "toolu_f1", "0", Some(TOKEN));
+        assert!(head.starts_with("HTTP/1.1 404"), "{head}");
+        assert!(!String::from_utf8_lossy(&body).contains("secret"));
+    }
+
+    // Under escouade-server, a file out of the home folder is not given.
+    let home = h.dir.join("another-home");
+    std::fs::create_dir_all(&home).unwrap();
+    h.core.folders_home.set(home).unwrap();
+    let (head, _) = get(&id, "toolu_f1", "0", Some(TOKEN));
+    assert!(head.starts_with("HTTP/1.1 404"), "{head}");
+}

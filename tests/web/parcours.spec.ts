@@ -184,9 +184,41 @@ test('an agent on the fake Claude Code: its reply, then its question answered', 
   await expect(page.getByText('Choix retenu : SQLite')).toBeVisible();
 });
 
-test('a project made from a folder chosen on the server, then from a repository cloned there', async () => {
+test('a file joined in the page goes to the server; one the agent sent comes back as a download', async () => {
   // What the cut of the network (above) wrote to the console was expected there.
   errors.length = 0;
+  const box = page.locator('.composer textarea');
+  // Chosen on this device: its bytes go to the server, which keeps the copy the agent reads.
+  await page
+    .locator('.composer input[type=file]')
+    .setInputFiles({ name: 'rapport.zip', mimeType: 'application/zip', buffer: Buffer.alloc(3 * 1024, 0x61) });
+  const chip = page.locator('.composer .atts .file');
+  await expect(chip).toContainText('rapport.zip');
+  await expect(page.locator('.composer .atts .file.copying')).toHaveCount(0);
+  await box.fill('Lis ces fichiers');
+  await box.press('Enter');
+  await expect(page.getByText(`Lu : rapport.zip=${3 * 1024}`)).toBeVisible({ timeout: 30_000 });
+
+  // « Ouvrir » of a file the agent sent: a download from the server, never a page of it.
+  await box.fill('envoie des fichiers');
+  await box.press('Enter');
+  const pdf = page.locator('[data-sent] .row').filter({ hasText: 'contrat.pdf' });
+  const [download] = await Promise.all([
+    page.waitForEvent('download'),
+    pdf.getByRole('button', { name: 'Télécharger contrat.pdf' }).click(),
+  ]);
+  expect(download.suggestedFilename()).toBe('contrat.pdf');
+  expect(
+    fs
+      .readFileSync(await download.path())
+      .subarray(0, 5)
+      .toString(),
+  ).toBe('%PDF-');
+  await expect(pdf.getByRole('button', { name: 'Afficher contrat.pdf dans le dossier' })).toHaveCount(0);
+  expect(errors).toEqual([]);
+});
+
+test('a project made from a folder chosen on the server, then from a repository cloned there', async () => {
   const tabs = page.getByRole('tablist', { name: 'Projets ouverts' }).getByRole('tab');
   await expect(tabs).toHaveCount(1);
   const projets = path.join(fs.realpathSync(server.home), 'projets');

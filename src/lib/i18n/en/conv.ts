@@ -144,6 +144,7 @@ export default defineZone('conv', {
     reveal: 'Show in folder',
     revealName: 'Show {name} in its folder',
     openName: 'Open {name}',
+    downloadName: 'Download {name}',
     missing: 'File not found',
     missingHint: 'Deleted or moved since it was sent',
     fenced: 'File of a private project, not shown',

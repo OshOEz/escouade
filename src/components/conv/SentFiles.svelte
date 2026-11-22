@@ -8,6 +8,7 @@
   import { desktop } from '../../lib/platform';
   import { app } from '../../lib/state.svelte';
   import { tip } from '../../lib/tip';
+  import { fetchFile } from '../../lib/transport/files';
   import type { EngineId, SentView, ToolItem } from '../../lib/types';
   import Icon from '../Icon.svelte';
   import ImageViewer from './ImageViewer.svelte';
@@ -64,6 +65,9 @@
     reveal
       ? app.run(api.sentFileOpen(agentId, item.id, index, true))
       : app.openFile(api.sentFileOpen(agentId, item.id, index, false), () => api.sentFileOpen(agentId, item.id, index, true));
+  /** In a browser: the file comes from the server to this device, never opened there. */
+  const download = (index: number, name: string) =>
+    app.run(fetchFile('/files/sent', { agent: agentId, item: item.id, index: String(index) }, name));
 </script>
 
 <div class="sent" data-sent={item.id}>
@@ -135,7 +139,13 @@
               {/if}
             </span>
           </span>
-          {#if there && desktop}
+          {#if there && !desktop}
+            <span class="acts">
+              <button class="act" aria-label={t('conv.sent.downloadName', { name: f.name })} onclick={() => download(f.index, f.name)}
+                ><Icon name="download" size={13} /><span class="lbl">{t('common.open')}</span></button
+              >
+            </span>
+          {:else if there}
             <span class="acts">
               <!-- A program or a script the agent sent is never run from here: shown in its folder only. -->
               {#if !v.runnable}

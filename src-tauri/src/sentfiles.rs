@@ -987,6 +987,48 @@ impl crate::core::Core {
         .await?
     }
 
+    /// The file `index` of the call `item` of the agent `id`, for a browser to fetch (`remoteapi::files`): the file,
+    /// open, and its name. Never one the fence keeps; under `escouade-server` (`folders_home`), one of the home folder or
+    /// of the agent's own copies alone. A program is fetched as any file: it is not run here. Opened first, then
+    /// checked: what was opened must be the file at the real path checked, so a link swapped in between is refused.
+    pub async fn sent_file(
+        &self,
+        id: &str,
+        item: &str,
+        index: usize,
+    ) -> anyhow::Result<(std::fs::File, String)> {
+        let (folder, cwd, input, sent, fence) = self.sent_call(id, item)?;
+        let (home, lang) = (self.folders_home.get().cloned(), crate::i18n::ui());
+        tokio::task::spawn_blocking(move || {
+            let found = target(
+                &folder,
+                &cwd,
+                &input,
+                sent.as_ref(),
+                index,
+                true,
+                &fence,
+                lang,
+            )?;
+            let file = std::fs::File::open(&found)?;
+            let real = dunce::canonicalize(found)?;
+            let under = |root: &Path| dunce::canonicalize(root).is_ok_and(|r| real.starts_with(r));
+            let opened = same_file::Handle::from_file(file.try_clone()?)?;
+            if fence.covers(&real.to_string_lossy())
+                || home.is_some_and(|h| !under(&h) && !under(&folder))
+                || opened != same_file::Handle::from_path(&real)?
+            {
+                anyhow::bail!("not a file the server gives");
+            }
+            let name = real
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            Ok((file, name))
+        })
+        .await?
+    }
+
     /// An image a message of the agent `id` shows by a local path (`local_image`).
     pub async fn agent_local_image(&self, id: &str, src: &str) -> anyhow::Result<Option<String>> {
         let cwd = self.agent(id)?.lock().meta.cwd.clone();

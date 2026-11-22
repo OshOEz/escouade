@@ -85,6 +85,21 @@ fn a_path_that_is_not_utf8_is_refused_in_the_unit_not_written_wrong() {
     assert!(why.contains("UTF-8"), "{why}");
 }
 
+#[cfg(unix)]
+#[test]
+fn the_files_sent_to_the_server_are_its_users_alone() {
+    use std::os::unix::fs::PermissionsExt;
+    let data = paths::DataDir::new(paths::test_dir("headless-private"));
+    let dir = data.attachments();
+    // Missing, then there with the umask's rights.
+    keep_private(&dir);
+    let mode = |d: &Path| std::fs::metadata(d).unwrap().permissions().mode() & 0o777;
+    assert_eq!(mode(&dir), 0o700);
+    std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o755)).unwrap();
+    keep_private(&dir);
+    assert_eq!(mode(&dir), 0o700);
+}
+
 #[test]
 fn the_arguments_say_one_place_to_listen() {
     #[cfg(unix)]

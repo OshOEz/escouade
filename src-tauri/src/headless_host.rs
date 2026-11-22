@@ -209,6 +209,8 @@ pub fn run(args: Vec<String>) -> i32 {
         }
     }
     let data = paths::DataDir::new(dir);
+    #[cfg(unix)]
+    keep_private(&data.attachments());
     config.devices = Some(Arc::new(Devices::open(data.root())));
     // The process groups of agents a killed run left behind, stopped before any agent starts.
     agentgroups::start(data.root().join("agent-groups.json"));
@@ -627,6 +629,21 @@ fn word(s: &str, command: bool) -> Result<String, String> {
     }
     out.push('"');
     Ok(out)
+}
+
+/// `dir` made this user's alone (0700), made if missing: on a server whose home others may read (0755, Debian), the
+/// files its clients send are kept from the other accounts. The desktop leaves its own as the umask makes them.
+#[cfg(unix)]
+fn keep_private(dir: &Path) {
+    use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
+    let made = std::fs::DirBuilder::new()
+        .recursive(true)
+        .mode(0o700)
+        .create(dir)
+        .and_then(|()| std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700)));
+    if let Err(e) = made {
+        log::warn!("{} not made private: {e}", dir.display());
+    }
 }
 
 #[cfg(test)]

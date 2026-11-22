@@ -29,6 +29,18 @@ const page = { setZoom: done } as unknown as Webview;
 /** A folder or a file chosen in the system's dialog; in a browser, none (no one chose). */
 export const open: typeof system.open = (options) => (desktop ? system.open(options) : Promise.resolve(null as never));
 
+/** A file of the device chosen in the browser's own dialog (`accept`: its filter); null when none was. */
+export function pickFile(accept: string): Promise<File | null> {
+  return new Promise((resolve) => {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = accept;
+    input.onchange = () => resolve(input.files?.[0] ?? null);
+    input.oncancel = () => resolve(null);
+    input.click();
+  });
+}
+
 /** An address in the system's browser; in a browser, in a tab of its own. */
 export const openUrl: typeof system.openUrl = (url, openWith) => {
   if (desktop) return system.openUrl(url, openWith);

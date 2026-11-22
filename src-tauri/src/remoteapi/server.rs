@@ -14,10 +14,10 @@
 //! client that does not read is closed: a queue that fills, or a socket write that hangs, closes it. A remote `subscribe` adds the connection to the hub's
 //! subscribers, the window keeping its own, until the connection ends; a second one takes the place of the first. A
 //! terminal's stream reads its output beside the window, from what it kept, until the connection ends. A remote
-//! `save_settings` retunes the desktop's conversation.
+//! `save_settings` retunes the desktop's conversation. The bytes of files go beside the WebSocket, by HTTP (`files`).
 use super::devices::{self, Devices};
 use super::table::{self, CallError, Ctx, Entry, ResultTag};
-use super::{web, wire};
+use super::{files, web, wire};
 use crate::commands::{self, CoreState};
 use crate::core::Core;
 use crate::hub::Subscription;
@@ -39,7 +39,7 @@ use std::collections::HashMap;
 use std::convert::Infallible;
 use std::net::{Ipv4Addr, SocketAddr};
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Weak};
 use std::time::Duration;
 use tokio::net::TcpListener;
@@ -384,6 +384,8 @@ fn start_with(
         web: config.web,
         origins: config.origins,
         calls: Arc::new(Semaphore::new(calls)),
+        uploads: Arc::new(Semaphore::new(files::MAX_UPLOADS)),
+        transfers: Arc::new(Semaphore::new(files::MAX_TRANSFERS)),
     });
     let (stop, stopped) = watch::channel(false);
     rt::spawn(server.accept(listener, stopped));
@@ -503,6 +505,10 @@ struct Server {
     origins: Vec<String>,
     /// The calls under way, all connections together.
     calls: Arc<Semaphore>,
+    /// The files being sent, all connections together (`files::MAX_UPLOADS`).
+    uploads: Arc<Semaphore>,
+    /// The requests of files, all connections together (`files::MAX_TRANSFERS`).
+    transfers: Arc<Semaphore>,
 }
 
 impl Server {
@@ -616,11 +622,19 @@ impl Server {
     /// One request per connection: a file, a session, or the WebSocket, which then holds the connection.
     async fn serve(self: Arc<Self>, tcp: Stream, stopped: watch::Receiver<bool>) {
         let upgrade: Arc<Upgrade> = Arc::default();
-        let (me, upgraded) = (self.clone(), upgrade.clone());
-        let service = service_fn(move |req| {
-            let (me, upgraded) = (me.clone(), upgraded.clone());
+        // A request of `files::PREFIX`: it may take longer than `EXCHANGE`, its bytes coming at a pace of their own.
+        let long = Arc::new(AtomicBool::new(false));
+        let (me, upgraded, slow) = (self.clone(), upgrade.clone(), long.clone());
+        let service = service_fn(move |req: Request| {
+            let (me, upgraded, slow) = (me.clone(), upgraded.clone(), slow.clone());
             async move {
-                let mut answer = me.answer(req, &upgraded).await;
+                let mut answer = if req.uri().path().starts_with(files::PREFIX) {
+                    slow.store(true, Ordering::Relaxed);
+                    me.transfer(req).await
+                } else {
+                    let answer = me.answer(req, &upgraded).await;
+                    answer.map(|b| b.map_err(|e| match e {}).boxed_unsync())
+                };
                 // The slot is held from the start: the next request comes on a connection of its own.
                 if answer.status() != StatusCode::SWITCHING_PROTOCOLS {
                     let close = header::HeaderValue::from_static("close");
@@ -634,7 +648,21 @@ impl Server {
             .header_read_timeout(HANDSHAKE)
             .serve_connection(TokioIo::new(tcp), service)
             .with_upgrades();
-        let Ok(Ok(())) = tokio::time::timeout(EXCHANGE, conn).await else {
+        tokio::pin!(conn);
+        let served = match tokio::time::timeout(EXCHANGE, &mut conn).await {
+            Ok(served) => served,
+            // A file sent stops at its first pause of `files::IDLE`; one fetched by a client that stopped reading
+            // holds its slot until `files::TRANSFER`.
+            Err(_) if long.load(Ordering::Relaxed) => {
+                let more = files::TRANSFER.saturating_sub(EXCHANGE);
+                match tokio::time::timeout(more, &mut conn).await {
+                    Ok(served) => served,
+                    Err(_) => return,
+                }
+            }
+            Err(_) => return,
+        };
+        let Ok(()) = served else {
             return;
         };
         let Some((on_upgrade, device)) = upgrade.lock().take() else {
@@ -673,6 +701,27 @@ impl Server {
             (&Method::GET | &Method::HEAD, path) => self.file(&req, path.to_string()).await,
             _ => empty(StatusCode::METHOD_NOT_ALLOWED),
         }
+    }
+
+    /// A request of `files::PREFIX`: from this server's own pages, with a token.
+    async fn transfer(&self, req: Request) -> files::Answer {
+        let admitted = self.mine(req.uri(), req.headers());
+        if let Err(status) = admitted.and_then(|()| self.admit(req.headers()).map(drop)) {
+            return files::status(status);
+        }
+        let Ok(slot) = self.transfers.clone().try_acquire_owned() else {
+            return files::busy();
+        };
+        let answer = files::serve(self.core.clone(), self.uploads.clone(), req).await;
+        // Held until its body is sent, or dropped with the connection: a download holds it as long as it is read.
+        // (`map_err` keeps the body's size, which `map_frame` would lose.)
+        answer.map(|body| {
+            body.map_err(move |e| {
+                let _held = &slot;
+                e
+            })
+            .boxed_unsync()
+        })
     }
 
     /// The WebSocket's handshake, its token or session checked.

@@ -266,7 +266,17 @@ fn no_copy() -> anyhow::Error {
     ))
 }
 
-fn too_big(name: &str, cap: u64) -> anyhow::Error {
+/// A write of the copy `name` that failed: said as before, the disk's error kept beneath (`remoteapi::files` tells a
+/// full disk by it).
+pub(crate) fn copy_failed(name: &str, e: std::io::Error) -> anyhow::Error {
+    let why = tr!(
+        "{name} n’a pas pu être copié : {e}",
+        "{name} couldn’t be copied: {e}"
+    );
+    anyhow::Error::new(e).context(why)
+}
+
+pub(crate) fn too_big(name: &str, cap: u64) -> anyhow::Error {
     anyhow!(tr!(
         "{name} dépasse {max}",
         "{name} is over {max}",
@@ -479,12 +489,7 @@ impl Core {
         let Some(file) = up.file.as_mut() else {
             return Err(no_copy());
         };
-        file.write_all(bytes).map_err(|e| {
-            anyhow!(tr!(
-                "{name} n’a pas pu être copié : {e}",
-                "{name} couldn’t be copied: {e}"
-            ))
-        })?;
+        file.write_all(bytes).map_err(|e| copy_failed(&name, e))?;
         up.written = total;
         Ok(())
     }
