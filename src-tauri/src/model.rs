@@ -341,6 +341,15 @@ pub enum UiEvent {
     Toast {
         text: String,
     },
+    /// A system notification, for a browser to show (`escouade-server` has none): its click comes back as
+    /// `notification_click` with `id`, which does what the desktop's click does.
+    Notify {
+        id: u64,
+        title: String,
+        body: String,
+    },
+    /// The chime of an alert, for a browser to play (`escouade-server` has no speaker).
+    Chime,
     /// The settings changed the language of the interface or of the texts Claude writes: the
     /// window switches to it at once.
     Language {

@@ -9,7 +9,12 @@ import type { ConvItem, InitialState, TermInfo } from './types';
 const hooks = vi.hoisted(() => ({
   close: null as ((reason: string, again: boolean) => void) | null,
   reopen: null as (() => void) | null,
+  /** The subscription's channel: the events of the server. */
+  channel: null as { onmessage: (e: unknown) => void } | null,
 }));
+/** The browser's notifications and chime: notifier.test.ts. */
+const notifier = vi.hoisted(() => ({ notify: vi.fn(() => true), chime: vi.fn(), askOnFirstGesture: vi.fn() }));
+vi.mock('./notifier', () => notifier);
 vi.mock('./transport', async (original) => ({
   ...(await original<typeof import('./transport')>()),
   desktop: false,
@@ -43,7 +48,11 @@ async function start(over: Partial<InitialState> = {}, handlers: Record<string, 
       ...over,
     },
   };
-  const backend = fakeBackend({ subscribe: () => snapshot.now, get_conversation: () => [], ...handlers });
+  const backend = fakeBackend({
+    subscribe: (a: any) => ((hooks.channel = a.channel), snapshot.now),
+    get_conversation: () => [],
+    ...handlers,
+  });
   app.terminals = [];
   app.exitedTerms = {};
   app.toasts = [];
@@ -61,6 +70,19 @@ async function start(over: Partial<InitialState> = {}, handlers: Record<string, 
 }
 
 describe('AppState in a browser', () => {
+  it("the server's notification is the browser's, a toast when the browser shows none; its chime plays", async () => {
+    await start();
+    expect(notifier.askOnFirstGesture).toHaveBeenCalled();
+    hooks.channel!.onmessage({ type: 'chime' });
+    expect(notifier.chime).toHaveBeenCalledTimes(1);
+    hooks.channel!.onmessage({ type: 'notify', id: 4, title: 'demo', body: 'Tour fini' });
+    expect(notifier.notify).toHaveBeenCalledWith(4, 'demo', 'Tour fini');
+    expect(app.toasts).toEqual([]);
+    notifier.notify.mockReturnValueOnce(false);
+    hooks.channel!.onmessage({ type: 'notify', id: 5, title: 'demo', body: 'Tour fini' });
+    expect(app.toasts.at(-1)).toMatchObject({ text: 'demo — Tour fini', kind: 'info' });
+  });
+
   it('a terminal whose attach failed in a stuttering cut is not ended; the next reconnection attaches it', async () => {
     attach.mockReset().mockResolvedValue(undefined);
     const { cut } = await start({ terminals: [term('t1')] });

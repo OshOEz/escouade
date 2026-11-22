@@ -2799,6 +2799,10 @@ export type UiEvent =
   /** A plugin of the seed installed for a gesture that needs it (ESC-373): said in a line, the plugins read again. */
   | { type: 'pluginSeeded'; id: string; text: string }
   | { type: 'toast'; text: string }
+  /** A system notification of escouade-server, for the browser to show; its click is `notification_click`. */
+  | { type: 'notify'; id: number; title: string; body: string }
+  /** The chime of an alert of escouade-server, for the browser to play. */
+  | { type: 'chime' }
   /** The settings changed a language: the window switches to it at once. */
   | { type: 'language'; lang: LangInfo }
   /** The MCP server started, stopped, could not start, or listens on another port. */

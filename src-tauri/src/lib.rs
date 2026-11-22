@@ -726,6 +726,7 @@ macro_rules! all_commands {
             commands::term_kill,
             commands::term_report,
             commands::play_chime,
+            commands::notification_click,
             commands::quit_app,
             commands::set_unsaved,
             commands::ticket_create,

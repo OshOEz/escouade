@@ -14,6 +14,8 @@ use crate::remoteapi::server::{Control, CONTROL};
 use crate::{paths, remoteapi};
 use escouade_base::rt;
 use escouade_model::agentgroups;
+use parking_lot::Mutex;
+use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, OnceLock, Weak};
 
@@ -22,7 +24,14 @@ use std::sync::{Arc, OnceLock, Weak};
 pub struct Headless {
     /// The core, once loaded: its hub carries the toasts.
     core: OnceLock<Weak<Core>>,
+    /// The clicks of the last toasts the browsers were told (`UiEvent::Notify`), by id: the last given, the next one.
+    clicks: Mutex<(u64, VecDeque<(u64, Click)>)>,
 }
+
+type Click = Box<dyn Fn() + Send + Sync>;
+
+/// The toasts whose click is kept: an older one, still on a screen, clicks to nothing.
+const KEPT_CLICKS: usize = 64;
 
 impl Host for Headless {
     fn version(&self) -> String {
@@ -44,13 +53,41 @@ impl Host for Headless {
 
     fn attention(&self) {}
 
-    fn chime(&self) {}
-
-    /// Said to the clients in passing, as the window says the background's news; nothing to click.
-    fn toast(&self, title: &str, body: &str, _: Box<dyn Fn() + Send + Sync>) {
+    /// Played by the browsers.
+    fn chime(&self) {
         if let Some(core) = self.core.get().and_then(Weak::upgrade) {
-            let text = format!("{title} — {body}");
-            core.hub.emit(UiEvent::Toast { text });
+            core.hub.emit(UiEvent::Chime);
+        }
+    }
+
+    /// Shown by the browsers, whose click comes back as `clicked`.
+    fn toast(&self, title: &str, body: &str, on_click: Click) {
+        let Some(core) = self.core.get().and_then(Weak::upgrade) else {
+            return;
+        };
+        let id = {
+            let mut clicks = self.clicks.lock();
+            clicks.0 += 1;
+            let id = clicks.0;
+            if clicks.1.len() == KEPT_CLICKS {
+                clicks.1.pop_front();
+            }
+            clicks.1.push_back((id, on_click));
+            id
+        };
+        let (title, body) = (title.into(), body.into());
+        core.hub.emit(UiEvent::Notify { id, title, body });
+    }
+
+    /// Once: the same toast clicked in two tabs does it once.
+    fn clicked(&self, id: u64) {
+        let click = {
+            let mut clicks = self.clicks.lock();
+            let at = clicks.1.iter().position(|(i, _)| *i == id);
+            at.and_then(|at| clicks.1.remove(at))
+        };
+        if let Some((_, click)) = click {
+            click();
         }
     }
 

@@ -3298,6 +3298,12 @@ pub fn play_chime(core: CoreState) {
     core.host.chime();
 }
 
+/// The click of a system notification a browser showed (`UiEvent::Notify`): what the desktop's click does.
+#[command]
+pub fn notification_click(core: CoreState, id: u64) {
+    core.host.clicked(id);
+}
+
 /// « Quitter »: with an update downloaded, it installs silently and the app stays closed.
 #[command(desktop)]
 pub fn quit_app(app: tauri::AppHandle) {

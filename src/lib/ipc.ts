@@ -888,5 +888,7 @@ export const api = {
   termResize: (id: string, cols: number, rows: number) => invoke<void>('term_resize', { id, cols, rows }),
   termKill: (id: string) => invoke<void>('term_kill', { id }),
   playChime: () => invoke<void>('play_chime'),
+  /** The click of a notification the browser showed (`notify`). */
+  notificationClick: (id: number) => invoke<void>('notification_click', { id }),
   quit: () => invoke<void>('quit_app'),
 };

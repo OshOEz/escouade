@@ -131,3 +131,118 @@ fn the_arguments_say_one_place_to_listen() {
         assert!(parse_serve(wrong).is_err(), "{wrong:?}");
     }
 }
+
+/// A core on the server's host, alerts on, and what its clients are told.
+fn alerting(
+    name: &str,
+) -> (
+    Arc<Headless>,
+    Arc<Core>,
+    Arc<parking_lot::Mutex<Vec<serde_json::Value>>>,
+) {
+    let data = paths::DataDir::new(paths::test_dir(name).join("data"));
+    data.ensure().unwrap();
+    let settings = Settings {
+        sound: true,
+        os_notifications: true,
+        ..Default::default()
+    };
+    std::fs::write(data.settings_file(), serde_json::to_vec(&settings).unwrap()).unwrap();
+    let host = Arc::new(Headless::default());
+    let (core, _rx) = Core::load(host.clone(), data);
+    let _ = host.core.set(Arc::downgrade(&core));
+    let told = Arc::new(parking_lot::Mutex::new(Vec::new()));
+    let sink = told.clone();
+    std::mem::forget(
+        core.hub
+            .subscribe(crate::sink::Sink::new(move |e: UiEvent| {
+                let e = serde_json::to_value(&e).unwrap();
+                if ["chime", "notify", "focus"].contains(&e["type"].as_str().unwrap_or("")) {
+                    sink.lock().push(e);
+                }
+                Ok(())
+            })),
+    );
+    (host, core, told)
+}
+
+fn click(core: &Arc<Core>, id: u64) {
+    let ctx = remoteapi::table::Ctx { core: core.clone() };
+    let call = remoteapi::table::call(
+        remoteapi::table::entries(),
+        ctx,
+        "notification_click",
+        serde_json::json!({ "id": id }),
+    );
+    rt::block_on(call).unwrap();
+}
+
+#[test]
+fn an_alert_chimes_and_notifies_in_the_browsers_and_its_click_comes_back_once() {
+    let (_host, core, told) = alerting("headless-alert");
+    let focus = UiEvent::Focus {
+        project_id: "p1".into(),
+        agent_id: Some("a1".into()),
+    };
+    core.alert(
+        crate::agent::NotifyKind::Done,
+        "demo".into(),
+        "Tour fini".into(),
+        focus,
+    );
+    let seen = told.lock().clone();
+    assert_eq!(seen.len(), 2, "{seen:?}");
+    assert_eq!(seen[0], serde_json::json!({ "type": "chime" }));
+    assert_eq!(
+        (
+            seen[1]["type"].as_str(),
+            seen[1]["title"].as_str(),
+            seen[1]["body"].as_str()
+        ),
+        (Some("notify"), Some("demo"), Some("Tour fini"))
+    );
+    let id = seen[1]["id"].as_u64().unwrap();
+    // The click, by the remote command: the focus the desktop's click sends.
+    click(&core, id);
+    assert_eq!(
+        told.lock()[2],
+        serde_json::json!({ "type": "focus", "projectId": "p1", "agentId": "a1" })
+    );
+    // Once: clicked again (another tab, another device), or an id never given, it does nothing.
+    click(&core, id);
+    click(&core, id + 1000);
+    assert_eq!(told.lock().len(), 3);
+    core.stop_for_good();
+}
+
+#[test]
+fn the_clicks_kept_are_the_last_ones() {
+    let (host, core, told) = alerting("headless-clicks-kept");
+    let clicked = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    for _ in 0..=KEPT_CLICKS {
+        let clicked = clicked.clone();
+        host.toast(
+            "t",
+            "b",
+            Box::new(move || {
+                clicked.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            }),
+        );
+    }
+    let ids: Vec<u64> = told
+        .lock()
+        .iter()
+        .map(|e| e["id"].as_u64().unwrap())
+        .collect();
+    assert_eq!(ids.len(), KEPT_CLICKS + 1);
+    host.clicked(ids[0]);
+    assert_eq!(
+        clicked.load(std::sync::atomic::Ordering::SeqCst),
+        0,
+        "the oldest is forgotten"
+    );
+    host.clicked(ids[KEPT_CLICKS]);
+    host.clicked(ids[1]);
+    assert_eq!(clicked.load(std::sync::atomic::Ordering::SeqCst), 2);
+    core.stop_for_good();
+}

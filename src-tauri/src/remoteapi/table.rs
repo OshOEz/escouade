@@ -328,8 +328,9 @@ mod tests {
     #[test]
     fn every_command_of_the_window_is_in_the_table() {
         let names: Vec<&str> = entries().iter().map(|e| e.name).collect();
-        // The names of `lib.rs`' list before it became `handlers!`, and `term_attach` and `run_attach`.
-        assert_eq!(names.len(), 388);
+        // The names of `lib.rs`' list before it became `handlers!`, `term_attach`, `run_attach` and
+        // `notification_click`.
+        assert_eq!(names.len(), 389);
         let unique: std::collections::BTreeSet<&str> = names.iter().copied().collect();
         assert_eq!(unique.len(), names.len(), "a command listed twice");
         assert!(names.contains(&"subscribe") && names.contains(&"file_origin"));
@@ -339,8 +340,8 @@ mod tests {
     #[test]
     fn the_table_is_the_same_with_and_without_the_desktop() {
         let table = entries();
-        assert_eq!(table.len(), 388);
-        assert_eq!(table.iter().filter(|e| e.call.is_some()).count(), 339);
+        assert_eq!(table.len(), 389);
+        assert_eq!(table.iter().filter(|e| e.call.is_some()).count(), 340);
         let called = |name: &str| {
             table
                 .iter()

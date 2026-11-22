@@ -23,6 +23,8 @@ pub trait Host: Send + Sync + 'static {
     fn chime(&self);
     /// `on_click` runs after the host has brought its window forward.
     fn toast(&self, title: &str, body: &str, on_click: Box<dyn Fn() + Send + Sync>);
+    /// The click of the toast `id` a browser showed (`UiEvent::Notify`); the desktop's toasts click by themselves.
+    fn clicked(&self, _id: u64) {}
     /// The agents waiting, for the tray icon and its tooltip.
     fn waiting(&self, n: usize);
     fn relabel(&self, lang: Lang, waiting: usize);

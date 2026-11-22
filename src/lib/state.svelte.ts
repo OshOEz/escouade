@@ -33,6 +33,7 @@ import { inboxViews } from './inbox/views.svelte';
 import { modeToAsk } from './first-mode';
 import { attachTerminal } from './terminals';
 import { desktop, onClose, onReopen } from './transport';
+import { askOnFirstGesture, chime, notify } from './notifier';
 import {
   activeItem,
   close as closePane,
@@ -847,7 +848,10 @@ class AppState {
     setInterval(() => (this.now = Date.now()), 1000);
     // The conversations out of sight leave the window's memory after a while, read again when shown.
     setInterval(() => releaseIdle(Date.now(), (id) => this.atWork(id)), 60_000);
-    if (!desktop) this.followConnection();
+    if (!desktop) {
+      this.followConnection();
+      askOnFirstGesture(() => this.settings.osNotifications);
+    }
   }
 
   /**
@@ -1052,6 +1056,13 @@ class AppState {
         // For want of an account (ESC-128): with « Ajouter un compte… ».
         if (missingAccountOf(e.text)) this.refused(e.text);
         else this.toast(e.text, 'info');
+        break;
+      case 'notify':
+        // From escouade-server alone: the browser's notification, else said here as the server said it before.
+        if (!notify(e.id, e.title, e.body)) this.toast(`${e.title} — ${e.body}`, 'info');
+        break;
+      case 'chime':
+        chime();
         break;
       case 'language':
         this.takeLang(e.lang);
