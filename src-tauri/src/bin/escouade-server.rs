@@ -1,6 +1,7 @@
 //! `escouade-server`: the core without a window, its commands over a WebSocket and the web build (`--web <folder>`) on
-//! 127.0.0.1, at `ESCOUADE_REMOTE_PORT`, for the devices paired by `escouade-server pair` (docs/REMOTE.md, « Le mode
-//! serveur »). Stops on SIGINT or SIGTERM.
+//! a Unix socket (`--socket`) or 127.0.0.1's port (`--port`, `ESCOUADE_REMOTE_PORT`), for the devices paired by
+//! `escouade-server pair`, one per data folder; `install` writes its systemd unit (docs/REMOTE.md, « Le mode serveur »).
+//! Stops on SIGINT or SIGTERM.
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();

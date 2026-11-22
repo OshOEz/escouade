@@ -10,6 +10,7 @@ use serde_json::json;
 use std::io::{Read, Write};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering::SeqCst};
+use tokio::net::TcpStream;
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use tokio_tungstenite::WebSocketStream;
 
@@ -44,6 +45,7 @@ fn serve(loaded: &Loaded) -> Running {
 fn serve_table(loaded: &Loaded, entries: &'static [Entry]) -> Running {
     let config = Config {
         port: 0,
+        socket: None,
         token: Some(TOKEN.into()),
         devices: Some(Arc::new(Devices::open(&loaded.dir))),
         web: None,
@@ -1160,6 +1162,7 @@ fn a_token_offered_twice_or_beside_a_wrong_bearer_is_refused() {
 fn serve_web(loaded: &Loaded) -> Running {
     let config = Config {
         port: 0,
+        socket: None,
         token: Some(TOKEN.into()),
         devices: Some(Arc::new(Devices::open(&loaded.dir))),
         web: Some(web_build(loaded)),
@@ -1284,6 +1287,7 @@ const PROXY: &str = "https://escouade.example.com";
 fn serve_declared(loaded: &Loaded) -> Running {
     let config = Config {
         port: 0,
+        socket: None,
         token: Some(TOKEN.into()),
         devices: Some(Arc::new(Devices::open(&loaded.dir))),
         web: Some(web_build(loaded)),
@@ -1579,6 +1583,7 @@ fn the_calls_of_all_connections_stay_under_the_servers_cap() {
     let loaded = load("remote-server-cap");
     let config = Config {
         port: 0,
+        socket: None,
         token: Some(TOKEN.into()),
         devices: Some(Arc::new(Devices::open(&loaded.dir))),
         web: None,
@@ -1866,6 +1871,7 @@ fn a_client_cut_while_an_attach_waits_for_room_frees_it_at_once() {
     let loaded = load("remote-server-cut-mid-resume");
     let config = Config {
         port: 0,
+        socket: None,
         token: Some(TOKEN.into()),
         devices: Some(Arc::new(Devices::open(&loaded.dir))),
         web: None,
@@ -1967,5 +1973,221 @@ fn the_variables_are_taken_out_of_the_environment() {
     std::env::set_var(PORT_VAR, "4001");
     let config = take_port_from_env().unwrap();
     assert_eq!((config.port, config.token), (4001, None));
+    // Unset: `--port` or `--socket` says where to listen.
+    assert_eq!(take_port_from_env().unwrap().port, 0);
+    std::env::set_var(PORT_VAR, "0");
     assert!(take_port_from_env().unwrap_err().starts_with(PORT_VAR));
+}
+
+/// A folder of its own under /tmp, not made yet, for a test's sockets: `sun_path` holds 104 bytes on macOS, NUL
+/// included, which a folder under `$TMPDIR` overflows.
+#[cfg(unix)]
+fn short_dir(tag: &str) -> PathBuf {
+    let pid = std::process::id().to_string();
+    let dir = std::fs::canonicalize("/tmp")
+        .unwrap()
+        .join(format!("esc-{pid}-{tag}"));
+    let _ = std::fs::remove_dir_all(&dir);
+    // With the longest pid (Linux's pid_max, 2^22: 7 digits), room for 20 bytes below it and the NUL.
+    let longest = dir.as_os_str().len() - pid.len() + 7;
+    assert!(
+        longest + 20 < 104,
+        "{} is too long for sockets",
+        dir.display()
+    );
+    dir
+}
+
+/// The head of the answer to the raw HTTP request `head` (its lines, up to the blank one excluded) on `socket`.
+#[cfg(unix)]
+fn over_socket(socket: &std::path::Path, head: &str, body: &str) -> String {
+    let mut s = std::os::unix::net::UnixStream::connect(socket).unwrap();
+    s.set_read_timeout(Some(Duration::from_secs(10))).unwrap();
+    let request = format!("{head}Content-Length: {}\r\n\r\n{body}", body.len());
+    s.write_all(request.as_bytes()).unwrap();
+    let (mut got, mut buf) = (Vec::new(), [0u8; 1024]);
+    while !got.windows(4).any(|w| w == b"\r\n\r\n") {
+        match s.read(&mut buf) {
+            Ok(0) | Err(_) => break,
+            Ok(n) => got.extend_from_slice(&buf[..n]),
+        }
+    }
+    let got = String::from_utf8_lossy(&got).into_owned();
+    assert!(!got.contains(TOKEN));
+    got.lines().next().unwrap_or_default().to_string()
+}
+
+#[cfg(unix)]
+#[test]
+fn a_tunnel_to_the_socket_is_let_in_with_a_token() {
+    use std::os::unix::fs::PermissionsExt;
+    let loaded = load("remote-server-socket");
+    let socket = short_dir("tunnel").join("s.sock");
+    let devices = Arc::new(Devices::open(&loaded.dir));
+    let on = |socket: &std::path::Path| Config {
+        port: 0,
+        socket: Some(socket.to_path_buf()),
+        token: Some(TOKEN.into()),
+        devices: Some(devices.clone()),
+        web: Some(web_build(&loaded)),
+        origins: Vec::new(),
+    };
+    let running = start(loaded.core.clone(), table::entries(), on(&socket)).unwrap();
+    let mode = |p: &std::path::Path| std::fs::metadata(p).unwrap().permissions().mode() & 0o777;
+    assert_eq!(mode(socket.parent().unwrap()), 0o700);
+    assert_eq!(mode(&socket), 0o600);
+    let kept: Control =
+        serde_json::from_slice(&std::fs::read(loaded.dir.join(CONTROL)).unwrap()).unwrap();
+    assert_eq!(kept.socket.as_deref(), Some(socket.as_path()));
+    // `ssh -L 9000:<socket>`: the page is http://localhost:9000, as through a tunnel to a port.
+    let ws = "GET / HTTP/1.1\r\nConnection: Upgrade\r\nUpgrade: websocket\r\n\
+              Sec-WebSocket-Version: 13\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n";
+    for name in ["localhost", "127.0.0.1"] {
+        let host = format!("Host: {name}:9000\r\n");
+        let origin = format!("Origin: http://{name}:9000\r\n");
+        let line = over_socket(
+            &socket,
+            &(ws.to_string() + &host + &origin + &bearer(TOKEN)),
+            "",
+        );
+        assert!(line.contains(" 101 "), "{name}: {line}");
+        let line = over_socket(&socket, &(ws.to_string() + &host + &origin), "");
+        assert!(line.contains(" 401 "), "{name}: {line}");
+    }
+    // Another local page stays out; and on a socket the server has no port of its own to let in.
+    for headers in [
+        "Host: localhost:9000\r\nOrigin: http://localhost:3000\r\n",
+        "Host: localhost:9000\r\nOrigin: http://127.0.0.1:0\r\n",
+        "Host: localhost:9000\r\nOrigin: https://localhost:9000\r\n",
+        "Host: evil.example:9000\r\nOrigin: http://evil.example:9000\r\n",
+    ] {
+        let line = over_socket(&socket, &(ws.to_string() + headers + &bearer(TOKEN)), "");
+        assert!(line.contains(" 403 "), "{headers}: {line}");
+    }
+    // The page loads and pairs through it.
+    let host = "Host: localhost:9000\r\n";
+    let line = over_socket(&socket, &format!("GET / HTTP/1.1\r\n{host}"), "");
+    assert!(line.contains(" 200 "), "{line}");
+    let code = devices.pair_code().code;
+    let body = json!({ "code": code, "name": "portable" }).to_string();
+    let head = format!("POST /pair HTTP/1.1\r\n{host}Origin: http://localhost:9000\r\n");
+    let line = over_socket(&socket, &head, &body);
+    assert!(line.contains(" 200 "), "{line}");
+    // A whole session over it.
+    rt::block_on(async {
+        let stream = tokio::net::UnixStream::connect(&socket).await.unwrap();
+        let mut req = "ws://127.0.0.1:9000/".into_client_request().unwrap();
+        let bearer = format!("Bearer {TOKEN}").parse().unwrap();
+        req.headers_mut().insert(header::AUTHORIZATION, bearer);
+        let (mut ws, _) = tokio_tungstenite::client_async(req, stream).await.unwrap();
+        let hello = tokio::time::timeout(Duration::from_secs(30), ws.next()).await;
+        let hello = hello
+            .unwrap()
+            .unwrap()
+            .unwrap()
+            .into_text()
+            .unwrap()
+            .to_string();
+        assert!(hello.contains("hello"), "{hello}");
+    });
+    // One server on a socket: the next is refused while it answers.
+    let second = start(loaded.core.clone(), table::entries(), on(&socket));
+    let why = second.err().unwrap().to_string();
+    assert!(why.contains("another server listens"), "{why}");
+    // Stopped, its core still stopping: the socket stays its own until it is dropped, the next one refused.
+    running.stop();
+    let second = start(loaded.core.clone(), table::entries(), on(&socket));
+    let why = second.err().unwrap().to_string();
+    assert!(why.contains("another server listens"), "{why}");
+    drop(running);
+    assert!(!socket.exists(), "the socket outlives its server");
+    // One left by a server that died is replaced.
+    drop(std::os::unix::net::UnixListener::bind(&socket).unwrap());
+    assert!(socket.exists());
+    let running = start(loaded.core.clone(), table::entries(), on(&socket)).unwrap();
+    let line = over_socket(&socket, &format!("GET / HTTP/1.1\r\n{host}"), "");
+    assert!(line.contains(" 200 "), "{line}");
+    drop(running);
+    // Not in a folder others may enter: it could be taken between the bind and the chmod, or replaced.
+    let open = loaded.dir.join("open");
+    std::fs::create_dir(&open).unwrap();
+    std::fs::set_permissions(&open, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let refused = start(
+        loaded.core.clone(),
+        table::entries(),
+        on(&open.join("s.sock")),
+    );
+    let why = refused.err().unwrap().to_string();
+    assert!(why.contains("alone (0700)"), "{why}");
+    assert!(!open.join("s.sock").exists());
+    let _ = std::fs::remove_dir_all(socket.parent().unwrap());
+}
+
+#[cfg(unix)]
+#[test]
+fn a_socket_given_by_hand_is_bound_only_where_no_other_user_can_change_its_path() {
+    use std::os::unix::fs::{symlink, PermissionsExt};
+    let loaded = load("remote-server-socket-path");
+    let base = short_dir("path");
+    let made = |p: &std::path::Path, mode: u32| {
+        std::fs::create_dir_all(p).unwrap();
+        std::fs::set_permissions(p, std::fs::Permissions::from_mode(mode)).unwrap();
+    };
+    made(&base, 0o700);
+    let on = |socket: &std::path::Path| Config {
+        port: 0,
+        socket: Some(socket.to_path_buf()),
+        token: Some(TOKEN.into()),
+        devices: None,
+        web: None,
+        origins: Vec::new(),
+    };
+    let serve = |socket: &std::path::Path| start(loaded.core.clone(), table::entries(), on(socket));
+    // Through a link: bound at the real path, which no later change of the link moves.
+    let real = base.join("real");
+    made(&real, 0o700);
+    symlink(&real, base.join("link")).unwrap();
+    let running = serve(&base.join("link/s.sock")).unwrap();
+    let bound = real.join("s.sock");
+    assert_eq!(running.socket.as_deref(), Some(bound.as_path()));
+    std::fs::remove_file(base.join("link")).unwrap();
+    symlink(&base, base.join("link")).unwrap();
+    assert!(std::os::unix::net::UnixStream::connect(&bound).is_ok());
+    drop(running);
+    assert!(!bound.exists());
+    // Below a folder others may write to, its own 0700 or not: another user could put a link in its place.
+    let open = base.join("open");
+    made(&open.join("me"), 0o700);
+    made(&open, 0o777);
+    let why = serve(&open.join("me/s.sock")).err().unwrap().to_string();
+    assert!(why.contains("other users"), "{why}");
+    assert!(!open.join("me/s.sock").exists());
+    // The same through a link to it.
+    symlink(open.join("me"), base.join("to-open")).unwrap();
+    let why = serve(&base.join("to-open/s.sock"))
+        .err()
+        .unwrap()
+        .to_string();
+    assert!(why.contains("other users"), "{why}");
+    // Sticky as /tmp is (where the others above live), but not root's: refused, unless this user is root.
+    // SAFETY: geteuid has no precondition.
+    let root = unsafe { libc::geteuid() } == 0;
+    let sticky = base.join("sticky");
+    made(&sticky.join("me"), 0o700);
+    made(&sticky, 0o1777);
+    let got = serve(&sticky.join("me/s.sock"));
+    assert_eq!(got.is_ok(), root, "{:?}", got.as_ref().err());
+    drop(got);
+    // Another user's, even closed to others: refused (only root can give one away, to test it).
+    if root {
+        let theirs = base.join("theirs");
+        made(&theirs.join("me"), 0o700);
+        made(&theirs, 0o755);
+        let c = std::ffi::CString::new(theirs.as_os_str().as_encoded_bytes()).unwrap();
+        // SAFETY: a NUL-terminated path, alive for the call.
+        assert_eq!(unsafe { libc::chown(c.as_ptr(), 65534, 65534) }, 0);
+        let why = serve(&theirs.join("me/s.sock")).err().unwrap().to_string();
+        assert!(why.contains("other users"), "{why}");
+    }
+    let _ = std::fs::remove_dir_all(&base);
 }

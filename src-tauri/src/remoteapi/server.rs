@@ -3,7 +3,8 @@
 //! start-up so that no child process inherits the token; the desktop app reads them in debug builds only.
 //! `escouade-server` reads the port always and the token in debug builds only (its tests): its clients are the devices
 //! paired by a code (`devices`, `POST /pair`), each with its own token, and its own commands (`pair`, `devices`) come
-//! with the key it writes beside them (`CONTROL`, `/admin/…`). Every request names this server; one from a page comes
+//! with the key it writes beside them (`CONTROL`, `/admin/…`); it may listen on a Unix socket instead of the port, in a
+//! folder of the user's alone, where no other user of the machine can take its place. Every request names this server; one from a page comes
 //! from the page it serves (`--web`, `web`). A connection brings a token, by `Authorization: Bearer` or, from a page,
 //! by the WebSocket's subprotocol `bearer.<token>`: never a cookie, which a browser would send to every port of the
 //! host. A device revoked has its connections closed at once. A connection's slot is taken before its request, so a local process may hold all 16 for up to 10 s each (acceptable for now). Its calls
@@ -41,7 +42,7 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Weak};
 use std::time::Duration;
-use tokio::net::{TcpListener, TcpStream};
+use tokio::net::TcpListener;
 use tokio::sync::mpsc::{self, error::TrySendError};
 use tokio::sync::{watch, Notify, OwnedSemaphorePermit, Semaphore};
 use tokio_tungstenite::tungstenite::handshake::derive_accept_key;
@@ -103,7 +104,11 @@ const STREAMS: [&str; 8] = [
 
 /// Where the server listens, the tokens its clients bring, and the web build it serves, if any.
 pub struct Config {
+    /// 127.0.0.1's port, unless `socket` is given.
     pub port: u16,
+    /// A Unix socket to listen on instead (`--socket`), in a folder of this user's alone: on a machine shared with
+    /// other users, none of them can take the place of the server while it restarts, as one could take a port.
+    pub socket: Option<PathBuf>,
     /// `ESCOUADE_REMOTE_TOKEN`'s: the desktop app's and the tests'.
     pub token: Option<String>,
     pub web: Option<PathBuf>,
@@ -117,6 +122,9 @@ pub struct Config {
 #[derive(serde::Serialize, serde::Deserialize)]
 pub struct Control {
     pub port: u16,
+    /// The socket it listens on instead of the port, if any.
+    #[serde(default)]
+    pub socket: Option<PathBuf>,
     pub key: String,
     /// The origins declared, the first of which `pair` gives as the address to open.
     #[serde(default)]
@@ -127,6 +135,7 @@ impl std::fmt::Debug for Config {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Config")
             .field("port", &self.port)
+            .field("socket", &self.socket)
             .field("token", &self.token.as_ref().map(|_| "<hidden>"))
             .field("web", &self.web)
             .field("devices", &self.devices.is_some())
@@ -142,13 +151,14 @@ pub fn take_from_env() -> Result<Option<Config>, String> {
     Config::parse(port.as_deref(), token.as_deref())
 }
 
-/// `escouade-server`'s: the port, which it needs; the token read in debug builds only (its tests), removed in all.
+/// `escouade-server`'s: the port, if set (0 if not: `--port` or `--socket` then says where to listen); the token read
+/// in debug builds only (its tests), removed in all.
 pub fn take_port_from_env() -> Result<Config, String> {
     let (port, token) = take_vars();
     let token = env_token(token, cfg!(debug_assertions));
-    let port = port.ok_or(format!("{PORT_VAR} is not set"))?;
     Ok(Config {
-        port: parse_port(&port)?,
+        port: port.as_deref().map(parse_port).transpose()?.unwrap_or(0),
+        socket: None,
         token: token.as_deref().map(parse_token).transpose()?,
         web: None,
         devices: None,
@@ -251,6 +261,7 @@ impl Config {
         };
         Ok(Some(Config {
             port: parse_port(port)?,
+            socket: None,
             token: Some(parse_token(token)?),
             web: None,
             devices: None,
@@ -261,10 +272,16 @@ impl Config {
 
 /// The server listening, stopped when dropped.
 pub struct Running {
+    /// Its address on 127.0.0.1; port 0 when it listens on a socket.
     pub addr: SocketAddr,
+    /// The socket it listens on, if any: removed when it stops.
+    pub socket: Option<PathBuf>,
     stop: watch::Sender<bool>,
     /// `CONTROL`'s path and the key written in it, if any.
     control: Option<(PathBuf, String)>,
+    /// The socket's lock, held until dropped: no other server binds the socket meanwhile, so the one `stop` removes
+    /// is this one's.
+    _socket_lock: Option<std::fs::File>,
 }
 
 impl Running {
@@ -273,6 +290,10 @@ impl Running {
     /// listens there next.
     pub fn stop(&self) {
         self.stop.send_replace(true);
+        // Still ours: its lock is held until this is dropped.
+        if let Some(socket) = &self.socket {
+            let _ = std::fs::remove_file(socket);
+        }
         if let Some((path, key)) = &self.control {
             let ours = std::fs::read(path)
                 .ok()
@@ -291,7 +312,7 @@ impl Drop for Running {
     }
 }
 
-/// Serves `entries` of `core` on 127.0.0.1, at `config.port`.
+/// Serves `entries` of `core` on 127.0.0.1, at `config.port`, or on `config.socket`.
 pub fn start(
     core: Arc<Core>,
     entries: &'static [Entry],
@@ -307,13 +328,33 @@ fn start_with(
     config: Config,
     calls: usize,
 ) -> std::io::Result<Running> {
-    let listener = std::net::TcpListener::bind((Ipv4Addr::LOCALHOST, config.port))?;
-    listener.set_nonblocking(true)?;
-    let listener = {
-        let _on = rt::handle().enter();
-        TcpListener::from_std(listener)?
+    let (listener, addr, socket, socket_lock) = match &config.socket {
+        #[cfg(unix)]
+        Some(path) => {
+            let (listener, bound, lock) = bind_socket(path)?;
+            let _on = rt::handle().enter();
+            let unspecified = SocketAddr::from((Ipv4Addr::LOCALHOST, 0));
+            (
+                Listener::Unix(tokio::net::UnixListener::from_std(listener)?),
+                unspecified,
+                Some(bound),
+                Some(lock),
+            )
+        }
+        #[cfg(not(unix))]
+        Some(_) => {
+            let why = "a Unix socket is for Unix systems: listen on --port";
+            return Err(std::io::Error::new(std::io::ErrorKind::Unsupported, why));
+        }
+        None => {
+            let listener = std::net::TcpListener::bind((Ipv4Addr::LOCALHOST, config.port))?;
+            listener.set_nonblocking(true)?;
+            let _on = rt::handle().enter();
+            let listener = TcpListener::from_std(listener)?;
+            let addr = listener.local_addr()?;
+            (Listener::Tcp(listener), addr, None, None)
+        }
     };
-    let addr = listener.local_addr()?;
     let tokens = escouade_mcp::Tokens::default();
     *tokens.external.write() = config.token;
     let admin = escouade_mcp::Tokens::default();
@@ -322,6 +363,7 @@ fn start_with(
         let key = escouade_mcp::new_token();
         let control = Control {
             port: addr.port(),
+            socket: socket.clone(),
             key: key.clone(),
             origins: config.origins.clone(),
         };
@@ -347,14 +389,105 @@ fn start_with(
     rt::spawn(server.accept(listener, stopped));
     Ok(Running {
         addr,
+        socket,
         stop,
         control: written,
+        _socket_lock: socket_lock,
     })
+}
+
+/// Bound in a folder of this user's alone (made 0700 if missing), the socket itself 0600: no other user can reach it,
+/// nor put one of theirs in its place. The folder's real path is checked, then bound: no folder above it that another
+/// user may change (but a sticky one of root's, as /tmp, where no one renames another's), so no link put in the way
+/// later moves it. Held by `<socket>.lock` while the server lives: one left by a server that died is replaced, one in
+/// use is not. The real path, and the lock.
+#[cfg(unix)]
+fn bind_socket(
+    path: &std::path::Path,
+) -> std::io::Result<(std::os::unix::net::UnixListener, PathBuf, std::fs::File)> {
+    use std::io::{Error, ErrorKind};
+    use std::os::unix::fs::{DirBuilderExt, FileTypeExt, MetadataExt, PermissionsExt};
+    use std::os::unix::net::UnixListener;
+    let Some(name) = path.file_name() else {
+        let why = format!("{} names no socket", path.display());
+        return Err(Error::new(ErrorKind::InvalidInput, why));
+    };
+    let folder = path.parent().filter(|p| !p.as_os_str().is_empty());
+    let folder = folder.unwrap_or(std::path::Path::new("."));
+    std::fs::DirBuilder::new()
+        .recursive(true)
+        .mode(0o700)
+        .create(folder)?;
+    let folder = std::fs::canonicalize(folder)?;
+    // SAFETY: geteuid has no precondition.
+    let me = unsafe { libc::geteuid() };
+    let meta = std::fs::symlink_metadata(&folder)?;
+    if !meta.is_dir() || meta.uid() != me || meta.mode() & 0o077 != 0 {
+        let why = format!(
+            "{} must be a folder of this user's alone (0700) to hold the socket",
+            folder.display()
+        );
+        return Err(Error::new(ErrorKind::PermissionDenied, why));
+    }
+    for above in folder.ancestors().skip(1) {
+        let m = std::fs::symlink_metadata(above)?;
+        let trusted = m.uid() == me || m.uid() == 0;
+        let sticky_roots = m.uid() == 0 && m.mode() & 0o1000 != 0;
+        if !m.is_dir() || !trusted || (m.mode() & 0o022 != 0 && !sticky_roots) {
+            let why = format!(
+                "{} may be changed by other users: the socket's path must be this user's and root's alone",
+                above.display()
+            );
+            return Err(Error::new(ErrorKind::PermissionDenied, why));
+        }
+    }
+    let path = folder.join(name);
+    let mut lock = path.clone().into_os_string();
+    lock.push(".lock");
+    let Some(lock) = super::lockfile::acquire(std::path::Path::new(&lock))? else {
+        let why = format!("another server listens on {}", path.display());
+        return Err(Error::new(ErrorKind::AddrInUse, why));
+    };
+    if std::fs::symlink_metadata(&path).is_ok_and(|m| m.file_type().is_socket()) {
+        std::fs::remove_file(&path)?;
+    }
+    let listener = UnixListener::bind(&path)?;
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))?;
+    listener.set_nonblocking(true)?;
+    Ok((listener, path, lock))
+}
+
+/// Where the clients come from.
+enum Listener {
+    Tcp(TcpListener),
+    #[cfg(unix)]
+    Unix(tokio::net::UnixListener),
+}
+
+/// A client's connection, by TCP or by the socket.
+trait Duplex: tokio::io::AsyncRead + tokio::io::AsyncWrite + Send {}
+impl<T: tokio::io::AsyncRead + tokio::io::AsyncWrite + Send> Duplex for T {}
+type Stream = std::pin::Pin<Box<dyn Duplex>>;
+
+impl Listener {
+    /// The next client; `None` for a peer off the loopback, which cannot come to a port bound there and is closed if
+    /// it does. A socket's clients are this user's: its folder lets no other in.
+    async fn accept(&self) -> std::io::Result<Option<Stream>> {
+        match self {
+            Listener::Tcp(listener) => {
+                let (tcp, peer) = listener.accept().await?;
+                Ok(peer.ip().is_loopback().then(|| Box::pin(tcp) as Stream))
+            }
+            #[cfg(unix)]
+            Listener::Unix(listener) => Ok(Some(Box::pin(listener.accept().await?.0))),
+        }
+    }
 }
 
 struct Server {
     core: Arc<Core>,
     entries: &'static [Entry],
+    /// Its port on 127.0.0.1; 0 on a socket, where every page comes through a tunnel.
     port: u16,
     /// `ESCOUADE_REMOTE_TOKEN`'s, if any, compared in constant time.
     tokens: escouade_mcp::Tokens,
@@ -373,25 +506,22 @@ struct Server {
 }
 
 impl Server {
-    async fn accept(self: Arc<Self>, listener: TcpListener, mut stopped: watch::Receiver<bool>) {
+    async fn accept(self: Arc<Self>, listener: Listener, mut stopped: watch::Receiver<bool>) {
         let connections = Arc::new(Semaphore::new(MAX_CONNECTIONS));
         loop {
             let accepted = tokio::select! {
                 _ = stopped.wait_for(|s| *s) => return,
                 accepted = listener.accept() => accepted,
             };
-            let (tcp, peer) = match accepted {
-                Ok(accepted) => accepted,
+            let tcp = match accepted {
+                Ok(Some(tcp)) => tcp,
+                Ok(None) => continue,
                 Err(e) => {
                     log::debug!("remote API: accept failed: {e}");
                     tokio::time::sleep(Duration::from_millis(100)).await;
                     continue;
                 }
             };
-            // Bound to the loopback: another peer cannot come, and is closed if it does.
-            if !peer.ip().is_loopback() {
-                continue;
-            }
             let Ok(permit) = connections.clone().try_acquire_owned() else {
                 continue;
             };
@@ -435,11 +565,14 @@ impl Server {
         if let (true, Some(host)) = (headers.contains_key(header::ORIGIN), host) {
             // A tunnel's page is at the loopback's address it names; another port's page is another site.
             let page = loopback(host).then(|| format!("http://{}", host.to_ascii_lowercase()));
-            let own = [
-                format!("http://127.0.0.1:{port}"),
-                format!("http://localhost:{port}"),
-            ];
-            let mut own = own.iter().chain(&self.origins).chain(&page);
+            // On a socket, no port of its own: every page is a tunnel's.
+            let own = (port != 0).then(|| {
+                [
+                    format!("http://127.0.0.1:{port}"),
+                    format!("http://localhost:{port}"),
+                ]
+            });
+            let mut own = own.iter().flatten().chain(&self.origins).chain(&page);
             let origin = headers.get(header::ORIGIN).filter(|_| once(header::ORIGIN));
             if !origin.is_some_and(|o| own.any(|own| o.as_bytes() == own.as_bytes())) {
                 return Err(StatusCode::FORBIDDEN);
@@ -481,7 +614,7 @@ impl Server {
     }
 
     /// One request per connection: a file, a session, or the WebSocket, which then holds the connection.
-    async fn serve(self: Arc<Self>, tcp: TcpStream, stopped: watch::Receiver<bool>) {
+    async fn serve(self: Arc<Self>, tcp: Stream, stopped: watch::Receiver<bool>) {
         let upgrade: Arc<Upgrade> = Arc::default();
         let (me, upgraded) = (self.clone(), upgrade.clone());
         let service = service_fn(move |req| {

@@ -19,6 +19,25 @@ fn folder(name: &str) -> PathBuf {
     dir
 }
 
+/// A socket in a short folder of its own under /tmp, not made yet: `sun_path` holds 104 bytes on macOS, NUL
+/// included, which a folder under `$TMPDIR` overflows.
+fn short_socket(tag: &str) -> PathBuf {
+    let pid = std::process::id().to_string();
+    let dir = std::fs::canonicalize("/tmp")
+        .unwrap()
+        .join(format!("esc-{pid}-{tag}"));
+    let _ = std::fs::remove_dir_all(&dir);
+    let socket = dir.join("s.sock");
+    // With the longest pid (Linux's pid_max, 2^22: 7 digits) all the same, NUL included.
+    let longest = socket.as_os_str().len() - pid.len() + 7;
+    assert!(
+        longest < 104,
+        "{} is too long for a socket",
+        socket.display()
+    );
+    socket
+}
+
 /// The program, its data and home in `dir`, none of the variables it reads but `vars`.
 fn program(dir: &Path, vars: &[(&str, String)]) -> Command {
     let mut c = Command::new(env!("CARGO_BIN_EXE_escouade-server"));
@@ -357,5 +376,340 @@ fn it_serves_the_core_and_stops_cleanly_on_sigterm() {
     let log = std::fs::read_to_string(dir.join("data/app.log")).unwrap();
     assert!(log.contains("core stopped"), "{log}");
     assert!(!log.contains(TOKEN), "{log}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Waits until `socket` answers, `child` still running.
+fn wait_for_socket(child: &mut Child, socket: &Path) {
+    let until = Instant::now() + Duration::from_secs(120);
+    while std::os::unix::net::UnixStream::connect(socket).is_err() {
+        assert!(child.try_wait().unwrap().is_none(), "the server ended");
+        assert!(Instant::now() < until, "no server on {}", socket.display());
+        std::thread::sleep(Duration::from_millis(100));
+    }
+}
+
+/// `program` with its stderr piped, waited for to its end: its code and what it said.
+fn refused(mut c: Command) -> (Option<i32>, String) {
+    let mut child = c.stderr(Stdio::piped()).spawn().unwrap();
+    let code = exit_within(&mut child, Duration::from_secs(60));
+    let mut said = String::new();
+    std::io::Read::read_to_string(&mut child.stderr.take().unwrap(), &mut said).unwrap();
+    (code, said)
+}
+
+#[test]
+fn a_second_server_on_the_same_data_folder_is_refused() {
+    let dir = folder("second");
+    let socket = short_socket("second");
+    let mut first = program(&dir, &[])
+        .arg("--socket")
+        .arg(&socket)
+        .spawn()
+        .unwrap();
+    wait_for_socket(&mut first, &socket);
+    // On another socket or port all the same: the data folder is what is held.
+    let other = socket.with_file_name("other.sock");
+    let control = std::fs::read(dir.join("data/server.json")).unwrap();
+    let mut on_socket = program(&dir, &[]);
+    on_socket.arg("--socket").arg(&other);
+    let on_port = program(&dir, &[("ESCOUADE_REMOTE_PORT", free_port().to_string())]);
+    for second in [on_socket, on_port] {
+        let (code, said) = refused(second);
+        // Its own code: the unit does not restart it in a loop.
+        assert_eq!(code, Some(3), "{said}");
+        let pid = first.id().to_string();
+        assert!(
+            said.contains("already serves") && said.contains(&pid),
+            "{said}"
+        );
+    }
+    // Refused before anything: no socket, `server.json` the first's.
+    assert!(!other.exists());
+    assert_eq!(
+        std::fs::read(dir.join("data/server.json")).unwrap(),
+        control
+    );
+    // The first serves on, and is the only one to write `devices.json`: a revocation stays one.
+    let (code, out) = command(&dir, &["pair"]);
+    assert_eq!(code, Some(0), "{out}");
+    unsafe { libc::kill(first.id() as i32, libc::SIGTERM) };
+    assert_eq!(exit_within(&mut first, Duration::from_secs(60)), Some(0));
+    assert!(!socket.exists(), "the socket outlives its server");
+    let _ = std::fs::remove_dir_all(&dir);
+    let _ = std::fs::remove_dir_all(socket.parent().unwrap());
+}
+
+#[test]
+fn a_killed_server_leaves_nothing_that_stops_the_next() {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = folder("killed");
+    let socket = short_socket("killed");
+    let start = || {
+        program(&dir, &[])
+            .arg("--socket")
+            .arg(&socket)
+            .spawn()
+            .unwrap()
+    };
+    let mut first = start();
+    wait_for_socket(&mut first, &socket);
+    let mode = |p: &Path| std::fs::metadata(p).unwrap().permissions().mode() & 0o777;
+    assert_eq!(mode(socket.parent().unwrap()), 0o700);
+    assert_eq!(mode(&socket), 0o600);
+    // `pair` reaches it by its socket, and says how to.
+    let (code, out) = command(&dir, &["pair"]);
+    assert_eq!(code, Some(0), "{out}");
+    assert!(
+        out.contains(&format!("ssh -N -L 8765:{} ", socket.display())),
+        "{out}"
+    );
+    assert!(out.contains("http://127.0.0.1:8765/"), "{out}");
+    assert!(!out.contains("serve on --socket"), "{out}");
+    first.kill().unwrap();
+    first.wait().unwrap();
+    // Its lock went with it; its socket and `server.json` stayed, and are replaced.
+    assert!(socket.exists() && dir.join("data/server.json").exists());
+    let mut next = start();
+    wait_for_socket(&mut next, &socket);
+    let (code, out) = command(&dir, &["pair"]);
+    assert_eq!(code, Some(0), "{out}");
+    unsafe { libc::kill(next.id() as i32, libc::SIGTERM) };
+    assert_eq!(exit_within(&mut next, Duration::from_secs(60)), Some(0));
+    let _ = std::fs::remove_dir_all(&dir);
+    let _ = std::fs::remove_dir_all(socket.parent().unwrap());
+}
+
+#[test]
+fn a_server_on_a_port_says_to_prefer_the_socket_on_a_shared_machine() {
+    let dir = folder("port-advice");
+    let port = free_port();
+    let mut child = program(&dir, &[])
+        .args(["--port", &port.to_string()])
+        .spawn()
+        .unwrap();
+    let until = Instant::now() + Duration::from_secs(120);
+    while std::net::TcpStream::connect(("127.0.0.1", port)).is_err() {
+        assert!(Instant::now() < until, "no server on {port}");
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    let (code, out) = command(&dir, &["pair"]);
+    assert_eq!(code, Some(0), "{out}");
+    assert!(out.contains(&format!("http://127.0.0.1:{port}/")), "{out}");
+    assert!(out.contains("serve on --socket"), "{out}");
+    unsafe { libc::kill(child.id() as i32, libc::SIGTERM) };
+    assert_eq!(exit_within(&mut child, Duration::from_secs(60)), Some(0));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// The answer to the call `cmd` with `args` (and the stream `stream`), the frames before it skipped.
+async fn ask(
+    ws: &mut tokio_tungstenite::WebSocketStream<tokio::net::UnixStream>,
+    id: u64,
+    cmd: &str,
+    args: serde_json::Value,
+    stream: Option<u32>,
+) -> serde_json::Value {
+    let mut call = serde_json::json!({ "id": id, "cmd": cmd, "args": args });
+    if let Some(n) = stream {
+        call["stream"] = n.into();
+    }
+    ws.send(Message::text(call.to_string())).await.unwrap();
+    loop {
+        let frame = tokio::time::timeout(Duration::from_secs(30), ws.next())
+            .await
+            .expect("an answer in time")
+            .expect("the connection open")
+            .unwrap();
+        let Message::Text(text) = frame else { continue };
+        let value: serde_json::Value = serde_json::from_str(&text).unwrap();
+        if value["id"] == id {
+            return value;
+        }
+    }
+}
+
+#[test]
+fn a_sigterm_with_a_terminal_open_stops_it_within_ten_seconds() {
+    let dir = folder("sigterm-terminal");
+    let repo = dir.join("repo");
+    std::fs::create_dir_all(&repo).unwrap();
+    for args in [
+        &["init", "-q"][..],
+        &[
+            "-c",
+            "user.name=t",
+            "-c",
+            "user.email=t@t",
+            "commit",
+            "-q",
+            "--allow-empty",
+            "-m",
+            "init",
+        ],
+    ] {
+        let ok = Command::new("git")
+            .args(args)
+            .current_dir(&repo)
+            .status()
+            .unwrap();
+        assert!(ok.success());
+    }
+    let socket = short_socket("sigterm");
+    // Unique on the machine: this test's pid.
+    let marker = 900_000_000 + std::process::id();
+    let mut child = program(&dir, &[("ESCOUADE_REMOTE_TOKEN", TOKEN.into())])
+        .arg("--socket")
+        .arg(&socket)
+        .spawn()
+        .unwrap();
+    wait_for_socket(&mut child, &socket);
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    let mut ws = runtime.block_on(async {
+        let stream = tokio::net::UnixStream::connect(&socket).await.unwrap();
+        let mut req = "ws://localhost:8765/".into_client_request().unwrap();
+        let bearer = format!("Bearer {TOKEN}").parse().unwrap();
+        req.headers_mut().insert("authorization", bearer);
+        let (mut ws, _) = tokio_tungstenite::client_async(req, stream).await.unwrap();
+        let project = ask(
+            &mut ws,
+            1,
+            "create_project",
+            serde_json::json!({ "path": repo, "name": "demo", "color": "oklch(0.72 0.12 48)", "worktreePerAgent": false }),
+            None,
+        )
+        .await;
+        let project = project["ok"]["id"].as_str().unwrap_or_else(|| panic!("{project}")).to_string();
+        let args = serde_json::json!({ "projectId": project, "shell": "bash", "name": "t", "cols": 80, "rows": 24 });
+        let term = ask(&mut ws, 2, "term_spawn", args, Some(7)).await;
+        let id = term["ok"]["id"].as_str().unwrap_or_else(|| panic!("{term}"));
+        // A process of the terminal's own, found by its command line once it runs.
+        let line = format!("exec sleep {marker}\n");
+        let wrote = ask(&mut ws, 3, "term_write", serde_json::json!({ "id": id, "data": line }), None).await;
+        assert!(wrote["ok"].is_number(), "{wrote}");
+        ws
+    });
+    let alive = || {
+        Command::new("pgrep")
+            .args(["-f", &format!("^sleep {marker}$")])
+            .output()
+            .unwrap()
+            .status
+            .success()
+    };
+    let until = Instant::now() + Duration::from_secs(30);
+    while !alive() {
+        assert!(Instant::now() < until, "the terminal never ran its command");
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    let sent = Instant::now();
+    unsafe { libc::kill(child.id() as i32, libc::SIGTERM) };
+    let code = exit_within(&mut child, Duration::from_secs(10));
+    assert_eq!(code, Some(0), "not stopped cleanly within 10 s");
+    assert!(sent.elapsed() < Duration::from_secs(10));
+    // Its clients are told: the connection ends.
+    runtime.block_on(async {
+        let ended = tokio::time::timeout(Duration::from_secs(5), async {
+            while let Some(Ok(_)) = ws.next().await {}
+        });
+        assert!(ended.await.is_ok());
+    });
+    // The terminal's processes went with it.
+    assert!(!alive(), "the terminal's process outlives the server");
+    let _ = std::fs::remove_dir_all(&dir);
+    let _ = std::fs::remove_dir_all(socket.parent().unwrap());
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn install_writes_the_unit_alike_twice_and_uninstall_removes_it() {
+    let dir = folder("install");
+    let web = dir.join("web");
+    std::fs::create_dir_all(&web).unwrap();
+    let unit = dir.join(".config/systemd/user/escouade-server.service");
+    let install = || {
+        let out = program(&dir, &[])
+            .env_remove("XDG_CONFIG_HOME")
+            .args(["install", "--user", "--web"])
+            .arg(&web)
+            .args(["--origin", "https://escouade.example.com"])
+            .stdout(Stdio::piped())
+            .output()
+            .unwrap();
+        let said = String::from_utf8_lossy(&out.stdout).into_owned();
+        assert_eq!(out.status.code(), Some(0), "{said}");
+        // What to run is said, not run.
+        for step in [
+            "systemctl --user daemon-reload",
+            "systemctl --user enable --now escouade-server",
+            "loginctl enable-linger",
+        ] {
+            assert!(said.contains(step), "{said}");
+        }
+        std::fs::read_to_string(&unit).unwrap()
+    };
+    let text = install();
+    let exe = std::fs::canonicalize(env!("CARGO_BIN_EXE_escouade-server")).unwrap();
+    assert!(
+        text.contains(&format!(
+            "ExecStart=\"{}\" --socket %t/escouade/server.sock --web \"{}\" --origin \"https://escouade.example.com\"\n",
+            exe.display(),
+            web.display()
+        )),
+        "{text}"
+    );
+    // The data folder it was installed for.
+    let data = format!(
+        "Environment=\"ESCOUADE_DATA_DIR={}\"\n",
+        dir.join("data").display()
+    );
+    assert!(text.contains(&data), "{text}");
+    assert!(text.contains("Restart=on-failure\n") && !text.contains(TOKEN));
+    assert_eq!(install(), text, "a second install changed the unit");
+    // Read by systemd itself where it is there.
+    if Command::new("systemd-analyze")
+        .arg("--version")
+        .output()
+        .is_ok()
+    {
+        let out = Command::new("systemd-analyze")
+            .args(["--user", "verify"])
+            .arg(&unit)
+            .env("XDG_RUNTIME_DIR", &dir)
+            .output()
+            .unwrap();
+        let said = String::from_utf8_lossy(&out.stderr);
+        assert!(
+            out.status.success() && said.trim().is_empty(),
+            "systemd-analyze verify: {said}"
+        );
+    }
+    let uninstall = || {
+        program(&dir, &[])
+            .env_remove("XDG_CONFIG_HOME")
+            .arg("uninstall")
+            .stderr(Stdio::piped())
+            .output()
+            .unwrap()
+    };
+    // Still enabled: left in place.
+    let wants = unit.with_file_name("default.target.wants");
+    std::fs::create_dir_all(&wants).unwrap();
+    std::os::unix::fs::symlink(&unit, wants.join("escouade-server.service")).unwrap();
+    let out = uninstall();
+    assert_eq!(out.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&out.stderr).contains("disable --now"));
+    assert!(unit.exists());
+    std::fs::remove_dir_all(&wants).unwrap();
+    assert_eq!(uninstall().status.code(), Some(0));
+    assert!(!unit.exists());
+    assert_eq!(
+        uninstall().status.code(),
+        Some(0),
+        "twice: nothing to remove"
+    );
     let _ = std::fs::remove_dir_all(&dir);
 }

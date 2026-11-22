@@ -3,6 +3,7 @@
 //! of the web build (`web`).
 
 pub mod devices;
+pub mod lockfile;
 pub mod server;
 pub mod table;
 pub mod web;
