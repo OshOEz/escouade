@@ -405,7 +405,7 @@ Demandé le 2026-11-14 : « avoir plusieurs serveurs Escouade pilotés par un se
 - [ ] La mise à jour du serveur (même signature que l'updater), proposée par le client à sa version.
 - [ ] Dans le client : « Se connecter à un serveur » (hôte SSH, appairage), la machine dans la barre de titre, le retour en local.
 - [ ] La table « Ce qui change de machine » :
-  - le navigateur des dossiers du serveur ;
+  - le navigateur des dossiers du serveur (fait : `fs_browse` et `fs_clone`, « Parcourir… » de « Nouveau projet » dans un navigateur ; les dossiers seuls, sous le dossier personnel de l'utilisateur du service, sans les dossiers cachés ni les fichiers privés, un lien qui en sort ni montré ni suivi ; 2 000 dossiers au plus par liste ; un dépôt s'y clone, depuis une adresse distante ou un dépôt du disque dans les mêmes bornes, jamais par une aide `x::` ; refusé si le dossier personnel est la racine). Le chemin tapé à la main suit la même borne : `escouade-server` la pose dans le cœur, et `inspect_folder`, `create_project`, `first_commit` et `shared_preview` refusent un dossier hors du dossier personnel ou parmi les fichiers privés ; l'app de bureau ne la pose pas ;
   - l'envoi des logos et des fichiers joints ;
   - le téléchargement des fichiers des agents ;
   - les ports des serveurs de test relayés ;

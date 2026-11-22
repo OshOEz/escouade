@@ -34,6 +34,9 @@ mod board;
 mod branchci;
 #[cfg(test)]
 mod branches_tests;
+mod browse;
+#[cfg(test)]
+mod browse_tests;
 mod bypass;
 #[cfg(feature = "desktop")]
 mod clipboard;
@@ -452,6 +455,8 @@ macro_rules! all_commands {
             commands::claude_locate,
             commands::claude_update_status,
             commands::data_dir,
+            commands::fs_browse,
+            commands::fs_clone,
             commands::plugins_list,
             commands::plugin_inspect_folder,
             commands::plugin_inspect_git,

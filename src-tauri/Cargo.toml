@@ -96,6 +96,7 @@ parking_lot = "0.13"
 uuid = { version = "1", features = ["v4"] }
 chrono = { version = "0.4", features = ["serde"] }
 dirs = "7"
+dunce = "1"
 portable-pty = "0.9"
 notify = "8"
 rusqlite = { version = "0.41", features = ["bundled"] }

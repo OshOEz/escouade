@@ -22,6 +22,7 @@
   import WorktreesStep from '../wizard/WorktreesStep.svelte';
   import Icon from '../Icon.svelte';
   import Modal from './Modal.svelte';
+  import ServerFolders from './ServerFolders.svelte';
 
   // The new project's assistant, in steps: the folder, its name and color and where its settings start from, then its
   // worktrees, launch, Kanban, account and integrations, each to skip, and a summary that says what would keep the way
@@ -306,7 +307,8 @@
                 spellcheck="false"
                 autofocus
               />
-              {#if desktop}<button class="btn" onclick={browse}><Icon name="folder" size={14} />{t('shell.newProject.browse')}</button>{/if}
+              {#if desktop}<button class="btn" onclick={browse}><Icon name="folder" size={14} />{t('shell.newProject.browse')}</button
+                >{:else}<ServerFolders onpick={(p) => (form.path = p)} />{/if}
             </div>
             <span class="git" style:color={gitLine.color} use:tip={info?.repos?.length ? t('repos.wizard.foundHint') : undefined}
               ><span class="gd" style:background={gitLine.color}></span>{gitLine.text}</span
@@ -631,6 +633,10 @@
     display: flex;
     align-items: center;
     gap: 8px;
+  }
+  /* In a browser, the server's folders open under the path. */
+  .row:has(:global(.sf)) {
+    flex-wrap: wrap;
   }
   .path-in {
     flex: 1;

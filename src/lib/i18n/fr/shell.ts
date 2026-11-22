@@ -44,6 +44,20 @@ export default {
     folderTitle: 'Dossier du projet',
     pathPlaceholder: 'C:\\chemin\\vers\\le\\projet',
     browse: 'Parcourir…',
+    /** In a browser: the folders of the server, under its user's home, to choose the project's or clone one into. */
+    server: {
+      title: 'Dossiers du serveur',
+      up: 'Dossier parent',
+      choose: 'Choisir ce dossier',
+      unreadable: 'Dossier illisible',
+      /** The mark of a folder that is a Git repository. */
+      git: 'git',
+      empty: 'Aucun dossier ici',
+      truncated: 'Dossier trop grand : seuls les premiers sont montrés',
+      cloneUrl: 'Adresse du dépôt à cloner ici',
+      clone: 'Cloner ici',
+      cloning: 'Clonage…',
+    },
     tabPreview: "Aperçu de l'onglet",
     untitled: 'nouveau-projet',
     colorN: 'Couleur {n}',

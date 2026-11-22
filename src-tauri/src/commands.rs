@@ -441,6 +441,27 @@ pub fn data_dir(core: CoreState) -> String {
     core.data.root().display().to_string()
 }
 
+/// The home of the server's user, where `fs_browse` and `fs_clone` stay.
+fn home() -> Res<std::path::PathBuf> {
+    dirs::home_dir().ok_or_else(|| tr!("dossier personnel introuvable", "no home folder"))
+}
+
+/// The folders of `path` on the server (its user's home when none), for « Nouveau projet » in a browser (`browse`):
+/// the private files of the projects (`fence`) left out as an agent's.
+#[command(async)]
+pub fn fs_browse(core: CoreState, path: Option<String>) -> Res<crate::browse::Listing> {
+    crate::browse::list(&home()?, &core.project_fence(""), path.as_deref()).map_err(err)
+}
+
+/// `url` cloned into the folder `into` of the server (`browse::clone`); the path of the clone.
+#[command]
+pub async fn fs_clone(core: CoreState<'_>, url: String, into: String) -> Res<String> {
+    let fence = core.project_fence("");
+    crate::browse::clone(&home()?, &fence, &url, &into)
+        .await
+        .map_err(err)
+}
+
 /// The installed plugins (ESC-173), as last read from their folders.
 #[command(async)]
 pub fn plugins_list(core: CoreState) -> Vec<crate::plugins::PluginView> {
@@ -1267,6 +1288,7 @@ pub async fn inspect_folder(
     path: String,
     history_id: Option<String>,
 ) -> Res<FolderInfo> {
+    let path = core.client_folder(&path).map_err(err)?;
     let p = std::path::Path::new(path.trim());
     let name = p
         .file_name()
@@ -1410,7 +1432,8 @@ pub async fn inspect_setup(
 
 /// « Faire un premier commit »: the folder made a repository if need be, with an empty first commit.
 #[command]
-pub async fn first_commit(_core: CoreState<'_>, path: String) -> Res<()> {
+pub async fn first_commit(core: CoreState<'_>, path: String) -> Res<()> {
+    let path = core.client_folder(&path).map_err(err)?;
     crate::git::first_commit(path.trim()).await.map_err(err)
 }
 
@@ -1430,6 +1453,7 @@ pub async fn create_project(
     restore: Option<bool>,
     history_id: Option<String>,
 ) -> Res<Project> {
+    let path = core.client_folder(&path).map_err(err)?;
     let r = core
         .add_project(
             &path,
@@ -1621,8 +1645,8 @@ pub fn shared_unkeep(core: CoreState, project_id: String, key: String) -> Res<Pr
 
 /// The settings the `.escouade.yml` of a folder gives a new project (the assistant's start).
 #[command(async)]
-pub fn shared_preview(path: String) -> Option<Project> {
-    crate::projectfile::preview(&path)
+pub fn shared_preview(core: CoreState, path: String) -> Option<Project> {
+    crate::projectfile::preview(&core.client_folder(&path).ok()?)
 }
 
 #[command(async)]

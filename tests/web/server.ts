@@ -21,6 +21,8 @@ export interface Server {
   root: string;
   /** A Git repository with one commit on `main`, to make a project of. */
   repo: string;
+  /** The home of the server's user, the folders the page browses: `projets/site` in it, a repository like `repo`. */
+  home: string;
   /** The proxy the browser goes through (`newContext({ proxy })`): what cuts its network (`cut`). */
   proxy: { server: string; bypass: string };
   /** The network of the page cut (its connections closed, none opened again) or given back. */
@@ -74,14 +76,18 @@ export async function startServer(): Promise<Server> {
       accounts: [{ id: 'principal', name: 'Principal', engine: 'claude', configDir: '', claudePath: '', active: true }],
     }),
   );
-  const repo = path.join(root, 'demo-api');
-  fs.mkdirSync(repo);
-  git(repo, 'init', '-q', '-b', 'main');
-  git(repo, 'config', 'user.email', 'e2e@test');
-  git(repo, 'config', 'user.name', 'e2e');
-  fs.writeFileSync(path.join(repo, 'README.md'), '# demo\n');
-  git(repo, 'add', '-A');
-  git(repo, 'commit', '-qm', 'init');
+  // In the home: a client's project folder stays there (the server's bound, as its browser of folders).
+  const repo = path.join(home, 'demo-api');
+  const site = path.join(home, 'projets', 'site');
+  for (const dir of [repo, site]) {
+    fs.mkdirSync(dir, { recursive: true });
+    git(dir, 'init', '-q', '-b', 'main');
+    git(dir, 'config', 'user.email', 'e2e@test');
+    git(dir, 'config', 'user.name', 'e2e');
+    fs.writeFileSync(path.join(dir, 'README.md'), '# demo\n');
+    git(dir, 'add', '-A');
+    git(dir, 'commit', '-qm', 'init');
+  }
 
   const port = await freePort();
   // No ESCOUADE_REMOTE_TOKEN: the devices paired by a code alone, as on a server.
@@ -118,6 +124,7 @@ export async function startServer(): Promise<Server> {
     url,
     root,
     repo,
+    home,
     proxy: { server: `http://127.0.0.1:${network.port}`, bypass: '<-loopback>' },
     cut: network.cut,
     async pair(page) {

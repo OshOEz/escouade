@@ -1752,6 +1752,7 @@ dependencies = [
  "chrono",
  "ctor",
  "dirs 7.0.0",
+ "dunce",
  "escouade-acp",
  "escouade-base",
  "escouade-engines",

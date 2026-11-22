@@ -574,6 +574,15 @@ fn a_sigterm_with_a_terminal_open_stops_it_within_ten_seconds() {
         let bearer = format!("Bearer {TOKEN}").parse().unwrap();
         req.headers_mut().insert("authorization", bearer);
         let (mut ws, _) = tokio_tungstenite::client_async(req, stream).await.unwrap();
+        // A project's folder from a client stays in the home of the server's user, as the browser of folders does.
+        let outside = std::env::temp_dir().canonicalize().unwrap();
+        let args = serde_json::json!({ "path": outside, "name": "out", "color": "oklch(0.72 0.12 48)", "worktreePerAgent": false });
+        let refused = ask(&mut ws, 10, "create_project", args, None).await;
+        assert!(refused["ok"].is_null() && !refused["err"].is_null(), "{refused}");
+        for (id, cmd) in [(11, "inspect_folder"), (12, "first_commit")] {
+            let refused = ask(&mut ws, id, cmd, serde_json::json!({ "path": outside }), None).await;
+            assert!(!refused["err"].is_null(), "{cmd}: {refused}");
+        }
         let project = ask(
             &mut ws,
             1,

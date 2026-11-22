@@ -1001,6 +1001,8 @@ pub struct Core {
     /// Itself, for what runs in the background from a method that only has `&self`.
     me: std::sync::Weak<Self>,
     pub host: Arc<dyn crate::host::Host>,
+    /// escouade-server's: the home its clients' project folders stay in (`client_folder`); none on the desktop.
+    pub folders_home: std::sync::OnceLock<std::path::PathBuf>,
     pub data: DataDir,
     pub hub: Hub,
     pub settings: RwLock<Settings>,
@@ -2228,6 +2230,7 @@ impl Core {
         facts.subscribe(plugin_events.clone());
         let core = Arc::new_cyclic(|me| Self {
             me: me.clone(),
+            folders_home: Default::default(),
             telemetry,
             stats: Stats::open(&data.stats_db()),
             plugin_runtime,

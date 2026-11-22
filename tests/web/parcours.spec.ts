@@ -1,5 +1,7 @@
 // The web interface in Chrome for Testing, against `escouade-server`: one server for the whole course, its steps in order.
-import { expect, test, type BrowserContext, type Page } from '@playwright/test';
+import fs from 'node:fs';
+import path from 'node:path';
+import { expect, test, type BrowserContext, type Locator, type Page } from '@playwright/test';
 import { startServer, type Server } from './server';
 
 test.describe.configure({ mode: 'serial' });
@@ -180,4 +182,51 @@ test('an agent on the fake Claude Code: its reply, then its question answered', 
   await expect(card).toContainText('Quelle base de données ?');
   await card.getByRole('button', { name: 'SQLite' }).click();
   await expect(page.getByText('Choix retenu : SQLite')).toBeVisible();
+});
+
+test('a project made from a folder chosen on the server, then from a repository cloned there', async () => {
+  // What the cut of the network (above) wrote to the console was expected there.
+  errors.length = 0;
+  const tabs = page.getByRole('tablist', { name: 'Projets ouverts' }).getByRole('tab');
+  await expect(tabs).toHaveCount(1);
+  const projets = path.join(fs.realpathSync(server.home), 'projets');
+  /** « Nouveau projet », its server's folders opened on `projets`. */
+  async function browse() {
+    await page
+      .getByRole('button', { name: /Ajouter un projet/ })
+      .first()
+      .click();
+    const item = page.getByRole('menuitem', { name: /Ajouter un projet/ });
+    const dialog = page.getByRole('dialog', { name: 'Nouveau projet' });
+    await expect(item.or(dialog).first()).toBeVisible();
+    if (await item.isVisible()) await item.click();
+    await dialog.getByRole('button', { name: 'Parcourir…' }).click();
+    const box = dialog.getByRole('group', { name: 'Dossiers du serveur' });
+    await box.getByRole('button', { name: 'projets' }).click();
+    await expect(box.getByText(projets, { exact: true })).toBeVisible();
+    return { dialog, box };
+  }
+  async function create(dialog: Locator, folder: string) {
+    await expect(dialog.locator('input').first()).toHaveValue(folder);
+    await expect(dialog.getByText(/Dépôt git détecté · branche main · propre/)).toBeVisible();
+    await dialog.getByRole('button', { name: /^Créer sans l.assistant$/ }).click();
+    await expect(dialog).toBeHidden();
+  }
+
+  // Chosen: down into a repository, then « Choisir ce dossier ».
+  let { dialog, box } = await browse();
+  await box.getByRole('button', { name: /^site/ }).click();
+  await expect(box.getByText(path.join(projets, 'site'), { exact: true })).toBeVisible();
+  await box.getByRole('button', { name: 'Choisir ce dossier' }).click();
+  await create(dialog, path.join(projets, 'site'));
+  await expect(tabs).toHaveCount(2);
+
+  // Cloned: a repository of the server's disk, into `projets`; the clone is the project's folder.
+  ({ dialog, box } = await browse());
+  await box.getByRole('textbox', { name: 'Adresse du dépôt à cloner ici' }).fill(server.repo);
+  await box.getByRole('button', { name: 'Cloner ici' }).click();
+  await create(dialog, path.join(projets, 'demo-api'));
+  await expect(tabs).toHaveCount(3);
+  expect(fs.existsSync(path.join(projets, 'demo-api', 'README.md'))).toBe(true);
+  expect(errors).toEqual([]);
 });

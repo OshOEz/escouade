@@ -3024,6 +3024,17 @@ export interface EngineShare {
   agents: number;
 }
 
+/** A folder of the server and the folders in it (`fs_browse`): « Nouveau projet » in a browser. */
+export interface Listing {
+  path: string;
+  /** None for the home. */
+  parent: string | null;
+  /** `dir` false: a folder that cannot be read. `git`: a repository. */
+  entries: { name: string; dir: boolean; git: boolean }[];
+  /** More folders in it than listed: only the first found. */
+  truncated?: boolean;
+}
+
 export interface FolderInfo {
   exists: boolean;
   isRepo: boolean;

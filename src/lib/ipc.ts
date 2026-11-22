@@ -72,6 +72,7 @@ import type {
   OwnedDiff,
   IsolaService,
   IssuePage,
+  Listing,
   AgentFolder,
   Project,
   RepoMerge,
@@ -228,6 +229,10 @@ export const api = {
   /** Where Escouade's update of Claude Code stands (ESC-133). */
   claudeUpdateStatus: () => invoke<ClaudeUpdateStatus>('claude_update_status'),
   dataDir: () => invoke<string>('data_dir'),
+  /** The folders of the server under its user's home (its home when `path` is none). */
+  fsBrowse: (path?: string) => invoke<Listing>('fs_browse', path ? { path } : {}),
+  /** `url` cloned into the folder `into` of the server; the path of the clone. */
+  fsClone: (url: string, into: string) => invoke<string>('fs_clone', { url, into }),
   /** Every harness with what is found of it here: its program, version and state (versions read again). */
   engines: () => invoke<EngineInfo[]>('engines'),
   /** The harnesses found now, the PATH of today read first (ESC-186). */

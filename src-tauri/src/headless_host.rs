@@ -215,6 +215,10 @@ pub fn run(args: Vec<String>) -> i32 {
     let host = Arc::new(Headless::default());
     let (core, git_rx) = Core::load(host.clone(), data);
     let _ = host.core.set(Arc::downgrade(&core));
+    // Its clients' project folders stay in its user's home, as its browser of folders (`browse`).
+    if let Some(home) = dirs::home_dir() {
+        let _ = core.folders_home.set(home);
+    }
     core.start(git_rx);
     let running = match remoteapi::server::start(core.clone(), remoteapi::table::entries(), config)
     {
