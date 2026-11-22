@@ -63,7 +63,9 @@ impl Host for Headless {
     fn tune_conversation(&self, _: &Settings, _: &dyn SecretStore) {}
 }
 
-const USAGE: &str = "usage: escouade-server [--web <folder>]   serve, on 127.0.0.1 at ESCOUADE_REMOTE_PORT\n\
+const USAGE: &str = "usage: escouade-server [--web <folder>] [--origin <url>]...\n\
+                     \x20        serve, on 127.0.0.1 at ESCOUADE_REMOTE_PORT, also for the pages of each origin\n\
+                     \x20        (https://name, a proxy's) besides the loopback's\n\
                      \x20      escouade-server pair                  a code to pair a browser\n\
                      \x20      escouade-server devices               the paired devices\n\
                      \x20      escouade-server devices revoke <id>   forget one, its connections closed";
@@ -73,15 +75,32 @@ pub fn run(args: Vec<String>) -> i32 {
     // First, before any thread: no child process may inherit the token.
     let remote = remoteapi::server::take_port_from_env();
     let args: Vec<&str> = args.iter().map(String::as_str).collect();
-    let web = match args.as_slice() {
-        [] => None,
-        ["--web", dir] => Some(PathBuf::from(dir)),
-        ["pair"] | ["devices"] | ["devices", "revoke", _] => return command(&args),
-        _ => {
-            eprintln!("{USAGE}");
-            return 2;
+    if let ["pair"] | ["devices"] | ["devices", "revoke", _] = args.as_slice() {
+        return command(&args);
+    }
+    let (mut web, mut origins, mut rest) = (None, Vec::new(), args.as_slice());
+    while !rest.is_empty() {
+        match rest {
+            ["--web", dir, tail @ ..] if web.is_none() => {
+                web = Some(PathBuf::from(dir));
+                rest = tail;
+            }
+            ["--origin", url, tail @ ..] => match remoteapi::server::parse_origin(url) {
+                Ok(origin) => {
+                    origins.push(origin);
+                    rest = tail;
+                }
+                Err(why) => {
+                    eprintln!("escouade-server: {why}");
+                    return 2;
+                }
+            },
+            _ => {
+                eprintln!("{USAGE}");
+                return 2;
+            }
         }
-    };
+    }
     let mut config = match remote {
         Ok(config) => config,
         Err(why) => {
@@ -96,6 +115,7 @@ pub fn run(args: Vec<String>) -> i32 {
         }
     }
     config.web = web;
+    config.origins = origins;
     // Caught before anything starts: a signal during the start-up still stops the core. Listened to once PATH is written,
     // which no other thread may read meanwhile: catching makes none.
     let caught = catch_stop();
@@ -109,6 +129,16 @@ pub fn run(args: Vec<String>) -> i32 {
         log::info!("migration: {note}");
     }
     log::info!("escouade-server {} starting", env!("CARGO_PKG_VERSION"));
+    for origin in &config.origins {
+        log::info!("remote API: the pages of {origin} accepted");
+        let host = origin.trim_start_matches("http://");
+        let local = ["127.0.0.1", "localhost", "[::1]"]
+            .iter()
+            .any(|l| host == *l || host.starts_with(&format!("{l}:")));
+        if origin.starts_with("http://") && !local {
+            log::warn!("remote API: {origin} is plain http: the devices' tokens cross the network unencrypted, use https");
+        }
+    }
     let data = paths::DataDir::new(paths::default_data_dir());
     config.devices = Some(Arc::new(Devices::open(data.root())));
     // The process groups of agents a killed run left behind, stopped before any agent starts.
@@ -232,10 +262,12 @@ impl Caught {
 fn command(args: &[&str]) -> i32 {
     let dir = paths::default_data_dir();
     let asked = match args {
-        ["pair"] => ask(&dir, "POST", "/admin/pair", "").map(|(port, answer)| {
+        ["pair"] => ask(&dir, "POST", "/admin/pair", "").map(|(control, answer)| {
             let code = answer["code"].as_str().unwrap_or_default();
             let minutes = answer["minutes"].as_u64().unwrap_or_default();
-            println!("Open http://127.0.0.1:{port}/ and enter the code:\n\n    {code}\n");
+            let local = format!("http://127.0.0.1:{}", control.port);
+            let address = control.origins.first().unwrap_or(&local);
+            println!("Open {address}/ and enter the code:\n\n    {code}\n");
             println!("It pairs one device, once, within {minutes} minutes.");
             println!("Five wrong codes cancel it: then run `escouade-server pair` again.");
         }),
@@ -281,14 +313,14 @@ fn command(args: &[&str]) -> i32 {
     }
 }
 
-/// `method path` with `body`, asked of the server of `dir` with its key: its port and its answer.
+/// `method path` with `body`, asked of the server of `dir` with its key: what it wrote of itself, and its answer.
 // shortcut: plain HTTP/1.1 by hand, the server answers one request and closes; a client crate if this grows.
 fn ask(
     dir: &std::path::Path,
     method: &str,
     path: &str,
     body: &str,
-) -> Result<(u16, serde_json::Value), String> {
+) -> Result<(Control, serde_json::Value), String> {
     use std::io::{Read, Write};
     let down = || {
         format!(
@@ -324,5 +356,5 @@ fn ask(
     }
     let json = serde_json::from_str(json)
         .map_err(|e| format!("the server on port {port} answered badly: {e}"))?;
-    Ok((port, json))
+    Ok((control, json))
 }

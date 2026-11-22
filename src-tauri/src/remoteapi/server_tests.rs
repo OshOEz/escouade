@@ -47,6 +47,7 @@ fn serve_table(loaded: &Loaded, entries: &'static [Entry]) -> Running {
         token: Some(TOKEN.into()),
         devices: Some(Arc::new(Devices::open(&loaded.dir))),
         web: None,
+        origins: Vec::new(),
     };
     start(loaded.core.clone(), entries, config).unwrap()
 }
@@ -672,10 +673,14 @@ fn a_foreign_host_is_refused() {
     let running = serve(&loaded);
     for foreign in [
         "Host: evil.example\r\n".to_string(),
-        format!(
-            "Host: 127.0.0.1:{}\r\n",
-            running.addr.port().wrapping_add(1)
-        ),
+        // Another local port is a tunnel's (below), but only as a plain port.
+        "Host: localhost\r\n".to_string(),
+        "Host: localhost:\r\n".to_string(),
+        "Host: 127.0.0.1:0\r\n".to_string(),
+        "Host: 127.0.0.1:+9000\r\n".to_string(),
+        "Host: 127.0.0.1:09000\r\n".to_string(),
+        "Host: 127.0.0.1:99999\r\n".to_string(),
+        "Host: evil.example:9000\r\n".to_string(),
         String::new(),
         // Given twice, whichever comes first.
         host(running.addr) + "Host: evil.example\r\n",
@@ -713,6 +718,7 @@ fn a_foreign_origin_is_refused() {
     let port = running.addr.port();
     for origin in [
         format!("Origin: http://127.0.0.1:{}\r\n", port.wrapping_add(1)),
+        format!("Origin: http://localhost:{}\r\n", port.wrapping_add(1)),
         format!("Origin: https://127.0.0.1:{port}\r\n"),
         format!("Origin: http://127.0.0.1:{port}/\r\n"),
         format!("Origin: http://evil.example:{port}\r\n"),
@@ -1152,6 +1158,18 @@ fn a_token_offered_twice_or_beside_a_wrong_bearer_is_refused() {
 
 /// The server of `loaded` with a web build: an `index.html`, an asset, and a secret beside the build.
 fn serve_web(loaded: &Loaded) -> Running {
+    let config = Config {
+        port: 0,
+        token: Some(TOKEN.into()),
+        devices: Some(Arc::new(Devices::open(&loaded.dir))),
+        web: Some(web_build(loaded)),
+        origins: Vec::new(),
+    };
+    start(loaded.core.clone(), table::entries(), config).unwrap()
+}
+
+/// That web build, written in `loaded`'s folder.
+fn web_build(loaded: &Loaded) -> PathBuf {
     let web = loaded.dir.join("web");
     std::fs::create_dir_all(web.join("assets")).unwrap();
     std::fs::write(
@@ -1161,13 +1179,7 @@ fn serve_web(loaded: &Loaded) -> Running {
     .unwrap();
     std::fs::write(web.join("assets/app-1234.js"), "console.log(1)").unwrap();
     std::fs::write(loaded.dir.join("Cargo.toml"), "secret").unwrap();
-    let config = Config {
-        port: 0,
-        token: Some(TOKEN.into()),
-        devices: Some(Arc::new(Devices::open(&loaded.dir))),
-        web: Some(web),
-    };
-    start(loaded.core.clone(), table::entries(), config).unwrap()
+    web
 }
 
 /// `GET target` as the server's page asks it.
@@ -1266,6 +1278,268 @@ fn a_file_asked_for_another_host_is_refused() {
     assert!(answer.starts_with("HTTP/1.1 403"), "{answer}");
 }
 
+const PROXY: &str = "https://escouade.example.com";
+
+/// The server of `serve_web`, behind a proxy at `PROXY` and at `http://box.lan:8080`, as `--origin` declares them.
+fn serve_declared(loaded: &Loaded) -> Running {
+    let config = Config {
+        port: 0,
+        token: Some(TOKEN.into()),
+        devices: Some(Arc::new(Devices::open(&loaded.dir))),
+        web: Some(web_build(loaded)),
+        origins: vec![
+            parse_origin("HTTPS://Escouade.Example.com:443/").unwrap(),
+            parse_origin("http://box.lan:8080").unwrap(),
+        ],
+    };
+    start(loaded.core.clone(), table::entries(), config).unwrap()
+}
+
+/// A request of `method target` with `headers`, the whole answer.
+fn request(addr: SocketAddr, method: &str, target: &str, headers: &str, body: &str) -> String {
+    http(
+        addr,
+        &format!(
+            "{method} {target} HTTP/1.1\r\n{headers}Content-Type: application/json\r\n\
+             Content-Length: {}\r\n\r\n{body}",
+            body.len()
+        ),
+    )
+}
+
+#[test]
+fn an_origin_is_declared_exactly() {
+    for (url, origin) in [
+        (
+            "https://escouade.example.com",
+            "https://escouade.example.com",
+        ),
+        (
+            "HTTPS://Escouade.Example.COM/",
+            "https://escouade.example.com",
+        ),
+        (
+            "https://escouade.example.com:443",
+            "https://escouade.example.com",
+        ),
+        ("http://box.lan:80", "http://box.lan"),
+        ("http://box.lan:8080", "http://box.lan:8080"),
+        ("https://[2001:db8::1]:8443", "https://[2001:db8::1]:8443"),
+    ] {
+        assert_eq!(parse_origin(url).as_deref(), Ok(origin), "{url}");
+    }
+    for url in [
+        "",
+        "escouade.example.com",
+        "ftp://escouade.example.com",
+        "ws://escouade.example.com",
+        "https://",
+        "https://user@escouade.example.com",
+        "https://user:pass@escouade.example.com",
+        "https://escouade.example.com/escouade",
+        "https://escouade.example.com/?a=1",
+        "https://escouade.example.com#top",
+        "https://escouade.example.com:0",
+        "https://escouade.example.com:99999",
+        "https://escouade.example.com\u{0}",
+        "https://*.example.com",
+    ] {
+        assert!(parse_origin(url).is_err(), "{url:?}");
+    }
+    // A name that is not ASCII: the message says how to write it.
+    let why = parse_origin("https://équipe.example").unwrap_err();
+    assert!(why.contains("punycode"), "{why}");
+}
+
+#[test]
+fn a_declared_origin_is_let_in() {
+    let loaded = load("remote-server-declared");
+    let running = serve_declared(&loaded);
+    let port = running.addr.port();
+    for (host, origin) in [
+        // The proxy that passes the browser's `Host`, or rewrites it to the server's.
+        ("escouade.example.com".to_string(), PROXY),
+        ("Escouade.Example.com".to_string(), PROXY),
+        (format!("127.0.0.1:{port}"), PROXY),
+        ("box.lan:8080".to_string(), "http://box.lan:8080"),
+    ] {
+        let headers = format!("Host: {host}\r\nOrigin: {origin}\r\n") + &bearer(TOKEN);
+        let line = handshake(running.addr, &headers);
+        assert!(line.contains(" 101 "), "{host} {origin}: {line}");
+    }
+    // The page, whose own WebSocket goes back the way it came, and the pairing through the proxy.
+    let page = request(
+        running.addr,
+        "GET",
+        "/",
+        "Host: escouade.example.com\r\n",
+        "",
+    );
+    assert!(page.starts_with("HTTP/1.1 200"), "{page}");
+    let csp = header_of(&page, "content-security-policy").unwrap();
+    assert!(
+        csp.contains("connect-src 'self' wss://escouade.example.com ws://box.lan:8080;"),
+        "{csp}"
+    );
+    let page = request(running.addr, "GET", "/", "Host: box.lan:8080\r\n", "");
+    let csp = header_of(&page, "content-security-policy").unwrap();
+    assert!(
+        csp.contains("connect-src 'self' ws://box.lan:8080 wss://escouade.example.com;"),
+        "{csp}"
+    );
+    // The proxy that rewrites `Host` to the server's: the page of the origin still opens its `wss`.
+    let page = request(
+        running.addr,
+        "GET",
+        "/",
+        &format!("Host: 127.0.0.1:{port}\r\n"),
+        "",
+    );
+    let csp = header_of(&page, "content-security-policy").unwrap();
+    assert!(csp.contains(" wss://escouade.example.com"), "{csp}");
+    let code = pair_code(&loaded, running.addr);
+    let body = json!({ "code": code, "name": "portable" }).to_string();
+    let headers = format!("Host: escouade.example.com\r\nOrigin: {PROXY}\r\n");
+    let answer = request(running.addr, "POST", "/pair", &headers, &body);
+    assert!(answer.starts_with("HTTP/1.1 200"), "{answer}");
+    // Its own origins are still the server's.
+    let line = handshake(running.addr, &page_handshake(running.addr, TOKEN));
+    assert!(line.contains(" 101 "), "{line}");
+}
+
+#[test]
+fn a_neighbour_of_a_declared_origin_is_refused() {
+    let loaded = load("remote-server-neighbour");
+    let running = serve_declared(&loaded);
+    let port = running.addr.port();
+    for origin in [
+        "http://escouade.example.com",
+        "https://escouade.example.com:8443",
+        "https://escouade.example.com:443",
+        "https://escouade.example.com/",
+        "https://sub.escouade.example.com",
+        "https://escouade.example.com.evil.example",
+        "https://evilescouade.example.com",
+        "https://escouade.example",
+        "https://box.lan:8080",
+        "http://box.lan",
+        "http://box.lan:8081",
+    ] {
+        let headers = host(running.addr) + &format!("Origin: {origin}\r\n") + &bearer(TOKEN);
+        let line = handshake(running.addr, &headers);
+        assert!(line.contains(" 403 "), "{origin}: {line}");
+    }
+    for host in [
+        "escouade.example.com:8443",
+        "escouade.example.com:443",
+        "sub.escouade.example.com",
+        "escouade.example.com.evil.example",
+        "escouade.example",
+        "box.lan",
+        "box.lan:8081",
+    ] {
+        let line = handshake(running.addr, &format!("Host: {host}\r\n{}", bearer(TOKEN)));
+        assert!(line.contains(" 403 "), "{host}: {line}");
+        let page = request(running.addr, "GET", "/", &format!("Host: {host}\r\n"), "");
+        assert!(page.starts_with("HTTP/1.1 403"), "{host}: {page}");
+    }
+    // A declared host, but a page of another origin.
+    let headers = format!(
+        "Host: escouade.example.com\r\nOrigin: http://127.0.0.1:{}\r\n",
+        port + 1
+    );
+    let line = handshake(running.addr, &(headers + &bearer(TOKEN)));
+    assert!(line.contains(" 403 "), "{line}");
+}
+
+#[test]
+fn the_forwarded_headers_are_not_believed() {
+    let loaded = load("remote-server-forwarded");
+    let running = serve_declared(&loaded);
+    let forwarded = |host: &str, proto: &str, from: &str| {
+        format!("X-Forwarded-Host: {host}\r\nX-Forwarded-Proto: {proto}\r\nX-Forwarded-For: {from}\r\nForwarded: for={from};host={host};proto={proto}\r\n")
+    };
+    // They do not let in what `Host` and `Origin` refuse…
+    for headers in [
+        "Host: evil.example\r\n".to_string()
+            + &forwarded("escouade.example.com", "https", "127.0.0.1"),
+        host(running.addr)
+            + "Origin: https://evil.example\r\n"
+            + &forwarded("evil.example", "https", "127.0.0.1"),
+        host(running.addr)
+            + "Origin: http://escouade.example.com\r\n"
+            + &forwarded("escouade.example.com", "https", "127.0.0.1"),
+    ] {
+        let line = handshake(running.addr, &(headers.clone() + &bearer(TOKEN)));
+        assert!(line.contains(" 403 "), "{headers}: {line}");
+    }
+    // …nor shut out what they let in.
+    let headers = format!("Host: escouade.example.com\r\nOrigin: {PROXY}\r\n")
+        + &forwarded("evil.example", "http", "203.0.113.9");
+    let line = handshake(running.addr, &(headers + &bearer(TOKEN)));
+    assert!(line.contains(" 101 "), "{line}");
+    let wrong = TOKEN.replace('0', "1");
+    let headers = format!("Host: escouade.example.com\r\nOrigin: {PROXY}\r\n")
+        + &forwarded("127.0.0.1", "http", "127.0.0.1");
+    let line = handshake(running.addr, &(headers + &bearer(&wrong)));
+    assert!(line.contains(" 401 "), "{line}");
+}
+
+#[test]
+fn a_tunnel_on_another_local_port_is_let_in_with_a_token() {
+    let loaded = load("remote-server-tunnel");
+    let running = serve_web(&loaded);
+    // `ssh -L 9000:127.0.0.1:<port>`: the page is http://localhost:9000.
+    let tunnel = if running.addr.port() == 9000 {
+        9001
+    } else {
+        9000
+    };
+    for name in ["localhost", "127.0.0.1", "LocalHost"] {
+        let host = format!("Host: {name}:{tunnel}\r\n");
+        let origin = format!("Origin: http://{}:{tunnel}\r\n", name.to_ascii_lowercase());
+        let line = handshake(running.addr, &(host.clone() + &origin + &bearer(TOKEN)));
+        assert!(line.contains(" 101 "), "{name}: {line}");
+        let line = handshake(running.addr, &(host.clone() + &bearer(TOKEN)));
+        assert!(line.contains(" 101 "), "{name}: {line}");
+        // Its token is what lets it in.
+        let line = handshake(running.addr, &(host.clone() + &origin));
+        assert!(line.contains(" 401 "), "{name}: {line}");
+        let line = handshake(
+            running.addr,
+            &(host + &origin + &bearer(&TOKEN.replace('0', "1"))),
+        );
+        assert!(line.contains(" 401 "), "{name}: {line}");
+    }
+    // Another local page, through the tunnel or not, stays out.
+    for headers in [
+        format!("Host: localhost:{tunnel}\r\nOrigin: http://localhost:3000\r\n"),
+        format!("Host: localhost:{tunnel}\r\nOrigin: http://127.0.0.1:{tunnel}\r\n"),
+        format!("Host: localhost:{tunnel}\r\nOrigin: https://localhost:{tunnel}\r\n"),
+        host(running.addr) + &format!("Origin: http://localhost:{tunnel}\r\n"),
+        format!("Host: localhost:{tunnel}\r\nOrigin: null\r\n"),
+    ] {
+        let line = handshake(running.addr, &(headers.clone() + &bearer(TOKEN)));
+        assert!(line.contains(" 403 "), "{headers}: {line}");
+    }
+    // The page loads and pairs through the tunnel.
+    let host = format!("Host: localhost:{tunnel}\r\n");
+    let page = request(running.addr, "GET", "/", &host, "");
+    assert!(page.starts_with("HTTP/1.1 200"), "{page}");
+    let csp = header_of(&page, "content-security-policy").unwrap();
+    assert!(csp.contains(&format!("ws://localhost:{tunnel};")), "{csp}");
+    let code = pair_code(&loaded, running.addr);
+    let body = json!({ "code": code, "name": "portable" }).to_string();
+    let headers = host.clone() + &format!("Origin: http://localhost:{tunnel}\r\n");
+    let answer = request(running.addr, "POST", "/pair", &headers, &body);
+    assert!(answer.starts_with("HTTP/1.1 200"), "{answer}");
+    // Without `Origin`, no browser's page: a program of the machine, which reached the port anyway, may pair.
+    let code = pair_code(&loaded, running.addr);
+    let body = json!({ "code": code, "name": "script" }).to_string();
+    let answer = request(running.addr, "POST", "/pair", &host, &body);
+    assert!(answer.starts_with("HTTP/1.1 200"), "{answer}");
+}
+
 #[test]
 fn a_command_that_panics_on_a_lane_is_answered() {
     let loaded = load("remote-server-panics");
@@ -1308,6 +1582,7 @@ fn the_calls_of_all_connections_stay_under_the_servers_cap() {
         token: Some(TOKEN.into()),
         devices: Some(Arc::new(Devices::open(&loaded.dir))),
         web: None,
+        origins: Vec::new(),
     };
     // Two at once across the server, three asked on two connections.
     let running = start_with(loaded.core.clone(), SLOW_TABLE, config, 2).unwrap();
@@ -1594,6 +1869,7 @@ fn a_client_cut_while_an_attach_waits_for_room_frees_it_at_once() {
         token: Some(TOKEN.into()),
         devices: Some(Arc::new(Devices::open(&loaded.dir))),
         web: None,
+        origins: Vec::new(),
     };
     // One call at a time across the server: the attach that waits holds it.
     let running = start_with(loaded.core.clone(), table::entries(), config, 1).unwrap();

@@ -109,6 +109,8 @@ pub struct Config {
     pub web: Option<PathBuf>,
     /// The paired devices, `escouade-server`'s.
     pub devices: Option<Arc<Devices>>,
+    /// The origins declared by `--origin`, as `parse_origin` gives them.
+    pub origins: Vec<String>,
 }
 
 /// What `escouade-server pair` and `devices` read to reach the server that runs: its port, and the key of `/admin/…`.
@@ -116,6 +118,9 @@ pub struct Config {
 pub struct Control {
     pub port: u16,
     pub key: String,
+    /// The origins declared, the first of which `pair` gives as the address to open.
+    #[serde(default)]
+    pub origins: Vec<String>,
 }
 
 impl std::fmt::Debug for Config {
@@ -147,6 +152,7 @@ pub fn take_port_from_env() -> Result<Config, String> {
         token: token.as_deref().map(parse_token).transpose()?,
         web: None,
         devices: None,
+        origins: Vec::new(),
     })
 }
 
@@ -169,6 +175,59 @@ fn take_vars() -> (Option<String>, Option<String>) {
 fn parse_port(port: &str) -> Result<u16, String> {
     let port = port.trim().parse::<u16>().ok().filter(|p| *p != 0);
     port.ok_or(format!("{PORT_VAR} is not a port from 1 to 65535"))
+}
+
+/// `--origin`'s URL as a browser writes the `Origin` of its pages: `http` or `https`, a host, its port unless it is the
+/// scheme's, in lower case; no user, path, query or fragment. `Err` says why.
+pub fn parse_origin(url: &str) -> Result<String, String> {
+    let wrong = || {
+        format!("--origin {url:?} is not an origin, such as https://escouade.example.com (a name in punycode, xn--…, if it is not ASCII)")
+    };
+    let uri = url
+        .parse::<hyper::Uri>()
+        .ok()
+        .filter(|_| !url.contains(['@', '?', '#']))
+        .filter(|u| matches!(u.path(), "" | "/"))
+        .ok_or_else(wrong)?;
+    let (scheme, default) = match uri.scheme_str().map(str::to_ascii_lowercase).as_deref() {
+        Some("http") => ("http", 80),
+        Some("https") => ("https", 443),
+        _ => return Err(wrong()),
+    };
+    let authority = uri.authority().ok_or_else(wrong)?;
+    let host = authority.host().to_ascii_lowercase();
+    let name = host
+        .bytes()
+        .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'.');
+    let ipv6 = host.starts_with('[')
+        && host.ends_with(']')
+        && host[1..host.len() - 1]
+            .bytes()
+            .all(|b| b.is_ascii_hexdigit() || b == b':' || b == b'.');
+    if host.is_empty() || !(name || ipv6) {
+        return Err(wrong());
+    }
+    // The port as written: `port_u16` would take one out of range for none.
+    let port = match authority.as_str().strip_prefix(authority.host()) {
+        Some("") => default,
+        Some(port) => port
+            .strip_prefix(':')
+            .filter(|p| p.bytes().all(|b| b.is_ascii_digit()))
+            .and_then(|p| p.parse::<u16>().ok())
+            .filter(|p| *p != 0)
+            .ok_or_else(wrong)?,
+        None => return Err(wrong()),
+    };
+    if port == default {
+        Ok(format!("{scheme}://{host}"))
+    } else {
+        Ok(format!("{scheme}://{host}:{port}"))
+    }
+}
+
+/// `origin`'s host and port, as `Host` names them.
+fn authority(origin: &str) -> &str {
+    origin.split_once("://").map_or(origin, |(_, a)| a)
 }
 
 /// A token of 32 characters or more.
@@ -195,6 +254,7 @@ impl Config {
             token: Some(parse_token(token)?),
             web: None,
             devices: None,
+            origins: Vec::new(),
         }))
     }
 }
@@ -263,6 +323,7 @@ fn start_with(
         let control = Control {
             port: addr.port(),
             key: key.clone(),
+            origins: config.origins.clone(),
         };
         let bytes = serde_json::to_vec(&control).expect("plain data");
         let path = devices.dir().join(CONTROL);
@@ -279,6 +340,7 @@ fn start_with(
         admin,
         conns: Mutex::default(),
         web: config.web,
+        origins: config.origins,
         calls: Arc::new(Semaphore::new(calls)),
     });
     let (stop, stopped) = watch::channel(false);
@@ -304,6 +366,8 @@ struct Server {
     conns: Mutex<Vec<(String, Weak<Conn>)>>,
     /// The web build's folder.
     web: Option<PathBuf>,
+    /// The origins declared by `--origin`, besides the loopback's.
+    origins: Vec<String>,
     /// The calls under way, all connections together.
     calls: Arc<Semaphore>,
 }
@@ -339,31 +403,45 @@ impl Server {
         }
     }
 
-    /// Whether `headers` name this server: one `Host`, its own, and no `Origin` but its own page's.
+    /// Whether `headers` name this server: one `Host`, its own, and no `Origin` but its own page's. Its own: the loopback
+    /// on its port or, for `ssh -L`, on another (the token is asked all the same), and the origins declared. No
+    /// `X-Forwarded-*` is read: anyone can write one.
     fn mine(&self, uri: &hyper::Uri, headers: &HeaderMap) -> Result<(), StatusCode> {
         let port = self.port;
-        let mine = |host: &str| {
-            [format!("127.0.0.1:{port}"), format!("localhost:{port}")]
-                .iter()
-                .any(|h| h.eq_ignore_ascii_case(host))
+        let loopback = |host: &str| {
+            host.rsplit_once(':').is_some_and(|(name, p)| {
+                ["127.0.0.1", "localhost"]
+                    .iter()
+                    .any(|n| n.eq_ignore_ascii_case(name))
+                    && p.parse::<u16>().is_ok_and(|n| n != 0 && n.to_string() == p)
+            })
         };
+        let declared = |host: &str| {
+            self.origins
+                .iter()
+                .any(|o| authority(o).eq_ignore_ascii_case(host))
+        };
+        let mine = |host: &str| loopback(host) || declared(host);
         // A header given twice could be read differently by another reader: refused.
         let once = |name| headers.get_all(name).iter().count() == 1;
         let host = headers
             .get(header::HOST)
             .filter(|_| once(header::HOST))
             .and_then(|h| h.to_str().ok());
-        let authority = uri.authority().map(|a| a.as_str());
-        if !host.is_some_and(mine) || authority.is_some_and(|a| !mine(a)) {
+        let target = uri.authority().map(|a| a.as_str());
+        if !host.is_some_and(mine) || target.is_some_and(|a| !mine(a)) {
             return Err(StatusCode::FORBIDDEN);
         }
-        if headers.contains_key(header::ORIGIN) {
+        if let (true, Some(host)) = (headers.contains_key(header::ORIGIN), host) {
+            // A tunnel's page is at the loopback's address it names; another port's page is another site.
+            let page = loopback(host).then(|| format!("http://{}", host.to_ascii_lowercase()));
             let own = [
                 format!("http://127.0.0.1:{port}"),
                 format!("http://localhost:{port}"),
             ];
+            let mut own = own.iter().chain(&self.origins).chain(&page);
             let origin = headers.get(header::ORIGIN).filter(|_| once(header::ORIGIN));
-            if !origin.is_some_and(|o| own.iter().any(|own| o.as_bytes() == own.as_bytes())) {
+            if !origin.is_some_and(|o| own.any(|own| o.as_bytes() == own.as_bytes())) {
                 return Err(StatusCode::FORBIDDEN);
             }
         }
@@ -573,9 +651,24 @@ impl Server {
             .get(header::HOST)
             .and_then(|h| h.to_str().ok())
             .unwrap_or_default();
+        // Behind a proxy in `https`, the WebSocket is `wss`.
+        let secure = self
+            .origins
+            .iter()
+            .any(|o| o.starts_with("https://") && authority(o).eq_ignore_ascii_case(host));
+        let ws = if secure { "wss" } else { "ws" };
+        // Each declared origin's too, whatever `Host` says: a proxy that rewrites it to 127.0.0.1 still serves them.
+        let own = format!("{ws}://{host}");
+        let declared: String = self
+            .origins
+            .iter()
+            .map(|o| format!("ws{}", o.strip_prefix("http").unwrap_or(o)))
+            .filter(|o| !o.eq_ignore_ascii_case(&own))
+            .map(|o| format!(" {o}"))
+            .collect();
         let csp = format!(
             "default-src 'self'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; \
-             font-src 'self' data:; script-src 'self' 'wasm-unsafe-eval'; connect-src 'self' ws://{host}; \
+             font-src 'self' data:; script-src 'self' 'wasm-unsafe-eval'; connect-src 'self' {own}{declared}; \
              frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
         );
         hyper::Response::builder()

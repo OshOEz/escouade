@@ -67,6 +67,30 @@ fn it_will_not_start_without_a_port() {
     assert_eq!(code, Some(2));
 }
 
+#[test]
+fn it_will_not_start_with_an_origin_that_is_not_one() {
+    for origin in [
+        "escouade.example.com",
+        "https://escouade.example.com/escouade",
+        "ftp://box.lan",
+    ] {
+        let dir = folder("bad-origin");
+        let port = free_port();
+        let mut child = program(&dir, &[("ESCOUADE_REMOTE_PORT", port.to_string())])
+            .args(["--origin", origin])
+            .spawn()
+            .unwrap();
+        let code = exit_within(&mut child, Duration::from_secs(30));
+        assert_eq!(code, Some(2), "{origin}");
+    }
+    let dir = folder("no-origin");
+    let mut child = program(&dir, &[("ESCOUADE_REMOTE_PORT", free_port().to_string())])
+        .arg("--origin")
+        .spawn()
+        .unwrap();
+    assert_eq!(exit_within(&mut child, Duration::from_secs(30)), Some(2));
+}
+
 /// `escouade-server <args>` beside the server of `dir`: its exit code and what it printed.
 fn command(dir: &Path, args: &[&str]) -> (Option<i32>, String) {
     let out = program(dir, &[])
@@ -96,8 +120,10 @@ fn a_device_paired_by_the_command_is_listed_then_revoked() {
     let (code, out) = command(&dir, &["pair"]);
     assert_eq!(code, Some(1), "no server runs yet: {out}");
     let port = free_port();
-    // No token: the devices alone.
+    // No token: the devices alone; behind a proxy, declared.
     let mut child = program(&dir, &[("ESCOUADE_REMOTE_PORT", port.to_string())])
+        .args(["--origin", "HTTPS://Escouade.Example.com/"])
+        .args(["--origin", "http://box.lan:8080"])
         .spawn()
         .unwrap();
     let runtime = tokio::runtime::Builder::new_current_thread()
@@ -116,7 +142,9 @@ fn a_device_paired_by_the_command_is_listed_then_revoked() {
     });
     let (code, out) = command(&dir, &["pair"]);
     assert_eq!(code, Some(0), "{out}");
-    assert!(out.contains(&format!("http://127.0.0.1:{port}/")), "{out}");
+    // The address of the first origin declared.
+    assert!(out.contains("https://escouade.example.com/"), "{out}");
+    assert!(!out.contains("box.lan"), "{out}");
     assert!(
         out.contains("pair` again"),
         "the five tries are not told: {out}"
