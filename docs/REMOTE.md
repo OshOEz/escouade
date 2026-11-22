@@ -184,6 +184,7 @@ escouade.exemple.fr {
 - Une machine à un seul utilisateur pour `--port` (la socket ferme ce cas) ; un port local réservé au tunnel.
 - Un dossier de projet hors du dossier personnel de l'utilisateur du service est refusé, même tapé à la main : déplacez le dépôt dans ce dossier.
 - Un fichier téléchargé passe en entier par la mémoire de l'onglet : au-delà de quelques Go, prenez-le par `scp`.
+- Le relais d'un terminal vers un client distant n'est testé que sous Unix : sous Windows, une session de terminal (ConPTY) ne rendait aucune trame dans les tests de la CI, et le mode serveur vise Linux ; l'API distante de l'app de bureau sous Windows reste à essayer à la main.
 - Un client dont la connexion prend moins de 64 Kio en 20 s est coupé, puis se reconnecte : sur un lien de moins de 26 kbit/s environ, avec des terminaux qui débitent, il est coupé en boucle.
 - Un lancement ou une vue d'agent ouverts pendant une coupure ne se reprennent pas d'eux-mêmes : « Reconnecté : recharger cette vue » (si l'interface de l'agent a redémarré entre-temps, la vue dit de cliquer « Relancer »).
 - Un client trop lent pour ses terminaux les reprend depuis un écran effacé et le tampon du terminal, qui peut commencer au milieu d'un écran : un programme plein écran lancé dans un shell (vim, htop) peut y perdre ses modes plus anciens que le tampon (écran alternatif, touches du curseur, souris) jusqu'à son prochain redessin.
