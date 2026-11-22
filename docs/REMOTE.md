@@ -88,7 +88,7 @@ C'est faisable, et c'est la même fondation que le téléphone. Rien n'est prêt
   - `escouade-server install` écrit le service systemd de l'utilisateur (`~/.config/systemd/user/escouade-server.service`) et dit quoi lancer ensuite (`systemctl --user enable --now escouade-server`, `loginctl enable-linger`) ; voir « Installer le service ».
   - Les données vont dans `~/.escouade`, comme aujourd'hui.
   - `escouade-server pair` affiche un code d'appairage pour un nouvel appareil.
-- **Sur le PC.**
+- **Sur le PC** (à venir ; aujourd'hui, un navigateur par le tunnel : voir « Sur un VPS, de bout en bout »).
   - Escouade › « Se connecter à un serveur » : l'hôte SSH (pris dans `~/.ssh/config` s'il y est), puis le code d'appairage la première fois.
   - La barre de titre dit sur quelle machine on est. On repasse en local d'un clic.
 - **H24.** Fermer le client, éteindre le PC ou couper le réseau ne touche à aucun agent : ils tournent sur le serveur, et le client n'en est qu'une vue.
@@ -131,6 +131,70 @@ escouade-server pair
 - Sur SIGTERM (`systemctl --user stop`), le serveur arrête ses agents comme l'app quand on la quitte, puis sort (code 0) ; `KillMode=mixed` tue ce qui resterait.
 - `escouade-server uninstall` retire l'unité ; tant que le service est activé, il refuse et dit de lancer d'abord `systemctl --user disable --now escouade-server`.
 - Les journaux : `journalctl --user -u escouade-server` (ce qu'il écrit sur sa sortie d'erreur) et `app.log` du dossier de données.
+
+### Sur un VPS, de bout en bout
+
+Aucune release ne livre encore `escouade-server` : il se construit depuis les sources, pour Linux x64 ou arm64 (sur la machine elle-même, ou une machine de la même architecture et d'une glibc pas plus récente). Ni GTK, ni WebKit, ni D-Bus : `ldd` ne montre que la libc et ses voisines, libm et libgcc_s (la CI le vérifie).
+
+Il faut : rustup (il prend la version de `rust-toolchain.toml`) et sa cible `wasm32-wasip1` (`rustup target add wasm32-wasip1`), Node 22, git, un compilateur C.
+
+```
+npm ci && npm run build:web                      # la page : dist-web/
+sh scripts/escouade-js.sh                        # le moteur des plugins run.js, embarqué dans le binaire
+npx --yes tsx@4.23.15 store/scripts/seed.ts fetch   # la graine des plugins, signée, depuis le store
+cd src-tauri && cargo build --release --locked --no-default-features --features server --bin escouade-server
+```
+
+Sans `escouade-js.sh`, le serveur ne fait tourner aucun plugin `run.js` (et le dit) ; sans la graine, il n'a rien à installer « depuis la graine » : le store et les dépôts git restent. `scripts/seed-dev.sh` fait une graine non signée, que seul un build de debug prend.
+
+1. **Copier** `src-tauri/target/release/escouade-server` et le dossier `dist-web/` sur le serveur, par exemple dans `~/.local/bin/` et `~/.local/share/escouade-web/`. `~/.local/bin` n'entre dans le `PATH` qu'à la session suivante, s'il n'existait pas : rouvrez-la, ou tapez le chemin entier (`~/.local/bin/escouade-server`).
+2. **Installer les harness** sur le serveur, en tant que l'utilisateur du service (Claude Code par son installeur, `git`), comme sur un poste.
+3. **Poser le service**, connecté par `ssh` en tant que cet utilisateur (jamais root ; ni `su` ni `sudo -u`, qui ne donnent pas le bus de session de `systemctl --user`) :
+
+   ```
+   escouade-server install --web ~/.local/share/escouade-web
+   systemctl --user daemon-reload
+   systemctl --user enable --now escouade-server
+   loginctl enable-linger
+   ```
+
+   Si polkit refuse `enable-linger` depuis une session ssh (Debian, Ubuntu : il veut un administrateur), `sudo loginctl enable-linger <utilisateur>`.
+
+   Sans `--socket` ni `--port`, il écoute sur `/run/user/<uid>/escouade/server.sock` (voir « Installer le service »).
+4. **Ouvrir le tunnel**, depuis le poste : `ssh -N -L 8765:/run/user/<uid>/escouade/server.sock <hôte>` (OpenSSH 6.7 et plus, des deux côtés ; un sshd durci par `AllowStreamLocalForwarding no` ou `DisableForwarding yes` refuse ce `-L` vers une socket). Gardez ce port local à Escouade seul (voir « Le tunnel »).
+5. **Appairer le navigateur** : sur le serveur, `escouade-server pair` donne la ligne `ssh` et un code ; ouvrez `http://127.0.0.1:8765/` (ou `http://localhost:8765/` : ce sont deux origines, le navigateur appairé sur l'une ne l'est pas sur l'autre), tapez le code et le nom de l'appareil. `escouade-server devices` liste les appareils, `escouade-server devices revoke <id>` en coupe un sur-le-champ.
+6. **Ajouter un compte** : Réglages › Comptes et harness › « Ajouter un compte Claude Code… ». Claude Code démarre dans le terminal de la page, sur le serveur : il n'y trouve aucun navigateur et affiche une adresse, longue, sur plusieurs lignes ; un clic l'ouvre dans le navigateur du poste ; la page de connexion donne un code, à coller dans ce terminal. Seul ce chemin (adresse cliquée, code collé) est joué par les tests, avec un faux `claude` ; la vraie connexion de chaque harness sans navigateur sur le serveur reste à essayer (voir « Tâches »).
+7. **Un projet** : « Nouveau projet » › « Parcourir… » montre les dossiers du serveur, sous le dossier personnel de l'utilisateur du service ; « Cloner ici » y clone un dépôt.
+
+**Derrière un proxy HTTPS** (Caddy, nginx), au lieu du tunnel : le service écoute alors sur un port (`install --port 8765 --origin https://escouade.exemple.fr --web …`), parce que le proxy tourne sous un autre compte et ne peut pas joindre une socket en `0700`. Sur une machine partagée, c'est le cas « 127.0.0.1 suppose une machine à un seul utilisateur ». Le proxy passe le `Host` du navigateur (Caddy le fait seul ; nginx : `proxy_set_header Host $host`, et `Upgrade`/`Connection` pour la WebSocket), jamais `nom:443`. Avec Caddy :
+
+```
+escouade.exemple.fr {
+	reverse_proxy 127.0.0.1:8765
+}
+```
+
+`escouade-server pair` donne alors l'adresse `https://escouade.exemple.fr/`. Une origine `https` permet aussi les notifications du navigateur, comme `localhost`.
+
+**Ce qui vit sur le serveur.** Tout l'état d'Escouade (`~/.escouade`, ou `ESCOUADE_DATA_DIR`) : projets, conversations, jetons des appareils (hachés, `devices.json`), et **les identifiants des comptes** : la connexion de Claude Code de chaque compte ajouté dans `~/.escouade/claude/<compte>/.credentials.json`, celle du compte de la machine dans `~/.claude/`, en clair dans un fichier lisible du seul utilisateur (aucun trousseau sur un serveur). Qui lit le disque, une sauvegarde ou la session SSH de cet utilisateur a ces comptes. Les dépôts clonés, les worktrees des agents et les fichiers joints (`attachments/`, `0700`) y sont aussi. Le navigateur ne garde que le jeton de l'appareil, mais ce jeton vaut un shell sur le serveur, sous l'utilisateur du service, avec ses dépôts et ses comptes : un appareil perdu ou un profil de navigateur copié se révoque par `escouade-server devices revoke <id>`.
+
+**Ce qui manque encore.** La voix (micro et lecture) dans le navigateur ; la mise à jour du serveur (on remplace le binaire et `dist-web/`, puis `systemctl --user restart escouade-server`, qui coupe les tours en cours) ; la mise en page mobile et l'app mobile ; le client de bureau qui se connecte à un serveur ; le relais des ports des serveurs de test des agents ; « Depuis un dossier… » des plugins ; une release qui livre le binaire.
+
+**Limites connues.**
+- Une machine à un seul utilisateur pour `--port` (la socket ferme ce cas) ; un port local réservé au tunnel.
+- Un dossier de projet hors du dossier personnel de l'utilisateur du service est refusé, même tapé à la main : déplacez le dépôt dans ce dossier.
+- Un fichier téléchargé passe en entier par la mémoire de l'onglet : au-delà de quelques Go, prenez-le par `scp`.
+- Un client dont la connexion prend moins de 64 Kio en 20 s est coupé, puis se reconnecte : sur un lien de moins de 26 kbit/s environ, avec des terminaux qui débitent, il est coupé en boucle.
+- Un lancement ou une vue d'agent ouverts pendant une coupure ne se reprennent pas d'eux-mêmes : « Reconnecté : recharger cette vue » (si l'interface de l'agent a redémarré entre-temps, la vue dit de cliquer « Relancer »).
+- Un client trop lent pour ses terminaux les reprend depuis un écran effacé et le tampon du terminal, qui peut commencer au milieu d'un écran : un programme plein écran lancé dans un shell (vim, htop) peut y perdre ses modes plus anciens que le tampon (écran alternatif, touches du curseur, souris) jusqu'à son prochain redessin.
+- L'état de l'interface est partagé entre les appareils (le dernier qui écrit gagne).
+- L'app de bureau ne prend pas le verrou du dossier de données : ne la lancez pas sur celui d'un serveur qui tourne.
+- Les routes `/files/` existent aussi sur l'API distante de l'app de bureau, qui n'écoute que dans un build de debug (voir « Tâches »).
+- Le serveur tient 16 connexions à la fois, appairées ou non. Une connexion lente (le corps d'un `POST /pair` envoyé au compte-gouttes, derrière un proxy qui ne le met pas en tampon) ou morte sans l'avoir dit (un téléphone qui change de réseau) garde sa place : jusqu'à 60 s pour la première, sans délai pour la seconde tant que rien ne lui est envoyé. Les 16 prises, plus personne n'entre, le propriétaire compris, jusqu'à ce qu'elles tombent. Rien n'est lu ni perdu ; un délai court sur ces lectures et une coupure après quelques battements sans réponse restent à faire.
+- Une page chargée pendant que le serveur redémarre reste sur son erreur : rechargez-la à la main.
+- Dans un navigateur, le fichier joint à une demande « À toi » qui n'est ni une image, ni un PDF, ni du Markdown ne s'ouvre pas et ne se télécharge pas.
+- Quelques erreurs du transport du navigateur ne sont dites qu'en anglais (connexion perdue, appel trop gros pour le serveur, envoi refusé).
+- **Les agents tournent sous le compte du serveur.** Ils peuvent lire son dossier de données, donc la clé d'administration (`server.json`), demander un code et s'appairer comme un appareil : toute l'API, les terminaux hors de leur périmètre compris. C'est ce qu'un agent pouvait déjà en écrivant dans ce dossier (`settings.json`) ; le mode serveur n'ajoute pas de barrière entre un agent et le cœur qui le lance.
 
 ### Ce qui change de machine
 
@@ -395,13 +459,13 @@ Demandé le 2026-11-14 : « avoir plusieurs serveurs Escouade pilotés par un se
   - Toute requête doit nommer le serveur dans `Host` : `127.0.0.1` ou `localhost` sur son port, ou sur un autre port de la boucle locale, celui d'un `ssh -L <port local>:127.0.0.1:<port du serveur>` (le jeton reste demandé). Une `Origin` n'est acceptée que si c'est exactement `http://127.0.0.1:<port>`, `http://localhost:<port>`, ou la page de la boucle locale que nomme `Host` (`http://localhost:<port local>` derrière le tunnel) : la page d'un autre port local reste dehors.
   - Derrière un proxy de l'utilisateur (HTTPS), `escouade-server --origin https://nom` (répétable) ajoute cette origine exacte (schéma, hôte, port) pour `Host` et `Origin` ; son voisin (autre schéma, autre port, sous-domaine, suffixe) est refusé. Le proxy peut passer le `Host` du navigateur (nginx : `$host`) ou le réécrire en `127.0.0.1:<port>`, mais jamais avec le port par défaut écrit (`nom:443`, celui de `$host:$server_port`) : il ne nomme pas l'origine déclarée, refusé (403). La CSP de la page permet la WebSocket (`wss://` ou `ws://`) de chaque origine déclarée, quel que soit `Host`. Une origine `http` hors de la boucle locale est acceptée, mais le journal prévient au démarrage : le jeton passerait en clair sur le réseau. Aucun `X-Forwarded-*` ni `Forwarded` n'est lu : n'importe qui peut en écrire un. La page servie sous une origine `https` ouvre sa WebSocket en `wss`. `escouade-server pair` donne l'adresse de la première origine déclarée. Le serveur n'écoute que sur `127.0.0.1` ou sur sa socket. Limite : le verrou du dossier de données ne tient pas l'app de bureau (voir « Un serveur par dossier de données »).
 - [ ] `hub.rs` à plusieurs abonnés ; `UiState` par client ; une réponse fermée chez les autres clients. Faits : le hub diffuse à la fenêtre et à chaque client distant, dans un seul ordre, et un client qui s'abonne ne prend rien à la fenêtre (ni ses événements, ni sa dictée, ni ses brouillons) ; la réponse fermée chez les autres l'est d'elle-même depuis que le hub diffuse à tous : la carte se ferme partout, et une seconde réponse est refusée, comme celle qui vient de claude.ai. Pas fait, par choix : `UiState` reste unique et partagé, le dernier qui l'écrit gagne, et naviguer dans un client ne déplace pas les autres.
-- [ ] Un tampon de sortie pour chaque terminal et chaque lancement ; la reprise d'un client après une coupure. Faits, côté serveur : chaque terminal, lancement et vue d'agent garde ses 4 derniers Mio, rejoués depuis un point sûr à qui vient le lire, la fenêtre comme un client, sans que l'un prenne la sortie de l'autre. Un client qui revient s'abonne, lit dans l'état initial les terminaux (`launch` dit lesquels sont des lancements), puis s'y rattache par `term_attach` ou `run_attach` : il retrouve leur écran et la suite. Côté navigateur : la page qui perd sa connexion le dit, en rouvre une seule à la fois après 0,5 s, puis 1, 2, 4, 8 et 10 s au plus, se réabonne et relit l'état sans changer de vue (sauf un projet supprimé entre-temps), relit les conversations et les traces des workflows dont elle a manqué les événements, et se rattache aux terminaux de la barre latérale, comme au chargement de la page. L'attente ne revient à 0,5 s qu'après 5 s de connexion tenue : un serveur qui salue puis ferme ne fait pas boucler la page. Une coupure silencieuse (portable en veille, NAT qui oublie) est vue par un battement : `data_dir` toutes les 30 s, sans réponse en 10 s la connexion est fermée et la reprise part. Un serveur d'un autre protocole n'est pas réessayé : la page demande à être rechargée. Reste : les lancements et les vues d'agent (Claude Code) ne sont pas encore repris dans un navigateur ; un terminal ouvert dans un onglet n'apparaît dans un autre qu'à son chargement (le cœur n'émet aucun événement d'ouverture).
-- [ ] `ipc.ts` sur deux transports ; l'app de bureau testée sur l'API distante en local (e2e). Fait, côté navigateur : `npm run test:web` (tests/web) lance `escouade-server` sur un dossier de données temporaire, appaire la page par `escouade-server pair` et son formulaire, vérifie qu'aucun cookie n'est posé, et joue dans Chrome for Testing un projet, un terminal, le Kanban, un rechargement, deux onglets, une coupure du réseau de la page et un agent sur le faux Claude Code des e2e ; la CI le joue (`web-e2e`), sans paquet du bureau.
+- [ ] Un tampon de sortie pour chaque terminal et chaque lancement ; la reprise d'un client après une coupure. Faits, côté serveur : chaque terminal, lancement et vue d'agent garde ses 4 derniers Mio, rejoués depuis un point sûr à qui vient le lire, la fenêtre comme un client, sans que l'un prenne la sortie de l'autre. Un client qui revient s'abonne, lit dans l'état initial les terminaux (`launch` dit lesquels sont des lancements), puis s'y rattache par `term_attach` ou `run_attach` : il retrouve leur écran et la suite. Côté navigateur : la page qui perd sa connexion le dit, en rouvre une seule à la fois après 0,5 s, puis 1, 2, 4, 8 et 10 s au plus, se réabonne et relit l'état sans changer de vue (sauf un projet supprimé entre-temps), relit les conversations et les traces des workflows dont elle a manqué les événements, et se rattache aux terminaux de la barre latérale, comme au chargement de la page. L'attente ne revient à 0,5 s qu'après 5 s de connexion tenue : un serveur qui salue puis ferme ne fait pas boucler la page. Une coupure silencieuse (portable en veille, NAT qui oublie) est vue par un battement : `data_dir` toutes les 30 s, sans réponse en 10 s la connexion est fermée et la reprise part. Un serveur d'un autre protocole n'est pas réessayé : la page demande à être rechargée. Un client lent n'est pas coupé tant qu'il lit : quand sa file (16 Mio) est pleine, un terminal prend du retard puis est rattrapé depuis son tampon (effacement, modes, relecture) ; la connexion n'est fermée que si la socket prend moins de 64 Kio en 20 s (un lien de moins de 26 kbit/s environ, avec des terminaux qui débitent, est donc coupé en boucle). Reste : les lancements et les vues d'agent (Claude Code) ne sont pas repris d'eux-mêmes dans un navigateur, un bouton « Reconnecté : recharger cette vue » les relit ; un terminal ouvert dans un onglet n'apparaît dans un autre qu'à son chargement (le cœur n'émet aucun événement d'ouverture).
+- [ ] `ipc.ts` sur deux transports ; l'app de bureau testée sur l'API distante en local (e2e). Fait, côté navigateur : `npm run test:web` (tests/web) lance `escouade-server` sur un dossier de données temporaire, appaire la page par `escouade-server pair` et son formulaire, vérifie qu'aucun cookie n'est posé, et joue dans Chrome for Testing un projet, un terminal, le Kanban, un rechargement, deux onglets, une coupure du réseau de la page et un agent sur le faux Claude Code des e2e. Un second parcours (`tests/web/serveur.spec.ts`) joue celui d'un utilisateur du serveur, sur sa socket Unix atteinte par un tunnel : l'appairage, un compte ajouté par le terminal de Claude Code (un faux `claude` qui affiche l'adresse de connexion et attend le code collé), un dépôt cloné, un agent qui répond et demande une autorisation, un fichier joint, un terminal, le Kanban, le navigateur fermé puis rouvert sur son profil, qui retrouve tout, et l'appareil révoqué, coupé aussitôt. La CI les joue (`web-e2e`) sans condition : le navigateur tourne sur le poste, et la nudité du serveur est prouvée par le `ldd` d'escouade-server (`linux-headless`). Aucun parcours ne joue encore une notification du navigateur (`osNotifications: false` dans `tests/web/server.ts`) : elles ne sont testées qu'en Vitest.
 
 **Mode serveur**
-- [ ] Essais : la connexion de Claude Code, Codex, Copilot CLI, Cursor CLI et OpenCode sur un VPS, le navigateur sur une autre machine.
-- [ ] `escouade-server` pour Linux x64 et arm64, sans WebKit ni GTK ; le service systemd ; `escouade-server pair` ; ses journaux. Faits : `pair`, `devices` et `devices revoke` (voir la fondation, L'API distante) ; `install` et `uninstall` (voir « Installer le service »).
-- [ ] Les secrets dans un fichier lisible du seul propriétaire, sur un serveur ; dit dans l'interface.
+- [ ] Essais : la connexion de Claude Code, Codex, Copilot CLI, Cursor CLI et OpenCode sur un VPS, le navigateur sur une autre machine. Seul le chemin « adresse affichée, code collé » est joué, avec un faux `claude` (`tests/web/serveur.spec.ts`) ; aucun vrai harness n'a été connecté ainsi.
+- [ ] `escouade-server` pour Linux x64 et arm64, sans WebKit ni GTK ; le service systemd ; `escouade-server pair` ; ses journaux. Faits : `pair`, `devices` et `devices revoke` (voir la fondation, L'API distante) ; `install` et `uninstall` (voir « Installer le service ») ; la CI construit le binaire sans bureau et vérifie par `ldd` qu'il ne lie ni GTK ni WebKit ; l'installation pas à pas (voir « Sur un VPS, de bout en bout »). Reste : un binaire livré par les releases (x64 et arm64), et l'unité essayée sur un vrai systemd (les tests vérifient le fichier écrit, pas son démarrage).
+- [ ] Les secrets dans un fichier lisible du seul propriétaire, sur un serveur ; dit dans l'interface. Fait : la doc dit où vivent les identifiants des comptes (« Sur un VPS, de bout en bout »). Reste : l'interface ne le dit pas encore.
 - [ ] La mise à jour du serveur (même signature que l'updater), proposée par le client à sa version.
 - [ ] Dans le client : « Se connecter à un serveur » (hôte SSH, appairage), la machine dans la barre de titre, le retour en local.
 - [ ] La table « Ce qui change de machine » :
@@ -412,7 +476,7 @@ Demandé le 2026-11-14 : « avoir plusieurs serveurs Escouade pilotés par un se
   - les notifications rendues par le client (fait : sous `escouade-server`, l'hôte dit au client `notify` et `chime` ; le navigateur montre la notification quand l'onglet n'a pas le focus, une seule quels que soient les onglets ouverts, après la permission demandée au premier geste si les notifications du système sont allumées (redemandée au geste suivant tant qu'elle n'a pas de réponse), sinon une ligne dans la page, et joue le carillon du bureau une fois le son permis (rien ne s'accumule avant) ; un clic ramène l'onglet et `notification_click` fait ce que fait le clic du bureau, une fois ; les 64 derniers clics sont gardés ; ni clignotement ni tray) ;
   - la vue Plugins et le store dans le navigateur (fait : tout ce qui se fait sur le serveur, installer depuis le store, la graine ou un dépôt git, activer, régler, les secrets, les mises à jour, les thèmes ; restent au bureau « Depuis un dossier… », « Charger un dossier… » et les liens `escouade://`) ;
   - la voix sur le poste.
-- [ ] Un e2e `escouade-server` + client par une redirection locale.
+- [ ] Un e2e `escouade-server` + client par une redirection locale. Fait pour le navigateur : `tests/web/serveur.spec.ts`, par un tunnel du test vers la socket (ce que fait `ssh -L`), sans `ssh` réel. Reste : le client de bureau.
 
 **Téléphone**
 - [ ] Essais : `boringtun` + `smoltcp` dans un binaire de test, joint depuis l'app WireGuard d'un téléphone en 4G, sous Windows, macOS et Linux.
@@ -430,5 +494,5 @@ Demandé le 2026-11-14 : « avoir plusieurs serveurs Escouade pilotés par un se
 - [ ] Détection de Tailscale et de son adresse.
 
 **Docs**
-- [ ] README et site : le mode serveur (installation sur un VPS, connexion par SSH) et l'accès depuis le téléphone.
+- [ ] README et site : le mode serveur (installation sur un VPS, connexion par SSH) et l'accès depuis le téléphone. Fait : le README renvoie à « Sur un VPS, de bout en bout ». Reste : le site, et le téléphone.
 - [ ] La FAQ « Où vont mes données ? » : elle doit mentionner ces deux accès, et les identifiants des comptes sur le serveur.

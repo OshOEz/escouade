@@ -98,6 +98,8 @@ Une version plus ancienne que celle testée est refusée, avec la commande qui l
 
 Les versions suivantes s'installent depuis l'application. Jusqu'à la 1.5.4, la barre de statut propose « Mise à jour disponible » ; à partir de la 1.6, la mise à jour se télécharge seule, la barre de statut affiche « Mise à jour X prête · Redémarrer », et l'app redémarre d'elle-même quand elle est au repos (réglage « Installer les mises à jour automatiquement », dans « À propos »).
 
+**Serveur Linux sans écran** (`escouade-server`, en cours) : le cœur d'Escouade en service systemd sur un VPS, piloté depuis un navigateur par un tunnel SSH. Aucune release ne le livre encore : il se construit depuis les sources ; voir [docs/REMOTE.md](docs/REMOTE.md), « Sur un VPS, de bout en bout ».
+
 ## Données locales
 
 Tout est stocké dans `~/.escouade/` (anciennement `~/.claude-code-manager/`, déplacé au premier lancement de la 0.1.4) :
