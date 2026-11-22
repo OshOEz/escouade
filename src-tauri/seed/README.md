@@ -10,3 +10,7 @@ Nothing but this file is committed:
 - `release.yml` fills this folder with `store/scripts/seed.ts fetch`, which checks each signature and fails otherwise;
 - a build of development may fill it with `sh scripts/seed-dev.sh`: modules built here, without a signature, which
   only a build of development takes. It writes its own `seed.json` beside them; `ESCOUADE_SEED_DIR` points at the folder.
+
+`escouade-server` embeds the same files (`build.rs` writes them in `$OUT_DIR/seed.rs`, which its `main` alone includes)
+and writes them at its start to `plugin-seed/` of its data folder, again when they change; built without them, it runs
+without a seed, as the app does. The seed of 2026-11-22 (28 plugins, 111 files) adds 19.4 MB to the program.

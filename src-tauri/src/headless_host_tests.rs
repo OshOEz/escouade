@@ -246,3 +246,40 @@ fn the_clicks_kept_are_the_last_ones() {
     assert_eq!(clicked.load(std::sync::atomic::Ordering::SeqCst), 2);
     core.stop_for_good();
 }
+
+#[test]
+fn the_seed_embedded_is_put_in_the_data_folder_once_per_stamp() {
+    let data = paths::test_dir("headless-seed");
+    let first: &[(&str, &[u8])] = &[
+        ("dev.escouade.x/version.json", b"{\"v\":1}"),
+        ("revocations.json", b"[]"),
+    ];
+    let at = place_seed(first, "2.2.5 1", &data).unwrap();
+    assert_eq!(at, data.join("plugin-seed"));
+    assert_eq!(
+        std::fs::read(at.join("dev.escouade.x/version.json")).unwrap(),
+        b"{\"v\":1}"
+    );
+    assert_eq!(std::fs::read(at.join("revocations.json")).unwrap(), b"[]");
+    // The same stamp: left as it is.
+    std::fs::write(at.join("dev.escouade.x/left"), "x").unwrap();
+    assert_eq!(place_seed(first, "2.2.5 1", &data), Some(at.clone()));
+    assert!(at.join("dev.escouade.x/left").exists());
+    // A file of it removed by hand, or cut: put back at the next start, the same stamp.
+    std::fs::remove_file(at.join("revocations.json")).unwrap();
+    std::fs::write(at.join("dev.escouade.x/version.json"), "{").unwrap();
+    assert_eq!(place_seed(first, "2.2.5 1", &data), Some(at.clone()));
+    assert_eq!(std::fs::read(at.join("revocations.json")).unwrap(), b"[]");
+    assert_eq!(
+        std::fs::read(at.join("dev.escouade.x/version.json")).unwrap(),
+        b"{\"v\":1}"
+    );
+    // Another (a new version): the folder replaced whole, nothing of the old one left.
+    let second: &[(&str, &[u8])] = &[("dev.escouade.y/version.json", b"{}")];
+    assert_eq!(place_seed(second, "2.2.6 2", &data), Some(at.clone()));
+    assert!(!at.join("dev.escouade.x").exists());
+    assert!(at.join("dev.escouade.y/version.json").exists());
+    assert!(!data.join("plugin-seed.new").exists());
+    // None embedded: no seed, as the app without its folder `seed`.
+    assert_eq!(place_seed(&[], "2.2.6 0", &data), None);
+}

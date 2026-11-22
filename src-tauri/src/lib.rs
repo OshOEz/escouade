@@ -22,6 +22,7 @@ mod alerts;
 mod app;
 #[cfg(feature = "desktop")]
 pub use app::{devpage_probe_cli, run};
+pub use headless_host::Seed;
 #[cfg_attr(not(feature = "desktop"), allow(dead_code))]
 mod asks;
 #[cfg(test)]
@@ -427,9 +428,10 @@ pub fn plugin_cli(args: Vec<String>) -> i32 {
     plugins::bench::cli::main(args)
 }
 
-/// `escouade-server` (src/bin): the core without a window, served on 127.0.0.1. Gives the exit code.
-pub fn server_cli(args: Vec<String>) -> i32 {
-    headless_host::run(args)
+/// `escouade-server` (src/bin): the core without a window, served on 127.0.0.1, with the seed of the plugins it embeds.
+/// Gives the exit code.
+pub fn server_cli(args: Vec<String>, seed: headless_host::Seed) -> i32 {
+    headless_host::run(args, seed)
 }
 
 /// Every command, once: `commands` gives them to Tauri and to the remote table (`escouade_macros::handlers!`).

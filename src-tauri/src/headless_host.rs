@@ -26,6 +26,62 @@ pub struct Headless {
     core: OnceLock<Weak<Core>>,
     /// The clicks of the last toasts the browsers were told (`UiEvent::Notify`), by id: the last given, the next one.
     clicks: Mutex<(u64, VecDeque<(u64, Click)>)>,
+    /// Where the seed of the plugins the program embeds was put (`place_seed`).
+    seed: Option<PathBuf>,
+}
+
+/// The seed of the plugins `escouade-server` embeds (build.rs: what `src-tauri/seed/` held when it was built), its
+/// files by path and a stamp of them; none when it held none.
+pub struct Seed {
+    pub files: &'static [(&'static str, &'static [u8])],
+    pub stamp: &'static str,
+}
+
+/// The files of the seed written to `plugin-seed` of the data folder `data`, unless they are all there from the same
+/// stamp; replaced whole otherwise. The folder, or none when nothing is embedded or it cannot be written (then the core
+/// runs without a seed, as the app without its folder `seed`).
+fn place_seed(files: &[(&str, &[u8])], stamp: &str, data: &Path) -> Option<PathBuf> {
+    if files.is_empty() {
+        return None;
+    }
+    let dir = data.join("plugin-seed");
+    const STAMP: &str = ".stamp";
+    // Its files there at their size too: one removed by hand, or cut, is put back without waiting for a new stamp.
+    let whole = || {
+        files.iter().all(|(path, bytes)| {
+            std::fs::metadata(dir.join(path)).is_ok_and(|m| m.len() == bytes.len() as u64)
+        })
+    };
+    if std::fs::read_to_string(dir.join(STAMP)).is_ok_and(|s| s == stamp) && whole() {
+        return Some(dir);
+    }
+    let new = data.join("plugin-seed.new");
+    let write = || -> std::io::Result<()> {
+        let _ = std::fs::remove_dir_all(&new);
+        for (path, bytes) in files {
+            let to = new.join(path);
+            if let Some(parent) = to.parent() {
+                std::fs::create_dir_all(parent)?;
+            }
+            std::fs::write(to, bytes)?;
+        }
+        std::fs::write(new.join(STAMP), stamp)?;
+        if dir.exists() {
+            std::fs::remove_dir_all(&dir)?;
+        }
+        std::fs::rename(&new, &dir)
+    };
+    match write() {
+        Ok(()) => Some(dir),
+        Err(e) => {
+            log::error!(
+                "the seed of the plugins not written to {}: {e}",
+                dir.display()
+            );
+            let _ = std::fs::remove_dir_all(&new);
+            None
+        }
+    }
 }
 
 type Click = Box<dyn Fn() + Send + Sync>;
@@ -38,9 +94,8 @@ impl Host for Headless {
         env!("CARGO_PKG_VERSION").into()
     }
 
-    // shortcut: no plugin seed beside the program, until the server ships one.
     fn seed_dir(&self) -> Option<PathBuf> {
-        None
+        self.seed.clone()
     }
 
     fn webview_version(&self) -> Option<String> {
@@ -176,7 +231,7 @@ fn parse_serve(args: &[&str]) -> Result<Serve, String> {
 }
 
 /// The program: the exit code.
-pub fn run(args: Vec<String>) -> i32 {
+pub fn run(args: Vec<String>, seed: Seed) -> i32 {
     // First, before any thread: no child process may inherit the token.
     let remote = remoteapi::server::take_port_from_env();
     let args: Vec<&str> = args.iter().map(String::as_str).collect();
@@ -251,7 +306,10 @@ pub fn run(args: Vec<String>) -> i32 {
     config.devices = Some(Arc::new(Devices::open(data.root())));
     // The process groups of agents a killed run left behind, stopped before any agent starts.
     agentgroups::start(data.root().join("agent-groups.json"));
-    let host = Arc::new(Headless::default());
+    let host = Arc::new(Headless {
+        seed: place_seed(seed.files, seed.stamp, data.root()),
+        ..Headless::default()
+    });
     let (core, git_rx) = Core::load(host.clone(), data);
     let _ = host.core.set(Arc::downgrade(&core));
     // Its clients' project folders stay in its user's home, as its browser of folders (`browse`).
