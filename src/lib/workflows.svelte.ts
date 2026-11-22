@@ -47,6 +47,14 @@ class Workflows {
     }
   }
 
+  /** After a lost connection (in a browser): the tracks asked already read again, their events of the meantime missed. */
+  rereadTracks() {
+    for (const projectId of [...this.asked]) {
+      this.asked.delete(projectId);
+      void this.loadTracks(projectId);
+    }
+  }
+
   /**
    * The workflows of a project as it has them (ESC-195): those of its files, with the user's corrections, those dismissed
    * left out; beside what the reading says of itself (when, where it looked). Asked again when the corrections change.

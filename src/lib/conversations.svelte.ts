@@ -86,6 +86,17 @@ export class Conversation {
     this.released = true;
   }
 
+  /** Its ops of a lost connection missed (in a browser): read again at once if shown, else let go of until its next view. */
+  reload() {
+    if (this.views > 0) return void this.load();
+    if (this.released) return;
+    this.items = [];
+    this.index = new Map();
+    this.error = null;
+    this.loaded = false;
+    this.released = true;
+  }
+
   async load() {
     this.buffer = [];
     this.error = null;
@@ -198,4 +209,9 @@ export function dropConversation(agentId: string) {
  */
 export function releaseIdle(now: number, busy: (agentId: string) => boolean) {
   for (const c of conversations.values()) if (!busy(c.agentId)) c.releaseIfIdle(now);
+}
+
+/** After a lost connection (in a browser), every conversation in memory read again: the ops of the meantime are lost. */
+export function reloadAll() {
+  for (const c of conversations.values()) c.reload();
 }

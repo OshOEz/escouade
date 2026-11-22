@@ -2363,6 +2363,8 @@ export interface TermInfo {
   projectId: string;
   name: string;
   shell: string;
+  /** A launch command (or a step of a test launch); else an interactive terminal. */
+  launch?: boolean;
 }
 
 export interface PatchHunk {

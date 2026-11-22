@@ -1,5 +1,5 @@
-import { describe, expect, it } from 'vitest';
-import { MAX_REQUEST, wsTransport, type Socket } from './ws';
+import { describe, expect, it, vi } from 'vitest';
+import { BEAT_EVERY, BEAT_WAIT, MAX_REQUEST, RETRY_FIRST, RETRY_HELD, RETRY_MAX, wsTransport, type Socket } from './ws';
 
 /** A WebSocket with no network: what the page sends is kept, what the server says is pushed by the test. */
 class FakeSocket implements Socket {
@@ -163,6 +163,27 @@ describe('the WebSocket transport', () => {
     expect(socket.closed).toBe(true);
   });
 
+  it('a_server_of_another_protocol_is_not_tried_again_and_the_reload_is_asked', async () => {
+    vi.useFakeTimers();
+    try {
+      const sockets: FakeSocket[] = [];
+      const transport = wsTransport(() => sockets[sockets.push(new FakeSocket()) - 1]);
+      const told: [string, boolean][] = [];
+      transport.onClose((reason, again) => told.push([reason, again]));
+      void transport.invoke('mcp_status').catch(() => {});
+      sockets[0].hello(2);
+      expect(told).toEqual([[expect.stringContaining('protocol 2'), false]]);
+      vi.advanceTimersByTime(10 * RETRY_MAX);
+      expect(sockets).toHaveLength(1);
+      // A call made after it fails at once, without a connection.
+      const e = (await transport.invoke('list_agents').catch((e) => e)) as Error;
+      expect(e.message).toMatch(/^list_agents: .*protocol 2/);
+      expect(sockets).toHaveLength(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('a_lost_connection_rejects_the_calls_in_flight', async () => {
     const { socket, transport } = connected();
     const lost: string[] = [];
@@ -211,5 +232,125 @@ describe('the WebSocket transport', () => {
     socket.text({ event: { type: 'terminalExit', id: 't1', code: 0 } });
     socket.bytes(r.stream!, 'after');
     expect(got).toEqual(['before', 'still']);
+  });
+
+  it('a_lost_connection_is_opened_again_after_a_wait_that_grows_and_is_bounded', () => {
+    vi.useFakeTimers();
+    try {
+      const sockets: FakeSocket[] = [];
+      const transport = wsTransport(() => sockets[sockets.push(new FakeSocket()) - 1]);
+      let reopened = 0;
+      transport.onReopen(() => reopened++);
+      void transport.invoke('mcp_status').catch(() => {});
+      sockets[0].hello();
+      sockets[0].close();
+      // Every try fails (the server is away): the waits double, then stay at their bound; none comes before its time.
+      const waits: number[] = [];
+      for (let wait = RETRY_FIRST; waits.length < 8; wait = Math.min(wait * 2, RETRY_MAX)) {
+        const before = sockets.length;
+        vi.advanceTimersByTime(wait - 1);
+        expect(sockets).toHaveLength(before);
+        vi.advanceTimersByTime(1);
+        expect(sockets).toHaveLength(before + 1);
+        waits.push(wait);
+        sockets.at(-1)!.close();
+      }
+      expect(waits).toEqual([500, 1000, 2000, 4000, 8000, 10_000, 10_000, 10_000]);
+      expect(reopened).toBe(0);
+      // The server is back: its greeting is the reconnection, told once; held a while, the next loss waits the first wait.
+      vi.advanceTimersByTime(RETRY_MAX);
+      sockets.at(-1)!.hello();
+      expect(reopened).toBe(1);
+      vi.advanceTimersByTime(RETRY_HELD);
+      const back = sockets.length;
+      sockets.at(-1)!.close();
+      vi.advanceTimersByTime(RETRY_FIRST);
+      expect(sockets).toHaveLength(back + 1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('a_call_made_while_the_connection_is_lost_opens_it_at_once_and_only_once', () => {
+    vi.useFakeTimers();
+    try {
+      const sockets: FakeSocket[] = [];
+      const transport = wsTransport(() => sockets[sockets.push(new FakeSocket()) - 1]);
+      void transport.invoke('mcp_status').catch(() => {});
+      sockets[0].hello();
+      sockets[0].close();
+      void transport.invoke('list_agents');
+      expect(sockets).toHaveLength(2);
+      vi.advanceTimersByTime(RETRY_MAX);
+      expect(sockets).toHaveLength(2);
+      sockets[1].hello();
+      expect(sockets[1].requests().map((r) => r.cmd)).toEqual(['list_agents']);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('a_server_that_greets_then_closes_at_once_is_tried_at_a_growing_pace', () => {
+    vi.useFakeTimers();
+    try {
+      const sockets: FakeSocket[] = [];
+      const transport = wsTransport(() => sockets[sockets.push(new FakeSocket()) - 1]);
+      void transport.invoke('mcp_status').catch(() => {});
+      sockets[0].hello();
+      sockets[0].close();
+      // Each new connection is greeted, then closed (a slow client the server lets go of): no loop at the first wait.
+      const waits: number[] = [];
+      for (let wait = RETRY_FIRST; waits.length < 6; wait = Math.min(wait * 2, RETRY_MAX)) {
+        const before = sockets.length;
+        vi.advanceTimersByTime(wait - 1);
+        expect(sockets).toHaveLength(before);
+        vi.advanceTimersByTime(1);
+        expect(sockets).toHaveLength(before + 1);
+        waits.push(wait);
+        sockets.at(-1)!.hello();
+        sockets.at(-1)!.close();
+      }
+      expect(waits).toEqual([500, 1000, 2000, 4000, 8000, 10_000]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('a_silent_connection_is_closed_after_a_beat_unanswered_then_opened_again', async () => {
+    vi.useFakeTimers();
+    try {
+      const sockets: FakeSocket[] = [];
+      const transport = wsTransport(() => sockets[sockets.push(new FakeSocket()) - 1]);
+      const lost: string[] = [];
+      transport.onClose((reason) => lost.push(reason));
+      void transport.invoke('mcp_status').catch(() => {});
+      sockets[0].hello();
+      // No beat before its time.
+      await vi.advanceTimersByTimeAsync(BEAT_EVERY - 1);
+      expect(sockets[0].requests().map((r) => r.cmd)).toEqual(['mcp_status']);
+      await vi.advanceTimersByTimeAsync(1);
+      const beat = sockets[0].requests().at(-1)!;
+      expect(beat).toMatchObject({ cmd: 'data_dir', args: {} });
+      // Answered: the connection stays, and the next beat goes at its time.
+      sockets[0].text({ id: beat.id, ok: '/data' });
+      await vi.advanceTimersByTimeAsync(BEAT_WAIT);
+      expect(sockets[0].closed).toBe(false);
+      await vi.advanceTimersByTimeAsync(BEAT_EVERY - BEAT_WAIT);
+      expect(sockets[0].requests().filter((r) => r.cmd === 'data_dir')).toHaveLength(2);
+      // Unanswered (the network gone without a word): closed at the end of the wait, told, and opened again.
+      await vi.advanceTimersByTimeAsync(BEAT_WAIT - 1);
+      expect(sockets[0].closed).toBe(false);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(sockets[0].closed).toBe(true);
+      expect(lost).toHaveLength(1);
+      await vi.advanceTimersByTimeAsync(RETRY_FIRST);
+      expect(sockets).toHaveLength(2);
+      // No beat on a connection not greeted yet, nor on the one closed.
+      await vi.advanceTimersByTimeAsync(BEAT_EVERY + BEAT_WAIT);
+      expect(sockets[1].sent).toEqual([]);
+      expect(sockets[0].requests().filter((r) => r.cmd === 'data_dir')).toHaveLength(2);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

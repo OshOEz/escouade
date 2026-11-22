@@ -320,6 +320,18 @@ export function openTerminal(projectId: string, shell: string, name: string, pla
   return interactive((cols, rows, onData) => api.termSpawn({ projectId, shell, name, ...place, cols, rows }, onData));
 }
 
+/**
+ * A terminal already running, read again (a page loaded or a connection back, in a browser): its screen kept, then what
+ * follows. Shown already, its xterm.js is cleared first and drawn again from what the backend kept.
+ */
+export function attachTerminal(id: string): Promise<TermInfo> {
+  const x = xterms.get(id);
+  if (!x) return interactive((cols, rows, onData) => api.termAttach(id, cols, rows, onData));
+  x.term.reset();
+  // shortcut: the echo's measures (`echoWatch`) are not taken again for these bytes; a terminal opened anew has them.
+  return api.termAttach(id, x.term.cols, x.term.rows, (buf) => x.term.write(new Uint8Array(buf)));
+}
+
 /** « Se connecter… »: the Claude account's `claude` in a terminal of its own, where the user signs in. */
 export function openAccountLogin(accountId: string): Promise<TermInfo> {
   return interactive((cols, rows, onData) => api.accountLogin(accountId, cols, rows, onData));

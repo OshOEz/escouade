@@ -103,6 +103,12 @@ export default defineZone('shell', {
     open: 'Open the copies’ folder',
     close: 'Close',
   },
+  /** In a browser, the connection to the server: lost, back, or refused (a server of another version of the wire). */
+  connection: {
+    lost: 'The connection to the server is lost: trying again…',
+    back: 'The connection to the server is back.',
+    outdated: 'The server no longer speaks this page’s language: reload it.',
+  },
   /** The update downloaded, its notes once installed, and the toasts about it. */
   update: {
     betaVersion: '{version} (beta)',

@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { fakeBackend } from '../test/ipc';
-import { Conversation, conversationOf, releaseIdle } from './conversations.svelte';
+import { Conversation, conversationOf, releaseIdle, reloadAll } from './conversations.svelte';
 import type { ConvItem } from './types';
 
 const text = (id: string, t: string, streaming = true): ConvItem => ({ kind: 'text', id, text: t, streaming });
@@ -185,5 +185,25 @@ describe('Conversations out of sight', () => {
     expect(c.items).toEqual([]);
     expect(c.place).toEqual(place);
     expect(c.jump).toBe('m:0');
+  });
+
+  it('are read again after a lost connection: at once when shown, at their next view else', async () => {
+    const shown = conversationOf(`shown-${Math.random()}`);
+    shown.show();
+    await vi.waitFor(() => expect(shown.loaded).toBe(true));
+    const left = await shownThenLeft();
+    // What the backend recorded while the connection was lost: its ops never came.
+    fakeBackend({
+      get_conversation: () => {
+        reads++;
+        return [text('m:0', 'Bonjour', false), text('m:1', 'Pendant la coupure', false)];
+      },
+    });
+    reloadAll();
+    await vi.waitFor(() => expect(shown.items.map((i) => i.id)).toEqual(['m:0', 'm:1']));
+    expect(left.loaded).toBe(false);
+    expect(left.items).toEqual([]);
+    left.show();
+    await vi.waitFor(() => expect(left.items.map((i) => i.id)).toEqual(['m:0', 'm:1']));
   });
 });

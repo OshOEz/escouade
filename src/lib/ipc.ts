@@ -801,6 +801,12 @@ export const api = {
     output.onmessage = onData;
     return invoke<TermInfo>('term_spawn', { ...a, output });
   },
+  /** A terminal already running, read from now on: its screen kept, then what follows, drawn again at `cols` × `rows`. */
+  termAttach: (id: string, cols: number, rows: number, onData: (d: ArrayBuffer) => void) => {
+    const output = flow<ArrayBuffer>();
+    output.onmessage = onData;
+    return invoke<TermInfo>('term_attach', { id, cols, rows, output });
+  },
   runStart: (
     a: { projectId: string; commandId: string; agentId?: string; cols: number; rows: number; cursorRow: number },
     onData: (d: ArrayBuffer) => void,

@@ -2,7 +2,7 @@
 
 import { openUrl } from './opener';
 import { api } from './ipc';
-import { applyConvOps, dropConversation, releaseIdle } from './conversations.svelte';
+import { applyConvOps, dropConversation, releaseIdle, reloadAll } from './conversations.svelte';
 import { buffers } from './editor/buffers.svelte';
 import { navHistory } from './editor/history';
 import { recentFiles } from './editor/quick-open';
@@ -31,6 +31,8 @@ import { newCount, opened, readSeen, seenOf, type PrSeen } from './prnew';
 import { workflows } from './workflows.svelte';
 import { inboxViews } from './inbox/views.svelte';
 import { modeToAsk } from './first-mode';
+import { attachTerminal } from './terminals';
+import { desktop, onClose, onReopen } from './transport';
 import {
   activeItem,
   close as closePane,
@@ -79,6 +81,7 @@ import type {
   SetupOutput,
   ShellInfo,
   TermInfo,
+  InitialState,
   Ticket,
   TicketDraft,
   UiEvent,
@@ -298,6 +301,9 @@ export const asksUser = (a: Pick<Agent, 'status' | 'deleteAsk'>) => a.status ===
 
 /** How many of the last lines of the step running a worktree's setup the window keeps (as the backend does). */
 const SETUP_LINES = 500;
+
+/** How long the toast of a lost connection stays at most: it goes when the connection is back. */
+const LOST_TOAST_MS = 3_600_000;
 
 /** How long after a Ctrl+C typed in a launch command's view its exit is taken for the user's stop (ESC-396). */
 const INTERRUPT_WINDOW_MS = 10_000;
@@ -803,6 +809,111 @@ class AppState {
   async init() {
     this.early = [];
     const s = await api.subscribe((e) => (this.early ? this.early.push(e) : this.onEvent(e)));
+    await this.take(s);
+    this.ui = {
+      ...s.ui,
+      view: s.ui.view || 'project',
+      selectedAgent: s.ui.selectedAgent ?? {},
+      panes: readPanes(s.ui.panes),
+      prSeen: readSeens(s.ui.prSeen),
+    };
+    this.overviewFrom = 'project';
+    if (!this.ui.activeProject || !this.projects.some((p) => p.id === this.ui.activeProject)) {
+      // Never the one the page crashed on (ESC-290): it is offered again, not opened.
+      this.ui.activeProject = this.projects.find((p) => p.id !== s.pageCrash?.projectId)?.id ?? null;
+    }
+    if (s.pageCrash) this.tellPageCrash(s.pageCrash);
+    // The mode of new agents, then the statistics: not answered yet (closed without a choice: asked again at the next
+    // start). An installation that existed before the first has `auto` (SEC-09).
+    if (modeToAsk(s.settings)) this.modal = { kind: 'firstMode' };
+    else if (s.settings.telemetry === null) this.modal = { kind: 'telemetry' };
+    // The user's name for the shared tickets (ESC-190), asked once, after the statistics' question.
+    else if (!s.settings.nameAsked) this.modal = { kind: 'teamName' };
+    if (s.installed) {
+      const { version, notes } = s.installed;
+      const tell = () =>
+        this.toast(t('shell.update.installed', { version }), 'ok', {
+          label: t('shell.update.seeNotes'),
+          onClick: () => {
+            if (!this.openFromToast({ kind: 'notes', version, notes })) tell();
+          },
+        });
+      tell();
+    }
+    const early = this.early ?? [];
+    this.early = null;
+    for (const e of early) this.onEvent(e);
+    this.ready = true;
+    setInterval(() => (this.now = Date.now()), 1000);
+    // The conversations out of sight leave the window's memory after a while, read again when shown.
+    setInterval(() => releaseIdle(Date.now(), (id) => this.atWork(id)), 60_000);
+    if (!desktop) this.followConnection();
+  }
+
+  /**
+   * In a browser, the terminals of the sidebar that run on the server, read again: its screen and what follows for each.
+   * One the server no longer runs (its exit missed while the connection was lost) is told as ended; one whose attach
+   * failed (the connection lost again meanwhile) is not: it is attached at the next reconnection.
+   */
+  private async takeTerminals(running: TermInfo[]) {
+    const read = await Promise.all(
+      running
+        .filter((x) => x.projectId && !x.launch)
+        .map((x) =>
+          attachTerminal(x.id).then(
+            () => x,
+            () => null,
+          ),
+        ),
+    );
+    const onServer = new Set(running.map((x) => x.id));
+    for (const x of this.terminals) if (!onServer.has(x.id)) this.exitedTerms[x.id] ??= null;
+    for (const x of read) if (x) delete this.exitedTerms[x.id];
+    const known = new Set(this.terminals.map((x) => x.id));
+    this.terminals = [...this.terminals, ...read.filter((x): x is TermInfo => !!x && !known.has(x.id))];
+  }
+
+  /**
+   * In a browser: the lost connection said until it is back, then the state read again; the view the user is on stays.
+   * A server of another protocol is not tried again: the page is to be loaded again, which is said instead.
+   */
+  private followConnection() {
+    let lost: number | null = null;
+    onClose((_, again) => {
+      if (again && lost !== null) return;
+      if (lost !== null) this.dismissToast(lost);
+      this.toast(t(again ? 'shell.connection.lost' : 'shell.connection.outdated'), 'error', undefined, LOST_TOAST_MS);
+      lost = this.toastId;
+    });
+    onReopen(() => {
+      if (lost !== null) this.dismissToast(lost);
+      lost = null;
+      this.toast(t('shell.connection.back'), 'ok');
+      this.resubscribe().catch((e) => this.toast(errorText(e), 'error'));
+    });
+  }
+
+  private async resubscribe() {
+    this.early = [];
+    const s = await api.subscribe((e) => (this.early ? this.early.push(e) : this.onEvent(e)));
+    await this.take(s);
+    // A project removed elsewhere meanwhile is not left shown, as at the start.
+    if (!this.ui.activeProject || !this.projects.some((p) => p.id === this.ui.activeProject)) {
+      this.ui.activeProject = this.projects[0]?.id ?? null;
+    }
+    const early = this.early ?? [];
+    this.early = null;
+    for (const e of early) this.onEvent(e);
+    // What the events keep up to date beside the snapshot, read again: their events of the meantime are lost.
+    reloadAll();
+    workflows.rereadTracks();
+    this.inboxTick++;
+    this.gitTick++;
+    for (const p of this.projects) this.memoryTicks[p.id] = (this.memoryTicks[p.id] ?? 0) + 1;
+  }
+
+  /** What the subscription's snapshot gives, taken: at the start, and again after a lost connection (in a browser). */
+  private async take(s: InitialState) {
     // First: what is shown from here on is written in it.
     if (s.lang) this.takeLang(s.lang);
     this.projects = s.projects;
@@ -819,18 +930,6 @@ class AppState {
     this.projectPauses = s.projectPauses ?? {};
     this.accounts = s.accounts ?? [];
     this.attention = {};
-    this.ui = {
-      ...s.ui,
-      view: s.ui.view || 'project',
-      selectedAgent: s.ui.selectedAgent ?? {},
-      panes: readPanes(s.ui.panes),
-      prSeen: readSeens(s.ui.prSeen),
-    };
-    this.overviewFrom = 'project';
-    if (!this.ui.activeProject || !this.projects.some((p) => p.id === this.ui.activeProject)) {
-      // Never the one the page crashed on (ESC-290): it is offered again, not opened.
-      this.ui.activeProject = this.projects.find((p) => p.id !== s.pageCrash?.projectId)?.id ?? null;
-    }
     this.settings = s.settings;
     this.offline = { on: !!s.settings.offline, imposed: false };
     void this.loadOffline();
@@ -852,31 +951,7 @@ class AppState {
     this.restartAt = s.restartAt ?? null;
     this.failedUpdate = s.failedUpdate ?? null;
     this.recovered = s.recovered ?? [];
-    if (s.pageCrash) this.tellPageCrash(s.pageCrash);
-    // The mode of new agents, then the statistics: not answered yet (closed without a choice: asked again at the next
-    // start). An installation that existed before the first has `auto` (SEC-09).
-    if (modeToAsk(s.settings)) this.modal = { kind: 'firstMode' };
-    else if (s.settings.telemetry === null) this.modal = { kind: 'telemetry' };
-    // The user's name for the shared tickets (ESC-190), asked once, after the statistics' question.
-    else if (!s.settings.nameAsked) this.modal = { kind: 'teamName' };
-    if (s.installed) {
-      const { version, notes } = s.installed;
-      const tell = () =>
-        this.toast(t('shell.update.installed', { version }), 'ok', {
-          label: t('shell.update.seeNotes'),
-          onClick: () => {
-            if (!this.openFromToast({ kind: 'notes', version, notes })) tell();
-          },
-        });
-      tell();
-    }
-    const early = this.early;
-    this.early = null;
-    for (const e of early) this.onEvent(e);
-    this.ready = true;
-    setInterval(() => (this.now = Date.now()), 1000);
-    // The conversations out of sight leave the window's memory after a while, read again when shown.
-    setInterval(() => releaseIdle(Date.now(), (id) => this.atWork(id)), 60_000);
+    if (!desktop) await this.takeTerminals(s.terminals);
   }
 
   /** The languages the backend resolved: the interface switches to its own at once, without reloading. */

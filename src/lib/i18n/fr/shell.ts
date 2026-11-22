@@ -112,6 +112,12 @@ export default {
     open: 'Ouvrir le dossier des copies',
     close: 'Fermer',
   },
+  /** In a browser, the connection to the server: lost, back, or refused (a server of another version of the wire). */
+  connection: {
+    lost: 'La connexion au serveur est perdue : nouvelle tentative en cours…',
+    back: 'La connexion au serveur est rétablie.',
+    outdated: 'Le serveur ne parle plus la langue de cette page : rechargez-la.',
+  },
   /** The update downloaded, its notes once installed, and the toasts about it. */
   update: {
     /** A beta's version, wherever the app says it (ESC-374). */

@@ -24,5 +24,11 @@ export const transport: Transport = ws ?? tauri.transport;
 export const invoke: Transport['invoke'] = transport.invoke;
 export const channel = <T>(): Flow<T> => transport.channel<T>();
 
-/** `listener` is told when the browser's connection to the core is lost; never in the window. */
-export const onClose = (listener: (reason: string) => void): (() => void) => ws?.onClose(listener) ?? (() => {});
+/**
+ * `listener` is told when the browser's connection to the core is lost, and whether another is tried (not with a server
+ * of another protocol: the page is to be loaded again); never in the window.
+ */
+export const onClose = (listener: (reason: string, again: boolean) => void): (() => void) => ws?.onClose(listener) ?? (() => {});
+
+/** `listener` is told when the browser's connection to the core is back after a lost one; never in the window. */
+export const onReopen = (listener: () => void): (() => void) => ws?.onReopen(listener) ?? (() => {});
