@@ -147,6 +147,15 @@ cd src-tauri && cargo build --release --locked --no-default-features --features 
 
 Sans `escouade-js.sh`, le serveur ne fait tourner aucun plugin `run.js` (et le dit) ; sans la graine, il n'a rien à installer « depuis la graine » : le store et les dépôts git restent. `scripts/seed-dev.sh` fait une graine non signée, que seul un build de debug prend.
 
+0. **Un compte à lui.** Les agents ont les droits du compte du service (voir « Limites connues ») : sur un VPS qui héberge autre chose, un compte d'administrateur, avec `sudo` ou dans le groupe `docker`, leur donne toute la machine. Un compte dédié, sans l'un ni l'autre, les borne à son dossier personnel. Depuis le compte administrateur :
+
+   ```
+   sudo adduser --disabled-password --gecos "" escouade
+   sudo install -d -m 700 -o escouade -g escouade /home/escouade/.ssh
+   sudo install -m 600 -o escouade -g escouade ~/.ssh/authorized_keys /home/escouade/.ssh/
+   ```
+
+   La dernière ligne reprend les clés SSH de l'administrateur : `ssh escouade@<hôte>` entre alors dans ce compte, et toutes les étapes suivantes s'y font. Pour tout retirer : `sudo loginctl disable-linger escouade && sudo deluser --remove-home escouade`.
 1. **Copier** `src-tauri/target/release/escouade-server` et le dossier `dist-web/` sur le serveur, par exemple dans `~/.local/bin/` et `~/.local/share/escouade-web/`. `~/.local/bin` n'entre dans le `PATH` qu'à la session suivante, s'il n'existait pas : rouvrez-la, ou tapez le chemin entier (`~/.local/bin/escouade-server`).
 2. **Installer les harness** sur le serveur, en tant que l'utilisateur du service (Claude Code par son installeur, `git`), comme sur un poste.
 3. **Poser le service**, connecté par `ssh` en tant que cet utilisateur (jamais root ; ni `su` ni `sudo -u`, qui ne donnent pas le bus de session de `systemctl --user`) :
@@ -162,6 +171,9 @@ Sans `escouade-js.sh`, le serveur ne fait tourner aucun plugin `run.js` (et le d
 
    Sans `--socket` ni `--port`, il écoute sur `/run/user/<uid>/escouade/server.sock` (voir « Installer le service »).
 4. **Ouvrir le tunnel**, depuis le poste : `ssh -N -L 8765:/run/user/<uid>/escouade/server.sock <hôte>` (OpenSSH 6.7 et plus, des deux côtés ; un sshd durci par `AllowStreamLocalForwarding no` ou `DisableForwarding yes` refuse ce `-L` vers une socket). Gardez ce port local à Escouade seul (voir « Le tunnel »).
+
+   - **Avec VS Code Remote-SSH** connecté au même serveur : son transfert automatique des ports (`remote.autoForwardPorts`, actif par défaut) ouvre en local le port de toute adresse `http://localhost:<port>` ou `http://127.0.0.1:<port>` affichée dans un terminal distant, dont celle que donne `pair`. Le port local est alors pris et le `ssh -L` échoue. Deux issues : garder la socket et dire à VS Code d'ignorer ce port (`"remote.portsAttributes": { "8765": { "onAutoForward": "ignore" } }`, puis arrêter dans le panneau Ports le transfert déjà ouvert) ; ou poser le service sur un port (`install --port 8765 …`) et laisser VS Code le transférer, avec la limite de « 127.0.0.1 suppose une machine à un seul utilisateur ».
+   - **Sous Windows**, l'OpenSSH du système dit `bind [127.0.0.1]:8765: Permission denied` quand le port est déjà pris : `Get-NetTCPConnection -State Listen -LocalPort 8765` montre qui le tient. Sous PowerShell, un chemin de clé (`-i`) qui contient des espaces se met entre guillemets, sinon `ssh` répond `hostname contains invalid characters`.
 5. **Appairer le navigateur** : sur le serveur, `escouade-server pair` donne la ligne `ssh` et un code ; ouvrez `http://127.0.0.1:8765/` (ou `http://localhost:8765/` : ce sont deux origines, le navigateur appairé sur l'une ne l'est pas sur l'autre), tapez le code et le nom de l'appareil. `escouade-server devices` liste les appareils, `escouade-server devices revoke <id>` en coupe un sur-le-champ.
 6. **Ajouter un compte** : Réglages › Comptes et harness › « Ajouter un compte Claude Code… ». Claude Code démarre dans le terminal de la page, sur le serveur : il n'y trouve aucun navigateur et affiche une adresse, longue, sur plusieurs lignes ; un clic l'ouvre dans le navigateur du poste ; la page de connexion donne un code, à coller dans ce terminal. Seul ce chemin (adresse cliquée, code collé) est joué par les tests, avec un faux `claude` ; la vraie connexion de chaque harness sans navigateur sur le serveur reste à essayer (voir « Tâches »).
 7. **Un projet** : « Nouveau projet » › « Parcourir… » montre les dossiers du serveur, sous le dossier personnel de l'utilisateur du service ; « Cloner ici » y clone un dépôt.
