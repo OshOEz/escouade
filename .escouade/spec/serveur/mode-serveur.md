@@ -1,7 +1,7 @@
 ---
 title: "Mode serveur : escouade-server et l'interface dans un navigateur"
 subject: "Mode serveur"
-sources: ["docs/REMOTE.md (« La fondation commune », « Le mode serveur »)","docs/CRATES.md §16","src-tauri/src/headless_host.rs","src-tauri/src/remoteapi/server.rs","src-tauri/src/remoteapi/devices.rs","src/lib/transport/","tests/web/"]
+sources: ["docs/REMOTE.md (« La fondation commune », « Le mode serveur »)","docs/CRATES.md §16","src-tauri/src/headless_host.rs","src-tauri/src/remoteapi/server.rs","src-tauri/src/remoteapi/devices.rs","src/lib/transport/","tests/web/","website/content/docs/fr/server-mode.md"]
 tickets: []
 decisions: ["le-mode-serveur-escouade-server-fait-tou"]
 compared: null
