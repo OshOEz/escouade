@@ -164,10 +164,9 @@ fn a_device_paired_by_the_command_is_listed_then_revoked() {
     // The address of the first origin declared.
     assert!(out.contains("https://escouade.example.com/"), "{out}");
     assert!(!out.contains("box.lan"), "{out}");
-    assert!(
-        out.contains("pair` again"),
-        "the five tries are not told: {out}"
-    );
+    // Wrong codes no longer cancel the pairing: only its single use and its delay are told.
+    assert!(out.contains("It pairs one device, once"), "{out}");
+    assert!(!out.contains("pair` again"), "{out}");
     let pairing = out
         .split_whitespace()
         .find(|w| w.len() == 9 && w.as_bytes()[4] == b'-')
