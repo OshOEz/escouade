@@ -871,6 +871,7 @@ impl Server {
             .header(header::CACHE_CONTROL, file.cache)
             .header(header::CONTENT_SECURITY_POLICY, csp)
             .header(header::X_CONTENT_TYPE_OPTIONS, "nosniff")
+            .header(header::REFERRER_POLICY, "no-referrer")
             .body(Full::new(Bytes::from(file.body)))
             .expect("a valid answer")
     }
