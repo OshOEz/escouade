@@ -73,7 +73,7 @@ describe('what the interface asks of the system', () => {
     expect(platform.desktop).toBe(false);
     const opened = vi.spyOn(window, 'open').mockReturnValue(null);
     await platform.openUrl('https://example.com/a');
-    expect(opened).toHaveBeenCalledWith('https://example.com/a', '_blank', 'noopener');
+    expect(opened).toHaveBeenCalledWith('https://example.com/a', '_blank', 'noopener,noreferrer');
     // The core's rule: http, https, mailto and tel alone, refused with its words.
     for (const ok of ['HTTP://example.com', 'mailto:a@b.c', 'tel:+33100000000']) await platform.openUrl(ok);
     for (const [bad, scheme] of [
