@@ -441,7 +441,7 @@ async fn read_diff(s: &Source) -> Result<(String, Vec<FileDiff>)> {
             .unwrap_or_else(|_| base.clone());
         // The repository's and the user's own settings do not reach what is parsed: no external
         // diff, no conversion, a prefix of a/ and b/.
-        let bytes = git::run(
+        let text = git::read_diff(
             &s.root,
             &[
                 "-c",
@@ -457,7 +457,7 @@ async fn read_diff(s: &Source) -> Result<(String, Vec<FileDiff>)> {
             ],
         )
         .await?;
-        Ok::<_, anyhow::Error>((sha, parse_diff(&String::from_utf8_lossy(&bytes))))
+        Ok::<_, anyhow::Error>((sha, parse_diff(&text)))
     }
     .await;
     for r in [&tip, &base] {
