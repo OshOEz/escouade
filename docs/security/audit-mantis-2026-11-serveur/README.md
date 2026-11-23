@@ -103,7 +103,8 @@ Chaque correctif a été écrit sur sa propre branche, puis tous ont été fusio
 
 Les tests Rust n'ont pas tourné dans l'environnement de la CI, mais dans un conteneur local. Une centaine de tests échouent déjà dans ce conteneur sur la base sans correctif (`b54b0f47`) : ce sont des tests d'intégration des harness et des plugins, sensibles au temps et à l'ordre. La comparaison s'est donc faite contre la base, dans ce même environnement :
 
-- Les échecs propres à la branche corrigée ont été relancés seuls. Ils passent, sauf deux tests `third_party::tests` qui échouent de la même façon sur la base dès qu'on les lance ensemble.
+- **Une régression trouvée et corrigée.** Le test d'intégration `a_device_paired_by_the_command_is_listed_then_revoked` attendait encore le message « cinq mauvais codes annulent l'appairage », que le correctif de l'appairage a retiré. Le test dit maintenant le nouveau comportement.
+- **Les autres échecs ne viennent pas des correctifs.** Ceux qui n'apparaissaient que sur la branche corrigée ont été relancés seuls. Ils passent, ou échouent de la même façon sur la base dès qu'on les lance ensemble : `third_party`, `cursor`, et les groupes de processus d'`escouade-model`.
 - Les tests ajoutés par les correctifs passent.
 
 L'app de bureau (feature `desktop`) n'a pas été recompilée. La CI le fera.
