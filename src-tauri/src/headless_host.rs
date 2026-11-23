@@ -451,7 +451,6 @@ fn command(args: &[&str]) -> i32 {
                 ),
             }
             println!("It pairs one device, once, within {minutes} minutes.");
-            println!("Five wrong codes cancel it: then run `escouade-server pair` again.");
             if control.socket.is_none() {
                 println!(
                     "\nThis server listens on a port of 127.0.0.1: another user of this machine may take it while the server\n\

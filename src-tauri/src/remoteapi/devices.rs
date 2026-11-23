@@ -1,7 +1,7 @@
 //! The devices paired with `escouade-server` (docs/REMOTE.md, « Le mode serveur »): each its own token, 32 random bytes
 //! only the device holds, kept here hashed (SHA-256) in `devices.json`, readable by its owner alone and written by
 //! replacement, compared in constant time. A pairing code (`escouade-server pair`) serves once, for 10 minutes, one
-//! alive at a time; five wrong tries cancel it. A device revoked is refused at once (the server closes its connections).
+//! alive at a time; a wrong try does not cancel it. A device revoked is refused at once (the server closes its connections).
 
 use crate::paths;
 use chrono::{DateTime, Utc};
@@ -14,8 +14,6 @@ use std::time::{Duration, Instant};
 pub const FILE: &str = "devices.json";
 /// How long a pairing code lives.
 pub const CODE_LIFE: Duration = Duration::from_secs(10 * 60);
-/// The wrong codes that cancel the pairing under way.
-pub const TRIES: u32 = 5;
 /// The longest name kept, in characters.
 pub const NAME_MAX: usize = 64;
 /// A code's characters: Crockford's base32 (no I, L, O, U), 5 bits each, 40 bits in 8.
@@ -56,7 +54,6 @@ struct Pending {
     /// Without its dash.
     code: String,
     until: Instant,
-    wrong: u32,
 }
 
 #[derive(Default)]
@@ -123,7 +120,6 @@ impl Devices {
         self.state.lock().pending = Some(Pending {
             code,
             until: Instant::now() + CODE_LIFE,
-            wrong: 0,
         });
         PairCode {
             code: shown,
@@ -137,19 +133,19 @@ impl Devices {
             .chars()
             .filter(|c| !c.is_whitespace() && *c != '-')
             .collect::<String>()
-            .to_ascii_uppercase();
+            .to_ascii_uppercase()
+            // Crockford's base32 reads O as 0, I and L as 1.
+            .replace('O', "0")
+            .replace(['I', 'L'], "1");
         let mut state = self.state.lock();
         let pending = state.pending.as_mut().ok_or(Refused)?;
         if Instant::now() >= pending.until {
             state.pending = None;
             return Err(Refused);
         }
+        // A wrong code does not cancel the pairing: `POST /pair` is open to anyone reaching the server, who could
+        // otherwise kill every code minted. 40 bits outlast the 10 minutes of a code at any rate a server answers.
         if !same(typed.as_bytes(), pending.code.as_bytes()) {
-            pending.wrong += 1;
-            if pending.wrong >= TRIES {
-                state.pending = None;
-                log::warn!("remote API: {TRIES} wrong pairing codes: the pairing is cancelled");
-            }
             return Err(Refused);
         }
         state.pending = None;

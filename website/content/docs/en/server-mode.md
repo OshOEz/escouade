@@ -71,7 +71,7 @@ The data is the app’s, in `~/.escouade`. One server runs per data folder: a se
 3. Open the address `pair` gave, `http://127.0.0.1:8765/`. The page shows “Pair this browser”.
 4. Type the code and a name for your device.
 
-The code works once and lasts 10 minutes. Five wrong codes cancel it: run `escouade-server pair` again.
+The code works once and lasts 10 minutes. A wrong code can simply be typed again.
 
 > [!NOTE]
 > To your browser, `http://127.0.0.1:8765/` and `http://localhost:8765/` are two different sites: a browser paired on one is not paired on the other. Always use the same address.

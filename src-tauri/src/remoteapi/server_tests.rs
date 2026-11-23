@@ -928,7 +928,7 @@ fn a_code_is_refused_once_used_wrong_or_guessed() {
     let code = pair_code(&loaded, running.addr);
     assert!(pair_with(&code).starts_with("HTTP/1.1 200"));
     assert!(pair_with(&code).starts_with("HTTP/1.1 403"));
-    // Five wrong: the right one no longer pairs. Wrong for sure: its first character changed.
+    // Wrong ones, from anyone, do not cancel it: the right one still pairs. Wrong for sure: its first character changed.
     let code = pair_code(&loaded, running.addr);
     let wrong = format!(
         "{}{}",
@@ -938,7 +938,7 @@ fn a_code_is_refused_once_used_wrong_or_guessed() {
     for _ in 0..5 {
         assert!(pair_with(&wrong).starts_with("HTTP/1.1 403"));
     }
-    assert!(pair_with(&code).starts_with("HTTP/1.1 403"));
+    assert!(pair_with(&code).starts_with("HTTP/1.1 200"));
     // A body that is no pairing, or too big, or a name left empty.
     let code = pair_code(&loaded, running.addr);
     for body in [
