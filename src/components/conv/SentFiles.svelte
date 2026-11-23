@@ -140,11 +140,14 @@
             </span>
           </span>
           {#if there && !desktop}
-            <span class="acts">
-              <button class="act" aria-label={t('conv.sent.downloadName', { name: f.name })} onclick={() => download(f.index, f.name)}
-                ><Icon name="download" size={13} /><span class="lbl">{t('common.open')}</span></button
-              >
-            </span>
+            <!-- A program or a script the agent sent is never offered from the browser either (docs/REMOTE.md, ESC-171). -->
+            {#if !v.runnable}
+              <span class="acts">
+                <button class="act" aria-label={t('conv.sent.downloadName', { name: f.name })} onclick={() => download(f.index, f.name)}
+                  ><Icon name="download" size={13} /><span class="lbl">{t('common.open')}</span></button
+                >
+              </span>
+            {/if}
           {:else if there}
             <span class="acts">
               <!-- A program or a script the agent sent is never run from here: shown in its folder only. -->
