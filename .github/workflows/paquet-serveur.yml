@@ -1,0 +1,48 @@
+# Fork only, never proposed upstream: builds escouade-server and the web page as docs/REMOTE.md says
+# (« Sur un VPS, de bout en bout »), for someone to try it without building. One archive per architecture.
+name: Paquet du serveur (essai)
+
+on:
+  push:
+    branches: [outil/paquet-serveur]
+
+permissions:
+  contents: read
+
+jobs:
+  paquet:
+    strategy:
+      matrix:
+        include:
+          - { os: ubuntu-22.04, arch: x64 }
+          - { os: ubuntu-22.04-arm, arch: arm64 }
+    # 22.04: its glibc (2.35) runs on Ubuntu 22.04 and Debian 12 and later.
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+          cache: npm
+      - name: Rust toolchain (pinned in src-tauri/rust-toolchain.toml)
+        working-directory: src-tauri
+        run: rustup toolchain install && rustup target add wasm32-wasip1
+      - run: npm ci && npm run build:web
+      - run: sh scripts/escouade-js.sh
+      - run: npx --yes tsx@4.23.15 store/scripts/seed.ts fetch
+      - working-directory: src-tauri
+        run: cargo build --release --locked --no-default-features --features server --bin escouade-server
+      - name: The archive
+        run: |
+          d=escouade-server-${{ matrix.arch }}
+          mkdir -p "$d" && cp src-tauri/target/release/escouade-server "$d/" && cp -r dist-web "$d/escouade-web"
+          cp .github/paquet-serveur-LISEZ-MOI.md "$d/LISEZ-MOI.md"
+          git rev-parse HEAD > "$d/VERSION"
+          ldd "$d/escouade-server"
+          tar czf "$d.tar.gz" "$d"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: escouade-server-${{ matrix.arch }}
+          path: escouade-server-${{ matrix.arch }}.tar.gz
+          retention-days: 14
