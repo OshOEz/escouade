@@ -56,8 +56,9 @@ use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::WebSocketStream;
 
 type Request = hyper::Request<Incoming>;
-/// A WebSocket's connection once upgraded, and the device it comes from (none: the environment's token).
-type Upgrade = Mutex<Option<(OnUpgrade, Option<String>)>>;
+/// A WebSocket's connection once upgraded, the device it comes from (none: the environment's token), and its slot
+/// among `MAX_SESSIONS`.
+type Upgrade = Mutex<Option<(OnUpgrade, Option<String>, OwnedSemaphorePermit)>>;
 type Response = hyper::Response<Full<Bytes>>;
 
 const PORT_VAR: &str = "ESCOUADE_REMOTE_PORT";
@@ -66,6 +67,10 @@ const TOKEN_VAR: &str = "ESCOUADE_REMOTE_TOKEN";
 const MIN_TOKEN: usize = 32;
 /// Clients connected at once; the next ones are closed at once.
 const MAX_CONNECTIONS: usize = 16;
+/// WebSockets open at once, all devices together: the rest of `MAX_CONNECTIONS` stays for short requests, so a device
+/// that holds its sockets open cannot keep out `escouade-server devices revoke` (`/admin/…`), `/pair` or a page's files.
+/// The next WebSocket is answered 503.
+const MAX_SESSIONS: usize = MAX_CONNECTIONS - 4;
 /// The most a request weighs: a command's call, as the MCP server takes one without attachments.
 const MAX_REQUEST: usize = escouade_mcp::http::MAX_TEXT_BODY;
 /// A connection's requests under way; the next ones wait in the socket.
@@ -395,6 +400,7 @@ fn start_with(
         calls: Arc::new(Semaphore::new(calls)),
         uploads: Arc::new(Semaphore::new(files::MAX_UPLOADS)),
         transfers: Arc::new(Semaphore::new(files::MAX_TRANSFERS)),
+        sessions: Arc::new(Semaphore::new(MAX_SESSIONS)),
     });
     let (stop, stopped) = watch::channel(false);
     rt::spawn(server.accept(listener, stopped));
@@ -518,6 +524,8 @@ struct Server {
     uploads: Arc<Semaphore>,
     /// The requests of files, all connections together (`files::MAX_TRANSFERS`).
     transfers: Arc<Semaphore>,
+    /// The WebSockets open, all connections together (`MAX_SESSIONS`).
+    sessions: Arc<Semaphore>,
 }
 
 impl Server {
@@ -674,7 +682,8 @@ impl Server {
         let Ok(()) = served else {
             return;
         };
-        let Some((on_upgrade, device)) = upgrade.lock().take() else {
+        // `_session` keeps its slot until the WebSocket ends.
+        let Some((on_upgrade, device, _session)) = upgrade.lock().take() else {
             return;
         };
         let Ok(Ok(io)) = tokio::time::timeout(HANDSHAKE, on_upgrade).await else {
@@ -752,10 +761,13 @@ impl Server {
         if req.method() != Method::GET {
             return empty(StatusCode::BAD_REQUEST);
         }
+        let Ok(session) = self.sessions.clone().try_acquire_owned() else {
+            return empty(StatusCode::SERVICE_UNAVAILABLE);
+        };
         let accept = derive_accept_key(key.as_bytes());
         // A page that names subprotocols is answered with ours, never with its token's.
         let named = subprotocols(req.headers()).any(|p| p == SUBPROTOCOL);
-        *upgrade.lock() = Some((hyper::upgrade::on(&mut req), device));
+        *upgrade.lock() = Some((hyper::upgrade::on(&mut req), device, session));
         let mut answer = hyper::Response::builder()
             .status(StatusCode::SWITCHING_PROTOCOLS)
             .header(header::CONNECTION, "Upgrade")
