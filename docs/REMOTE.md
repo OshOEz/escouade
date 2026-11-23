@@ -252,6 +252,7 @@ escouade.exemple.fr {
   - cpal ;
   - GTK du presse-papiers.
 - **Les tests.** Un e2e lance `escouade-server`, puis le client par une redirection locale : sans SSH réel en CI, et avec un `ssh` du système vers `localhost` en option.
+- **La sécurité.** Le mode serveur a eu un audit Mantis complet le 2026-11-23 : 19 points corrigés, surtout sur le contenu d'un dépôt cloné. Le compte rendu est dans `docs/security/audit-mantis-2026-11-serveur/README.md`. Un audit Mantis de tout le dépôt est prévu.
 
 ## Le téléphone
 
