@@ -1090,8 +1090,14 @@ mod state_text_tests {
     fn a_state_file_is_read_only_inside_the_project_and_capped() {
         let root = crate::paths::test_dir("wf-state-text");
         std::fs::write(root.join("STATE.md"), "status: ok\n").unwrap();
-        assert_eq!(state_text(&root, "STATE.md").as_deref(), Some("status: ok\n"));
-        assert_eq!(state_text(&root, "./STATE.md").as_deref(), Some("status: ok\n"));
+        assert_eq!(
+            state_text(&root, "STATE.md").as_deref(),
+            Some("status: ok\n")
+        );
+        assert_eq!(
+            state_text(&root, "./STATE.md").as_deref(),
+            Some("status: ok\n")
+        );
         // An absolute path or `..` is refused, even when it lands inside the project.
         let abs = root.join("STATE.md");
         assert_eq!(state_text(&root, abs.to_str().unwrap()), None);

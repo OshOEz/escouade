@@ -1339,7 +1339,11 @@ fn read_dir(dir: &Path) -> Option<BTreeMap<String, String>> {
             continue;
         }
         let mut bytes = Vec::new();
-        if file.take(MAX_TICKET_FILE + 1).read_to_end(&mut bytes).is_err() {
+        if file
+            .take(MAX_TICKET_FILE + 1)
+            .read_to_end(&mut bytes)
+            .is_err()
+        {
             continue;
         }
         let text = if bytes.len() as u64 > MAX_TICKET_FILE {

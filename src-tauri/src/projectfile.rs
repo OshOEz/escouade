@@ -1686,10 +1686,7 @@ fn regular_text(file: &std::path::Path) -> std::io::Result<String> {
     open.read(true);
     // Swapped for a link or a pipe since the check: refused at open, never waited on.
     #[cfg(unix)]
-    std::os::unix::fs::OpenOptionsExt::custom_flags(
-        &mut open,
-        libc::O_NOFOLLOW | libc::O_NONBLOCK,
-    );
+    std::os::unix::fs::OpenOptionsExt::custom_flags(&mut open, libc::O_NOFOLLOW | libc::O_NONBLOCK);
     let f = open.open(file)?;
     if !f.metadata()?.is_file() {
         return Err(Error::new(ErrorKind::InvalidInput, "not a regular file"));
@@ -1697,7 +1694,10 @@ fn regular_text(file: &std::path::Path) -> std::io::Result<String> {
     let mut text = String::new();
     f.take(MAX_FILE + 1).read_to_string(&mut text)?;
     if text.len() as u64 > MAX_FILE {
-        return Err(Error::new(ErrorKind::InvalidData, format!("over {MAX_FILE} bytes")));
+        return Err(Error::new(
+            ErrorKind::InvalidData,
+            format!("over {MAX_FILE} bytes"),
+        ));
     }
     Ok(text)
 }

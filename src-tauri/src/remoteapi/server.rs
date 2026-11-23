@@ -656,9 +656,11 @@ impl Server {
         let long = Arc::new(AtomicBool::new(false));
         // Told when the device of a transfer is revoked: the connection, and its transfer, end at once.
         let cut = Arc::new(Notify::new());
-        let (me, upgraded, slow, ended) = (self.clone(), upgrade.clone(), long.clone(), cut.clone());
+        let (me, upgraded, slow, ended) =
+            (self.clone(), upgrade.clone(), long.clone(), cut.clone());
         let service = service_fn(move |req: Request| {
-            let (me, upgraded, slow, ended) = (me.clone(), upgraded.clone(), slow.clone(), ended.clone());
+            let (me, upgraded, slow, ended) =
+                (me.clone(), upgraded.clone(), slow.clone(), ended.clone());
             async move {
                 let mut answer = if req.uri().path().starts_with(files::PREFIX) {
                     slow.store(true, Ordering::Relaxed);
@@ -750,7 +752,9 @@ impl Server {
     /// A request of `files::PREFIX`: from this server's own pages, with a token. A device's is told by `cut` when
     /// the device is revoked, and its connection ends.
     async fn transfer(&self, req: Request, cut: &Arc<Notify>) -> files::Answer {
-        let admitted = self.mine(req.uri(), req.headers()).and_then(|()| self.admit(req.headers()));
+        let admitted = self
+            .mine(req.uri(), req.headers())
+            .and_then(|()| self.admit(req.headers()));
         let device = match admitted {
             Ok(device) => device,
             Err(status) => return files::status(status),

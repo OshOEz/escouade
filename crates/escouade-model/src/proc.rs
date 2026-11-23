@@ -320,7 +320,11 @@ mod tests {
         assert!(!out.status.success());
         assert!(out.stdout.len() > 1_000_000, "{}", out.stdout.len());
         assert!(out.stdout.len() < 3_000_000, "{}", out.stdout.len());
-        assert!(start.elapsed() < Duration::from_secs(10), "{:?}", start.elapsed());
+        assert!(
+            start.elapsed() < Duration::from_secs(10),
+            "{:?}",
+            start.elapsed()
+        );
     }
 
     #[tokio::test]
