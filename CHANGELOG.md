@@ -4,6 +4,10 @@ Les changements visibles d'Escouade, version par version. Les notes de la mise �
 
 Pour écrire une entrée : une ou deux phrases courtes, pour un lecteur humain. Ce qu'il voit ou peut faire de nouveau, et pourquoi c'est utile ; le détail (cas limites, réglages, noms de fichiers, outils, numéros de ticket) va dans la documentation, pas ici. Chaque entrée a sa traduction anglaise dans CHANGELOG.en.md, sous la même version et le même titre (`## [Unreleased]` pour `## [Non publié]`) : un test de la CI refuse une version sans elle.
 
+## [Non publié]
+
+- Mode serveur, première version : `escouade-server` fait tourner Escouade sans fenêtre sur une machine Linux qui reste allumée, et la même interface s’ouvre dans un navigateur depuis un autre poste, une fois appairé par un code. Les agents continuent quand le poste s’éteint ; le binaire se construit encore depuis les sources.
+
 ## [2.2.7] — 2026-11-22
 
 - Plugins : « Depuis un dossier… » ne copie plus que le plugin, sans `target/`, `node_modules/` ni ce qu’ignore Git, et installe un plugin en Rust sur le module que `escouade-plugin build` a rangé dans `packs/` ; sans module, le refus dit quoi faire, et le journal nomme le fichier vraiment chargé.
