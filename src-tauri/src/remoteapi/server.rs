@@ -963,7 +963,21 @@ impl Server {
                 }
                 let (id, on) = (request.id, conn.clone());
                 let run = async move { me.run(&on, entry, request.args, request.stream).await };
-                let answer = answer_of(id, rt::block_on(rt::spawn(run)));
+                // A call that never ends must not keep its permits and lane once its client is gone or revoked.
+                let mut closed = conn.closed.subscribe();
+                let mut task = rt::spawn(run);
+                let done = rt::block_on(async {
+                    tokio::select! {
+                        done = &mut task => Some(done),
+                        _ = closed.wait_for(|c| *c) => None,
+                    }
+                });
+                let Some(done) = done else {
+                    // shortcut: a sync command stuck in a blocking read keeps its pool thread; only permits and lane are freed.
+                    task.abort();
+                    return;
+                };
+                let answer = answer_of(id, done);
                 let _ = conn.push(&conn.text, Message::text(answer));
             }),
         );
