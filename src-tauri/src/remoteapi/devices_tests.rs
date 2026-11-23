@@ -64,20 +64,23 @@ fn only_the_last_code_is_alive() {
 }
 
 #[test]
-fn five_wrong_tries_cancel_the_code() {
+fn wrong_tries_do_not_cancel_the_code() {
     let (devices, _) = opened("devices-tries");
     let code = devices.pair_code().code;
-    for _ in 0..TRIES - 1 {
+    for _ in 0..100 {
         assert_eq!(devices.redeem(&wrong(&code), "pc"), Err(Refused));
     }
-    // Four wrong: the right one still pairs.
+    // Anyone may send wrong codes: the right one still pairs.
     assert!(devices.redeem(&code, "pc").is_ok());
-    let code = devices.pair_code().code;
-    for _ in 0..TRIES {
-        assert_eq!(devices.redeem(&wrong(&code), "pc"), Err(Refused));
-    }
-    assert_eq!(devices.redeem(&code, "pc"), Err(Refused));
     assert_eq!(devices.list().len(), 1);
+}
+
+#[test]
+fn o_i_and_l_are_read_as_0_and_1() {
+    let (devices, _) = opened("devices-folded");
+    devices.pair_code();
+    devices.state.lock().pending.as_mut().unwrap().code = "01AB01CD".into();
+    assert!(devices.redeem("oiab-OLcd", "pc").is_ok());
 }
 
 #[test]
