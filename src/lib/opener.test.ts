@@ -27,7 +27,7 @@ describe('a link opened in a browser', () => {
     const opened = vi.spyOn(window, 'open').mockReturnValue(null);
     activation(true);
     await openUrl('https://example.com/a');
-    expect(opened).toHaveBeenCalledWith('https://example.com/a', '_blank', 'noopener');
+    expect(opened).toHaveBeenCalledWith('https://example.com/a', '_blank', 'noopener,noreferrer');
     expect(app.toasts).toEqual([]);
   });
 
@@ -40,7 +40,7 @@ describe('a link opened in a browser', () => {
     const [toast] = app.toasts;
     expect(toast.text).toContain('http://localhost:5173/');
     toast.action!.onClick();
-    expect(opened).toHaveBeenCalledWith('http://localhost:5173/', '_blank', 'noopener');
+    expect(opened).toHaveBeenCalledWith('http://localhost:5173/', '_blank', 'noopener,noreferrer');
   });
 
   it('a link the core would refuse is refused at the toast’s click too', async () => {

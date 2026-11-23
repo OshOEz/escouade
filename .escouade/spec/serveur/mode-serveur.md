@@ -26,7 +26,7 @@ C'est une première version : Linux x64 et arm64, construit depuis les sources (
 ### Les appareils
 
 - Un navigateur ne voit rien avant d'être appairé : la page affiche « Appairer ce navigateur » (un code, le nom de l'appareil).
-- `escouade-server pair`, lancé sur le serveur, donne le code et l'adresse à ouvrir. Le code sert une fois, vit 10 minutes, un seul à la fois ; 5 codes faux l'annulent.
+- `escouade-server pair`, lancé sur le serveur, donne le code et l'adresse à ouvrir. Le code sert une fois, vit 10 minutes, un seul à la fois ; un code faux ne l'annule pas, et O, I, L tapés valent 0, 1, 1.
 - Appairé, le navigateur reçoit un jeton qui n'est qu'à lui. Le serveur n'en garde que l'empreinte, dans un fichier lisible de son seul propriétaire. Le jeton n'est jamais dans une adresse ni dans un journal.
 - `escouade-server devices` liste les appareils (nom, appairé le, vu le). `escouade-server devices revoke <id>` en coupe un sur-le-champ, connexions ouvertes comprises. Si la révocation n'a pas pu être écrite sur le disque, la commande le dit et sort en erreur : l'appareil reste coupé tant que le serveur tourne, et il faut révoquer de nouveau une fois le disque réparé.
 - Une page d'une autre origine que celle du serveur (ou qu'une origine déclarée) est refusée, jeton ou non.

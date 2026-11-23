@@ -47,7 +47,7 @@ export const openUrl: typeof system.openUrl = (url, openWith) => {
   // The core's rule and refusal for `open_url` (commands.rs): http, https, mailto and tel alone.
   const scheme = String(url).split(':')[0].toLowerCase();
   if (!['http', 'https', 'mailto', 'tel'].includes(scheme)) return Promise.reject(`not a link Escouade opens: ${scheme}:`);
-  window.open(String(url), '_blank', 'noopener');
+  window.open(String(url), '_blank', 'noopener,noreferrer');
   return done();
 };
 

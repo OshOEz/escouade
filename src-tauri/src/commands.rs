@@ -240,7 +240,10 @@ pub(crate) fn subscribe_to(
     };
     // One lock at a time, each guard ending with its statement: in a struct literal the guards
     // would live together (the lock order is projects before tickets, see `Core`).
-    let settings = core.settings.read().clone();
+    let mut settings = core.settings.read().clone();
+    // SEC-10: the proxy's password kept in the file apart (no keychain) never leaves the backend;
+    // `proxysecret::on_save` takes the backend's copy back anyway.
+    settings.proxy_password_in_file.clear();
     let projects = core.projects.read().clone();
     let tickets = core.tickets.read().clone();
     let agents = core.agent_views();

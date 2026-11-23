@@ -71,7 +71,7 @@ Les données sont celles de l’app, dans `~/.escouade`. Un seul serveur tourne 
 3. Ouvre l’adresse que `pair` a donnée, `http://127.0.0.1:8765/`. La page affiche « Appairer ce navigateur ».
 4. Tape le code et un nom pour ton appareil.
 
-Le code sert une fois et vit 10 minutes. Cinq codes faux l’annulent : relance alors `escouade-server pair`.
+Le code sert une fois et vit 10 minutes. Un code faux se retape simplement.
 
 > [!NOTE]
 > Pour ton navigateur, `http://127.0.0.1:8765/` et `http://localhost:8765/` sont deux sites différents : un navigateur appairé sur l’un ne l’est pas sur l’autre. Garde toujours la même adresse.

@@ -56,8 +56,9 @@ use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::WebSocketStream;
 
 type Request = hyper::Request<Incoming>;
-/// A WebSocket's connection once upgraded, and the device it comes from (none: the environment's token).
-type Upgrade = Mutex<Option<(OnUpgrade, Option<String>)>>;
+/// A WebSocket's connection once upgraded, the device it comes from (none: the environment's token), and its slot
+/// among `MAX_SESSIONS`.
+type Upgrade = Mutex<Option<(OnUpgrade, Option<String>, OwnedSemaphorePermit)>>;
 type Response = hyper::Response<Full<Bytes>>;
 
 const PORT_VAR: &str = "ESCOUADE_REMOTE_PORT";
@@ -66,6 +67,10 @@ const TOKEN_VAR: &str = "ESCOUADE_REMOTE_TOKEN";
 const MIN_TOKEN: usize = 32;
 /// Clients connected at once; the next ones are closed at once.
 const MAX_CONNECTIONS: usize = 16;
+/// WebSockets open at once, all devices together: the rest of `MAX_CONNECTIONS` stays for short requests, so a device
+/// that holds its sockets open cannot keep out `escouade-server devices revoke` (`/admin/…`), `/pair` or a page's files.
+/// The next WebSocket is answered 503.
+const MAX_SESSIONS: usize = MAX_CONNECTIONS - 4;
 /// The most a request weighs: a command's call, as the MCP server takes one without attachments.
 const MAX_REQUEST: usize = escouade_mcp::http::MAX_TEXT_BODY;
 /// A connection's requests under way; the next ones wait in the socket.
@@ -390,11 +395,13 @@ fn start_with(
         devices: config.devices,
         admin,
         conns: Mutex::default(),
+        cuts: Mutex::default(),
         web: config.web,
         origins: config.origins,
         calls: Arc::new(Semaphore::new(calls)),
         uploads: Arc::new(Semaphore::new(files::MAX_UPLOADS)),
         transfers: Arc::new(Semaphore::new(files::MAX_TRANSFERS)),
+        sessions: Arc::new(Semaphore::new(MAX_SESSIONS)),
     });
     let (stop, stopped) = watch::channel(false);
     rt::spawn(server.accept(listener, stopped));
@@ -508,6 +515,8 @@ struct Server {
     admin: escouade_mcp::Tokens,
     /// The devices' connections, closed when their device is revoked.
     conns: Mutex<Vec<(String, Weak<Conn>)>>,
+    /// The devices' transfers of files, ended when their device is revoked.
+    cuts: Mutex<Vec<(String, Weak<Notify>)>>,
     /// The web build's folder.
     web: Option<PathBuf>,
     /// The origins declared by `--origin`, besides the loopback's.
@@ -518,6 +527,8 @@ struct Server {
     uploads: Arc<Semaphore>,
     /// The requests of files, all connections together (`files::MAX_TRANSFERS`).
     transfers: Arc<Semaphore>,
+    /// The WebSockets open, all connections together (`MAX_SESSIONS`).
+    sessions: Arc<Semaphore>,
 }
 
 impl Server {
@@ -626,6 +637,16 @@ impl Server {
             }
             device != id
         });
+        self.cuts.lock().retain(|(device, cut)| {
+            let Some(cut) = cut.upgrade() else {
+                return false;
+            };
+            if device == id {
+                // A permit kept: the transfer ends even if its connection is not waiting yet.
+                cut.notify_one();
+            }
+            device != id
+        });
     }
 
     /// One request per connection: a file, a session, or the WebSocket, which then holds the connection.
@@ -633,13 +654,17 @@ impl Server {
         let upgrade: Arc<Upgrade> = Arc::default();
         // A request of `files::PREFIX`: it may take longer than `EXCHANGE`, its bytes coming at a pace of their own.
         let long = Arc::new(AtomicBool::new(false));
-        let (me, upgraded, slow) = (self.clone(), upgrade.clone(), long.clone());
+        // Told when the device of a transfer is revoked: the connection, and its transfer, end at once.
+        let cut = Arc::new(Notify::new());
+        let (me, upgraded, slow, ended) =
+            (self.clone(), upgrade.clone(), long.clone(), cut.clone());
         let service = service_fn(move |req: Request| {
-            let (me, upgraded, slow) = (me.clone(), upgraded.clone(), slow.clone());
+            let (me, upgraded, slow, ended) =
+                (me.clone(), upgraded.clone(), slow.clone(), ended.clone());
             async move {
                 let mut answer = if req.uri().path().starts_with(files::PREFIX) {
                     slow.store(true, Ordering::Relaxed);
-                    me.transfer(req).await
+                    me.transfer(req, &ended).await
                 } else {
                     let answer = me.answer(req, &upgraded).await;
                     answer.map(|b| b.map_err(|e| match e {}).boxed_unsync())
@@ -658,15 +683,22 @@ impl Server {
             .serve_connection(TokioIo::new(tcp), service)
             .with_upgrades();
         tokio::pin!(conn);
-        let served = match tokio::time::timeout(EXCHANGE, &mut conn).await {
+        let timed = tokio::select! {
+            timed = tokio::time::timeout(EXCHANGE, &mut conn) => timed,
+            () = cut.notified() => return,
+        };
+        let served = match timed {
             Ok(served) => served,
             // A file sent stops at its first pause of `files::IDLE`; one fetched by a client that stopped reading
-            // holds its slot until `files::TRANSFER`.
+            // holds its slot until `files::TRANSFER`, or until its device is revoked.
             Err(_) if long.load(Ordering::Relaxed) => {
                 let more = files::TRANSFER.saturating_sub(EXCHANGE);
-                match tokio::time::timeout(more, &mut conn).await {
-                    Ok(served) => served,
-                    Err(_) => return,
+                tokio::select! {
+                    timed = tokio::time::timeout(more, &mut conn) => match timed {
+                        Ok(served) => served,
+                        Err(_) => return,
+                    },
+                    () = cut.notified() => return,
                 }
             }
             Err(_) => return,
@@ -674,7 +706,8 @@ impl Server {
         let Ok(()) = served else {
             return;
         };
-        let Some((on_upgrade, device)) = upgrade.lock().take() else {
+        // `_session` keeps its slot until the WebSocket ends.
+        let Some((on_upgrade, device, _session)) = upgrade.lock().take() else {
             return;
         };
         let Ok(Ok(io)) = tokio::time::timeout(HANDSHAKE, on_upgrade).await else {
@@ -716,11 +749,25 @@ impl Server {
         }
     }
 
-    /// A request of `files::PREFIX`: from this server's own pages, with a token.
-    async fn transfer(&self, req: Request) -> files::Answer {
-        let admitted = self.mine(req.uri(), req.headers());
-        if let Err(status) = admitted.and_then(|()| self.admit(req.headers()).map(drop)) {
-            return files::status(status);
+    /// A request of `files::PREFIX`: from this server's own pages, with a token. A device's is told by `cut` when
+    /// the device is revoked, and its connection ends.
+    async fn transfer(&self, req: Request, cut: &Arc<Notify>) -> files::Answer {
+        let admitted = self
+            .mine(req.uri(), req.headers())
+            .and_then(|()| self.admit(req.headers()));
+        let device = match admitted {
+            Ok(device) => device,
+            Err(status) => return files::status(status),
+        };
+        if let Some(id) = device {
+            let mut cuts = self.cuts.lock();
+            cuts.retain(|(_, c)| c.strong_count() > 0);
+            cuts.push((id, Arc::downgrade(cut)));
+            drop(cuts);
+            // Checked again once registered: a revoke between the first check and the registration is not missed.
+            if let Err(status) = self.admit(req.headers()) {
+                return files::status(status);
+            }
         }
         let Ok(slot) = self.transfers.clone().try_acquire_owned() else {
             return files::busy();
@@ -752,10 +799,13 @@ impl Server {
         if req.method() != Method::GET {
             return empty(StatusCode::BAD_REQUEST);
         }
+        let Ok(session) = self.sessions.clone().try_acquire_owned() else {
+            return empty(StatusCode::SERVICE_UNAVAILABLE);
+        };
         let accept = derive_accept_key(key.as_bytes());
         // A page that names subprotocols is answered with ours, never with its token's.
         let named = subprotocols(req.headers()).any(|p| p == SUBPROTOCOL);
-        *upgrade.lock() = Some((hyper::upgrade::on(&mut req), device));
+        *upgrade.lock() = Some((hyper::upgrade::on(&mut req), device, session));
         let mut answer = hyper::Response::builder()
             .status(StatusCode::SWITCHING_PROTOCOLS)
             .header(header::CONNECTION, "Upgrade")
@@ -871,6 +921,7 @@ impl Server {
             .header(header::CACHE_CONTROL, file.cache)
             .header(header::CONTENT_SECURITY_POLICY, csp)
             .header(header::X_CONTENT_TYPE_OPTIONS, "nosniff")
+            .header(header::REFERRER_POLICY, "no-referrer")
             .body(Full::new(Bytes::from(file.body)))
             .expect("a valid answer")
     }
@@ -962,7 +1013,21 @@ impl Server {
                 }
                 let (id, on) = (request.id, conn.clone());
                 let run = async move { me.run(&on, entry, request.args, request.stream).await };
-                let answer = answer_of(id, rt::block_on(rt::spawn(run)));
+                // A call that never ends must not keep its permits and lane once its client is gone or revoked.
+                let mut closed = conn.closed.subscribe();
+                let mut task = rt::spawn(run);
+                let done = rt::block_on(async {
+                    tokio::select! {
+                        done = &mut task => Some(done),
+                        _ = closed.wait_for(|c| *c) => None,
+                    }
+                });
+                let Some(done) = done else {
+                    // shortcut: a sync command stuck in a blocking read keeps its pool thread; only permits and lane are freed.
+                    task.abort();
+                    return;
+                };
+                let answer = answer_of(id, done);
                 let _ = conn.push(&conn.text, Message::text(answer));
             }),
         );
