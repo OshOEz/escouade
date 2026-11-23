@@ -2,7 +2,7 @@
 
 Le mode serveur (`escouade-server`, l'API distante, le client web) a été audité le 23 novembre 2026 avec [Mantis](https://github.com/google/mantis), une chaîne d'audit de sécurité menée par des agents d'IA. L'audit a tourné au niveau le plus poussé (« Overkill ») : chaque fichier relu, puis trois tours complets de recherche, de reproduction et de correction. C'est un audit interne mené par un agent pour le projet. Il dit l'état d'une branche à une date, pas celui des versions suivantes.
 
-Ce document est le compte rendu : le périmètre, la méthode, les points relevés et corrigés, et ce qui reste à faire. Le rapport brut de Mantis (constats détaillés, programmes de reproduction) n'est pas versionné, car il décrit des attaques pas à pas.
+Ce document est le compte rendu : le périmètre, la méthode, les points relevés et corrigés, et ce qui reste à faire. Le rapport complet de Mantis, avec le détail de chaque constat, est dans [rapport-mantis.md](rapport-mantis.md) ; les programmes de reproduction ne sont pas publiés.
 
 ## Périmètre
 
