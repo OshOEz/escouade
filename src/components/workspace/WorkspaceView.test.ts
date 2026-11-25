@@ -5,6 +5,7 @@ import { app } from '../../lib/state.svelte';
 import { agent, fakeBackend, project, resetApp } from '../../test/ipc';
 import { planWith, planWithRunning, req, sub } from '../../test/workspace';
 import WorkspaceView from './WorkspaceView.svelte';
+import { HUD_H } from '../../lib/workspace-camera';
 
 const show = () => render(WorkspaceView, { project: app.projects[0] });
 /** The zoom the bar shows (jsdom has no size: the canvas opens fitted at its lowest zoom). */
@@ -124,6 +125,17 @@ describe('the workspace', () => {
     await ptr('pointerdown', { button: 0, clientX: 0, clientY: 0 });
     await ptr('pointermove', { clientX: 50, clientY: 50 });
     expect(world()).not.toBe(before);
+  });
+
+  it('fits below its floating bar, which never covers a card', async () => {
+    const spy = vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockImplementation(() => 1200);
+    const spyH = vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockImplementation(() => 300);
+    resetApp({ agents: [agent({ id: 'a1' }), agent({ id: 'a2' })] });
+    show();
+    const m = /translate\((-?[\d.]+)px, (-?[\d.]+)px\)/.exec((document.querySelector('.world') as HTMLElement).style.transform);
+    expect(Number(m![2])).toBeGreaterThanOrEqual(HUD_H);
+    spy.mockRestore();
+    spyH.mockRestore();
   });
 
   it('fits again when the window is resized, until the camera is moved', async () => {

@@ -10,6 +10,8 @@ export const ZOOM_MAX = 2.5;
 export const ZOOM_STEP = 1.25;
 /** The step of the dotted background, at a zoom of 1 (px). */
 export const DOT = 18;
+/** The height the floating bar and « Quitter » take at the top of the canvas: a fit keeps the cards below it (px). */
+export const HUD_H = 56;
 
 /** Below this zoom the agents are discs seen from afar; above it, their compass. */
 export const FAR_BELOW = 0.45;

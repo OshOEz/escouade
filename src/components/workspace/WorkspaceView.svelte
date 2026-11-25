@@ -19,6 +19,7 @@
     type Altitude,
     type Box,
     type Camera,
+    HUD_H,
   } from '../../lib/workspace-camera';
   import { canvasOrder, discOf, frameOf, layoutFar, layoutNear, type Side } from '../../lib/workspace-layout';
   import Icon from '../Icon.svelte';
@@ -55,14 +56,21 @@
   let moved = false;
 
   const size = () => ({ w: view?.clientWidth ?? 0, h: view?.clientHeight ?? 0 });
-  const centre = () => {
+  /** The part of the canvas under the floating bar: where the cards are fitted, and whose middle the zoom keeps. */
+  const below = () => {
     const s = size();
-    return [s.w / 2, s.h / 2] as const;
+    return { w: s.w, h: Math.max(0, s.h - HUD_H) };
+  };
+  const centre = () => {
+    const b = below();
+    return [b.w / 2, HUD_H + b.h / 2] as const;
   };
 
   // Fitted on opening, and on « Ajuster »: the camera is not kept.
   function fitAll() {
-    cam = fitBest({ far, near }, size());
+    // Below the floating bar: a fitted card is never under it.
+    const c = fitBest({ far, near }, below());
+    cam = { ...c, y: c.y + HUD_H };
     moved = false;
   }
   const place = (next: Camera) => {
@@ -85,7 +93,7 @@
     let c = cam;
     const to = altitude(zoomAt(c, factor, px, py).zoom);
     if (to !== alt) {
-      const from = nearest(anchors(alt), c, size());
+      const from = nearest(anchors(alt), { ...c, y: c.y - HUD_H }, below());
       const there = from && anchors(to).find((b) => b.agentId === from.agentId);
       if (from && there) c = keepAnchor(c, from, there);
     }
