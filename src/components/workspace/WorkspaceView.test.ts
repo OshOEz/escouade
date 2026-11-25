@@ -1,9 +1,10 @@
 import { fireEvent, render, screen } from '@testing-library/svelte';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { dropConversation } from '../../lib/conversations.svelte';
 import { setLang } from '../../lib/i18n';
 import { app } from '../../lib/state.svelte';
 import { agent, fakeBackend, project, resetApp } from '../../test/ipc';
-import { planWith, planWithRunning, req, sub } from '../../test/workspace';
+import { planWith, planWithRunning, questionItem, req, sub } from '../../test/workspace';
 import WorkspaceView from './WorkspaceView.svelte';
 import { HUD_H } from '../../lib/workspace-camera';
 
@@ -51,8 +52,10 @@ function centreOf(container: HTMLElement, agentId: string): [number, number] {
 describe('the workspace', () => {
   beforeEach(() => {
     setLang('fr');
-    fakeBackend();
+    fakeBackend({ get_conversation: () => [] });
   });
+  // An agent that waits has its conversation read: none is kept from a test to the next.
+  afterEach(() => ['a1', 'a2', 'a3'].forEach(dropConversation));
 
   it('draws a disc per agent of the project, archived ones aside', () => {
     resetApp({
@@ -244,5 +247,57 @@ describe('the workspace', () => {
     await fireEvent.click(screen.getByRole('button', { name: /terminé/ }));
     expect(container.querySelectorAll('path.link.run')).toHaveLength(1);
     expect(container.querySelectorAll('path.link.done')).toHaveLength(1);
+  });
+
+  describe('an agent that waits', () => {
+    it('is unfolded from afar, the others stay discs', async () => {
+      fakeBackend({ get_conversation: () => [questionItem('q1')] });
+      resetApp({
+        agents: [
+          agent({ id: 'a1', name: 'un' }),
+          agent({ id: 'a2', name: 'deux', status: 'waiting', pending: ['q1'], requests: [req('q1')] }),
+        ],
+      });
+      show(); // de loin
+      expect(await screen.findByText('Question q1 ?')).toBeTruthy();
+      expect(screen.getByRole('button', { name: /^un,/ })).toBeTruthy();
+      expect(screen.queryByRole('button', { name: /^deux,/ })).toBeNull();
+      expect(screen.getByRole('textbox', { name: 'Écrire à deux' })).toBeTruthy();
+    });
+
+    it('has its conversation read, the others not', async () => {
+      const backend = fakeBackend({ get_conversation: () => [questionItem('q1')] });
+      resetApp({
+        agents: [agent({ id: 'a1', status: 'running' }), agent({ id: 'a2', status: 'waiting', pending: ['q1'], requests: [req('q1')] })],
+      });
+      show();
+      await screen.findByText('Question q1 ?');
+      await zoomTo(1);
+      await screen.findByText('Question q1 ?');
+      expect(new Set(backend.called('get_conversation').map((c) => c.args.id))).toEqual(new Set(['a2']));
+    });
+
+    it("counts its subagents' questions too", () => {
+      fakeBackend({ get_conversation: () => [questionItem('q1', { sub: 's1' })] });
+      resetApp({ agents: [agent({ id: 'a1', status: 'waiting', pending: ['q1'], requests: [req('q1')] })] });
+      show();
+      expect(screen.getByText('1 question')).toBeTruthy();
+    });
+
+    it('is folded back once answered', async () => {
+      fakeBackend({ get_conversation: () => [questionItem('q1')] });
+      resetApp({
+        agents: [
+          agent({ id: 'a1', name: 'un' }),
+          agent({ id: 'a2', name: 'deux', status: 'waiting', pending: ['q1'], requests: [req('q1')] }),
+        ],
+      });
+      show();
+      await screen.findByText('Question q1 ?');
+      app.agents.a2 = { ...app.agents.a2, status: 'running', pending: [], requests: [] };
+      await new Promise((r) => setTimeout(r, 0));
+      expect(screen.queryByRole('textbox', { name: 'Écrire à deux' })).toBeNull();
+      expect(screen.getByRole('button', { name: /^deux,/ })).toBeTruthy();
+    });
   });
 });

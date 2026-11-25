@@ -24,12 +24,13 @@
   <p class="loading">{t('workspace.ask.loading')}</p>
 {:else if asks.length}
   <!-- On the canvas, the wheel scrolls the inset rather than pans (a pinch still zooms). -->
+  <!-- `current` false: no card takes the answer keys nor shows them, several may wait on screen at once. -->
   <div class="ask" style:max-height="{maxH}px" onwheel={(e) => !e.ctrlKey && !e.metaKey && e.stopPropagation()}>
     {#each asks as item (item.id)}
       {#if item.kind === 'question'}
-        <QuestionCard {item} agentId={agent.id} pending current={agent.pending[0] === item.id} />
+        <QuestionCard {item} agentId={agent.id} pending current={false} />
       {:else}
-        <PermissionCard {item} agentId={agent.id} cwd={agent.cwd} pending current={agent.pending[0] === item.id} />
+        <PermissionCard {item} agentId={agent.id} cwd={agent.cwd} pending current={false} />
       {/if}
     {/each}
   </div>

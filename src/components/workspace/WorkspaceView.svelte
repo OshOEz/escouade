@@ -21,7 +21,8 @@
     type Camera,
     HUD_H,
   } from '../../lib/workspace-camera';
-  import { canvasOrder, discOf, frameOf, layoutFar, layoutNear, type Side } from '../../lib/workspace-layout';
+  import { canvasOrder, discOf, frameOf, layoutFarOpen, layoutNear, waits, type Side } from '../../lib/workspace-layout';
+  import type { Agent } from '../../lib/types';
   import Icon from '../Icon.svelte';
   import Compass from './Compass.svelte';
   import Disc from './Disc.svelte';
@@ -34,23 +35,32 @@
   /** Its pile of ended subagents unfolded, by agent; when it was unfolded last (a failure since stays out of the pile). */
   let teamOpen = $state<Record<string, boolean>>({});
   let seenAt = $state<Record<string, number>>({});
-  const far = $derived(layoutFar(ordered.order.map(discOf)));
-  const near = $derived(
-    layoutNear(
-      ordered.order.map((a) =>
-        // Its banner open or folded as in its conversation (PlanBanner: the reader's choice, else a window of 760 px).
-        frameOf(a, { teamOpen: teamOpen[a.id], seenAt: seenAt[a.id], planOpen: app.planOpen[a.id] ?? window.innerHeight >= 760 }),
-      ),
-      ordered.launched,
-    ),
-  );
+  /** The height measured of each card, by agent then by card (`centre`: the agent's): a card that grows moves the others. */
+  let heights = $state<Record<string, Record<string, number>>>({});
+  const frameAt = (a: Agent) =>
+    frameOf(a, {
+      teamOpen: teamOpen[a.id],
+      seenAt: seenAt[a.id],
+      // Its banner open or folded as in its conversation (PlanBanner: the reader's choice, else a window of 760 px).
+      planOpen: app.planOpen[a.id] ?? window.innerHeight >= 760,
+      centreH: heights[a.id]?.centre || undefined,
+      teamH: heights[a.id],
+    });
+  function sized(agentId: string, id: string, h: number) {
+    // 0: not laid out (yet), its size by default.
+    if (h && heights[agentId]?.[id] !== h) heights[agentId] = { ...heights[agentId], [id]: h };
+  }
+  // From afar, an agent that waits is unfolded among the discs (« toujours déplié, quelle que soit l'altitude »).
+  const far = $derived(layoutFarOpen(ordered.order.map(discOf), new Map(ordered.order.filter(waits).map((a) => [a.id, frameAt(a)]))));
+  const near = $derived(layoutNear(ordered.order.map(frameAt), ordered.launched));
   const byId = $derived(new Map(agents.map((a) => [a.id, a])));
   const questions = $derived(agents.reduce((n, a) => n + (a.requests?.length ?? 0), 0));
 
   let view: HTMLDivElement | undefined = $state();
   let cam = $state<Camera>({ x: 0, y: 0, zoom: 1 });
   const alt = $derived(altitude(cam.zoom));
-  const world = $derived(alt === 'far' ? far : near);
+  /** The compasses on screen: all of them near, those of the agents that wait from afar. */
+  const shown = $derived(alt === 'far' ? far : { links: near.links, w: near.w, h: near.h, frames: near.items });
   let drag: { x: number; y: number } | null = $state(null);
   /** The user placed the camera: a resize of the window no longer fits it. */
   let moved = false;
@@ -83,10 +93,16 @@
   });
 
   /** Where each agent is at an altitude: its disc from afar, its card near (the card does not move on screen). */
-  const anchors = (a: Altitude): (Box & { agentId: string })[] =>
-    a === 'far'
-      ? far.items
-      : near.items.map((f) => ({ agentId: f.agentId, x: f.x + f.centre.x, y: f.y + f.centre.y, w: f.centre.w, h: f.centre.h }));
+  const anchors = (a: Altitude): (Box & { agentId: string })[] => {
+    const cards = (a === 'far' ? far.frames : near.items).map((f) => ({
+      agentId: f.agentId,
+      x: f.x + f.centre.x,
+      y: f.y + f.centre.y,
+      w: f.centre.w,
+      h: f.centre.h,
+    }));
+    return a === 'far' ? [...far.discs, ...cards] : cards;
+  };
 
   /** Zooms by `factor` around (px, py); past 45 %, the agent nearest the middle stays where it was on screen. */
   function zoomAround(factor: number, px: number, py: number) {
@@ -179,22 +195,21 @@
   onpointerup={up}
   onpointercancel={up}
 >
-  {#if world.items.length}
+  {#if agents.length}
     <div class="world" style:transform="translate({cam.x}px, {cam.y}px) scale({cam.zoom})">
       {#if alt === 'far'}
         <svg width={far.w} height={far.h} viewBox="0 0 {far.w} {far.h}" overflow="visible">
-          {#each far.items as d (d.agentId)}
+          {#each far.discs as d (d.agentId)}
             {@const a = byId.get(d.agentId)}
             {#if a}<Disc disc={d} agent={a} onpick={pick} />{/if}
           {/each}
         </svg>
-      {:else}
-        <Links links={near.links} w={near.w} h={near.h} />
-        {#each near.items as f (f.agentId)}
-          {@const a = byId.get(f.agentId)}
-          {#if a}<Compass frame={f} agent={a} ontoggle={toggleTeam} />{/if}
-        {/each}
       {/if}
+      {#if shown.frames.length}<Links links={shown.links} w={shown.w} h={shown.h} />{/if}
+      {#each shown.frames as f (f.agentId)}
+        {@const a = byId.get(f.agentId)}
+        {#if a}<Compass frame={f} agent={a} ontoggle={toggleTeam} onsize={(id, h) => sized(f.agentId, id, h)} />{/if}
+      {/each}
     </div>
   {:else}
     <p class="empty">{t('workspace.empty')}</p>

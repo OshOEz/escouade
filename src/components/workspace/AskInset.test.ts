@@ -48,6 +48,12 @@ describe('the questions on a card of the workspace', () => {
     expect(backend.called('answer_question')[0].args).toMatchObject({ id: 'a1', requestId: 'q1', answers: { 'Question q1 ?': 'Oui' } });
   });
 
+  it('shows no answer key: several cards may wait at once, none takes the keys', async () => {
+    const { container } = render(AskInset, { agent: app.agents.a1, sub: undefined, maxH: 700 });
+    await screen.findByText('Question q1 ?');
+    expect(container.querySelector('kbd')).toBeNull();
+  });
+
   it('scrolls past its height', async () => {
     const { container } = render(AskInset, { agent: app.agents.a1, sub: undefined, maxH: 420 });
     await screen.findByText('Question q1 ?');
