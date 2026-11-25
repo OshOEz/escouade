@@ -326,7 +326,9 @@ describe('the workspace', () => {
       const source = readFileSync(resolve(here, file), 'utf8');
       expect(source, file).not.toMatch(/rgba\(var\(--fg-rgb\), 0\.04\)|color-mix\(in oklch, var\(--text\) 6%/);
     }
-    expect(readFileSync(resolve(here, 'WorkspaceView.svelte'), 'utf8')).toContain('--ws-card: color-mix(in oklch, var(--text) 6%, var(--panel));');
+    expect(readFileSync(resolve(here, 'WorkspaceView.svelte'), 'utf8')).toContain(
+      '--ws-card: color-mix(in oklch, var(--text) 6%, var(--panel));',
+    );
   });
 
   describe('an agent that waits', () => {

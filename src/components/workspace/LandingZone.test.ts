@@ -31,4 +31,9 @@ describe('the landing zone', () => {
     rerender({ agentId: 'a1', items: [ribbon('ci', 'running')], onsize: () => {} });
     return Promise.resolve().then(() => expect(container.querySelector('h3.above')).toBeTruthy());
   });
+
+  it("names the button of a page by the page's title for a screen reader", () => {
+    render(LandingZone, { agentId: 'a1', items: [art(true)], onsize: () => {} });
+    expect(screen.getByRole('button', { name: 'Ouvrir Rapport' }).textContent).toBe('Ouvrir ↗');
+  });
 });

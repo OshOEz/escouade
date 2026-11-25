@@ -30,6 +30,8 @@ export default defineZone('workspace', {
     empty: 'Nothing has landed yet',
     artifact: 'Artifact · version {n} · {ago}',
     open: 'Open ↗',
+    /** The name of a page's button for a screen reader. */
+    openPage: 'Open {title}',
   },
   ribbon: {
     label: '{kind}, {state}',

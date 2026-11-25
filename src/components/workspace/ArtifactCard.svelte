@@ -19,7 +19,12 @@
   {#if item.url}
     <footer>
       <span class="meta">{t('workspace.land.artifact', { n: item.versions, ago: fAgo(item.at / 1000, app.now) })}</span>
-      <button type="button" class="btn" onclick={() => item.url && void openUrl(item.url)}>{t('workspace.land.open')}</button>
+      <button
+        type="button"
+        class="btn"
+        aria-label={t('workspace.land.openPage', { title: item.title })}
+        onclick={() => item.url && void openUrl(item.url)}>{t('workspace.land.open')}</button
+      >
     </footer>
   {/if}
 </article>

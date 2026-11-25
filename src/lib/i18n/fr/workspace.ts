@@ -34,6 +34,8 @@ export default {
     empty: 'Rien n’a encore atterri',
     artifact: 'Artefact · version {n} · {ago}',
     open: 'Ouvrir ↗',
+    /** The name of a page's button for a screen reader. */
+    openPage: 'Ouvrir {title}',
   },
   /** A card with a ribbon: a test run, a CI, a deployment. */
   ribbon: {
