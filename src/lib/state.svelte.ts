@@ -654,11 +654,21 @@ class AppState {
   );
   /** The Docs tab of the project on screen is shown (ESC-258): never while the Docs space is off (F-1), nor its project's. */
   docsOn = $derived(
-    this.ui.view === 'project' && !!this.project && !!this.docs[this.project.id] && !this.boardOn && !this.workspace[this.project.id] && this.partOn(this.project.id, 'docs'),
+    this.ui.view === 'project' &&
+      !!this.project &&
+      !!this.docs[this.project.id] &&
+      !this.boardOn &&
+      !this.workspace[this.project.id] &&
+      this.partOn(this.project.id, 'docs'),
   );
   /** The « Pull requests » view of the project on screen is shown (ESC-65). */
   prsOn = $derived(
-    this.ui.view === 'project' && !!this.project && !!this.prs[this.project.id] && !this.boardOn && !this.docsOn && !this.workspace[this.project.id],
+    this.ui.view === 'project' &&
+      !!this.project &&
+      !!this.prs[this.project.id] &&
+      !this.boardOn &&
+      !this.docsOn &&
+      !this.workspace[this.project.id],
   );
   /** The « Workspace » of the project on screen is shown: the canvas of its agents. */
   workspaceOn = $derived(this.ui.view === 'project' && !!this.project && !!this.workspace[this.project.id]);
@@ -781,7 +791,14 @@ class AppState {
       ? this.panes.active.startsWith('agent:')
         ? (this.agents[this.panes.active.slice(6)] ?? null)
         : null
-      : this.ui.view === 'project' && !this.term && !this.pageShown && !this.runCommand && !this.editorOn && !this.boardOn && !this.prsOn && !this.workspaceOn
+      : this.ui.view === 'project' &&
+          !this.term &&
+          !this.pageShown &&
+          !this.runCommand &&
+          !this.editorOn &&
+          !this.boardOn &&
+          !this.prsOn &&
+          !this.workspaceOn
         ? this.agent
         : null,
   );
@@ -1656,7 +1673,7 @@ class AppState {
       this.board[p.id] = false;
       this.docs[p.id] = false;
       this.workspace[p.id] = false;
-    this.prs[p.id] = false;
+      this.prs[p.id] = false;
       this.closeEditor(p.id);
       this.paneShow(p.id, { kind: 'term', id });
     }
@@ -1672,7 +1689,7 @@ class AppState {
       this.board[p.id] = false;
       this.docs[p.id] = false;
       this.workspace[p.id] = false;
-    this.prs[p.id] = false;
+      this.prs[p.id] = false;
       this.closeEditor(p.id);
       this.paneShow(p.id, { kind: 'launch', id: commandId });
     }
@@ -1689,7 +1706,7 @@ class AppState {
       this.board[p.id] = false;
       this.docs[p.id] = false;
       this.workspace[p.id] = false;
-    this.prs[p.id] = false;
+      this.prs[p.id] = false;
       this.closeEditor(p.id);
       this.paneShow(p.id, { kind: 'page', id: key });
     }

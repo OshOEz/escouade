@@ -32,7 +32,12 @@ function centreOf(container: HTMLElement, agentId: string): [number, number] {
   const g = container.querySelector(`g[data-agent="${agentId}"]`);
   let wx: number;
   let wy: number;
-  if (g) [wx, wy] = g.getAttribute('transform')!.match(/translate\((.+) (.+)\)/)!.slice(1).map(Number);
+  if (g)
+    [wx, wy] = g
+      .getAttribute('transform')!
+      .match(/translate\((.+) (.+)\)/)!
+      .slice(1)
+      .map(Number);
   else {
     const frame = container.querySelector(`div[data-agent="${agentId}"]`) as HTMLElement;
     const slot = frame.querySelector('[data-side="centre"]')!.parentElement as HTMLElement;

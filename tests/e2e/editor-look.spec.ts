@@ -689,7 +689,12 @@ for (const lang of ['fr', 'en'] as const)
       await agentAtWork(app.repo, write);
       const words =
         lang === 'fr'
-          ? { conv: 'Rechercher dans les conversations', open: 'Ouvrir un fichier', editor: 'Éditeur ou workspace du projet', editorItem: 'Éditeur' }
+          ? {
+              conv: 'Rechercher dans les conversations',
+              open: 'Ouvrir un fichier',
+              editor: 'Éditeur ou workspace du projet',
+              editorItem: 'Éditeur',
+            }
           : { conv: 'Search conversations', open: 'Open a file', editor: 'Editor or workspace of the project', editorItem: 'Editor' };
       const view = page.getByTestId('vscode-view');
       const back = () => page.getByTestId('vscode-back').click();

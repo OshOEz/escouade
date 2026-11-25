@@ -107,7 +107,11 @@ export function teamOf(agent: Agent, opts: FrameOpts): TeamItem[] {
   const subs = plan?.agents ?? [];
   const item = (sub: SubAgent): TeamItem => ({ kind: 'sub', id: sub.id, sub });
   const out: TeamItem[] = subs.filter(isRunning).map(item);
-  out.push(...bgRows(plan).filter(isRunning).map((row): TeamItem => ({ kind: 'bg', id: row.id, row })));
+  out.push(
+    ...bgRows(plan)
+      .filter(isRunning)
+      .map((row): TeamItem => ({ kind: 'bg', id: row.id, row })),
+  );
   // In the sidebar's order, the latest ended first.
   const ended: SubAgent[] = sidebarSubs(agent)?.finished ?? [];
   if (opts.teamOpen) return [...out, ...ended.map(item)];
@@ -185,7 +189,7 @@ function computeFrame(agent: Agent, opts: FrameOpts): Frame {
       rowEnd.set(i.id, { root: i.id, x: colX + sizeOf(i).w });
       colY += sizeOf(i).h + STACK_GAP;
     }
-  for (let more = true; more; ) {
+  for (let more = true; more;) {
     more = false;
     for (const i of items) {
       const p = parentOf(i);
@@ -204,7 +208,15 @@ function computeFrame(agent: Agent, opts: FrameOpts): Frame {
     const p = parentOf(i);
     const from = p ? placed.get(p)! : centre;
     const state: LinkState =
-      i.kind === 'bg' ? 'run' : i.kind === 'folded' ? 'done' : i.sub.status === 'running' ? 'run' : i.sub.status === 'failed' ? 'failed' : 'done';
+      i.kind === 'bg'
+        ? 'run'
+        : i.kind === 'folded'
+          ? 'done'
+          : i.sub.status === 'running'
+            ? 'run'
+            : i.sub.status === 'failed'
+              ? 'failed'
+              : 'done';
     links.push({ id: `${agent.id}:${i.id}`, state, x1: from.x + from.w, y1: from.y + from.h / 2, x2: i.x, y2: i.y + i.h / 2 });
   }
 

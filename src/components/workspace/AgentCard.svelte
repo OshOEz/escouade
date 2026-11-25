@@ -125,7 +125,12 @@
         label: t('workspace.card.model'),
         submenu: [
           ...entries(models, agent.model, (model) => setAgentOption(agentId, { model })),
-          ...(many ? [{ separator: true, label: '' }, { label: t('workspace.card.allModels'), onClick: () => app.selectAgent(agentId) }] : []),
+          ...(many
+            ? [
+                { separator: true, label: '' },
+                { label: t('workspace.card.allModels'), onClick: () => app.selectAgent(agentId) },
+              ]
+            : []),
         ],
       },
       {

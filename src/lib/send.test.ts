@@ -9,14 +9,15 @@ import { routeOf, submitDraft } from './send.svelte';
 import { app } from './state.svelte';
 import type { Agent, ConvItem, InitialState, QuestionItem } from './types';
 
-const question = (id: string, text: string): QuestionItem => ({
-  kind: 'question',
-  id,
-  toolUseId: `tu-${id}`,
-  questions: [{ question: text, options: [] }],
-  answers: null,
-  ts: 1,
-} as unknown as QuestionItem);
+const question = (id: string, text: string): QuestionItem =>
+  ({
+    kind: 'question',
+    id,
+    toolUseId: `tu-${id}`,
+    questions: [{ question: text, options: [] }],
+    answers: null,
+    ts: 1,
+  }) as unknown as QuestionItem;
 
 const file = (name: string): DraftAttachment => ({ kind: 'image', name, mediaType: 'image/png', data: 'AA==', size: 1 });
 

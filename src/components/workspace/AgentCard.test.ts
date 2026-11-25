@@ -88,7 +88,9 @@ describe('the card of an agent on the workspace', () => {
     await vi.waitFor(() => expect(backend.called('get_conversation').length).toBeGreaterThan(0));
     await new Promise((r) => setTimeout(r, 0));
     await fireEvent.keyDown(field, { key: 'Enter' });
-    await vi.waitFor(() => expect(backend.called('answer_question')[0]?.args).toMatchObject({ id: 'a1', requestId: 'q1', answers: { 'Q ?': 'Oui' } }));
+    await vi.waitFor(() =>
+      expect(backend.called('answer_question')[0]?.args).toMatchObject({ id: 'a1', requestId: 'q1', answers: { 'Q ?': 'Oui' } }),
+    );
     expect(backend.called('send_message')).toHaveLength(0);
   });
 
@@ -100,7 +102,9 @@ describe('the card of an agent on the workspace', () => {
       },
     });
     const field = await typeAndEnter('Bonjour');
-    await vi.waitFor(() => expect(app.toasts.map((x) => x.text)).toContain('Aucun compte Codex : ajoute-en un dans Réglages › Comptes et harness.'));
+    await vi.waitFor(() =>
+      expect(app.toasts.map((x) => x.text)).toContain('Aucun compte Codex : ajoute-en un dans Réglages › Comptes et harness.'),
+    );
     await vi.waitFor(() => expect(field.value).toBe('Bonjour'));
   });
 

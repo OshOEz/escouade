@@ -16,7 +16,9 @@
     {#if l.state === 'run'}
       <circle class="flow" r="3.5"><animateMotion dur="1.6s" repeatCount="indefinite" path={l.d} /></circle>
     {:else if l.state === 'launched'}
-      <text class="said" dy="-6"><textPath href="#link-{uid}-{i}" startOffset="50%" text-anchor="middle">{t('workspace.launched')}</textPath></text>
+      <text class="said" dy="-6"
+        ><textPath href="#link-{uid}-{i}" startOffset="50%" text-anchor="middle">{t('workspace.launched')}</textPath></text
+      >
     {/if}
   {/each}
 </svg>

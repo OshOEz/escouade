@@ -76,7 +76,15 @@ describe('the compass of the workspace', () => {
     expect(frameOf(agent()).north).toBeNull();
   });
   it('packs frames in rows', () => {
-    const r = packRows([{ w: 1000, h: 10 }, { w: 1000, h: 30 }, { w: 1000, h: 20 }], 2100, 50);
+    const r = packRows(
+      [
+        { w: 1000, h: 10 },
+        { w: 1000, h: 30 },
+        { w: 1000, h: 20 },
+      ],
+      2100,
+      50,
+    );
     expect(r.items[2]).toMatchObject({ x: 0, y: 80 });
     expect(r).toMatchObject({ w: 2050, h: 100 });
   });

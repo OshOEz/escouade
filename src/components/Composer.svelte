@@ -30,16 +30,7 @@
   import { t } from '../lib/i18n';
   import { api } from '../lib/ipc';
   import { EFFORTS } from '../lib/models';
-  import {
-    can,
-    capsOf,
-    modelTakes,
-    refreshModels,
-    searchesModels,
-    setFavorite,
-    speakerOf,
-    engineName,
-  } from '../lib/engines';
+  import { can, capsOf, modelTakes, refreshModels, searchesModels, setFavorite, speakerOf, engineName } from '../lib/engines';
   import { keyLabel } from '../lib/platform';
   import { observeWidth } from '../lib/resize';
   import { app, atWork } from '../lib/state.svelte';

@@ -12,7 +12,13 @@ export const sub = (id: string, status: SubAgent['status'] = 'running'): SubAgen
   startedAt: 1,
 });
 
-export const bg = (id: string, status: BgTask['status'] = 'running'): BgTask => ({ id, kind: 'command', title: `tâche ${id}`, status, startedAt: 1 });
+export const bg = (id: string, status: BgTask['status'] = 'running'): BgTask => ({
+  id,
+  kind: 'command',
+  title: `tâche ${id}`,
+  status,
+  startedAt: 1,
+});
 
 /** A plan of tasks in these states, and nothing else. */
 export const planWith = (states: PlanTask['status'][], over: Partial<PlanState> = {}): PlanState => ({

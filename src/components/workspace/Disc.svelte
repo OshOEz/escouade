@@ -64,8 +64,7 @@
       };
     });
   });
-  const satWord = (kind: SatKind, count: number) =>
-    kind === 'team' || kind === 'question' ? t(`workspace.sat.${kind}`, { count }) : '';
+  const satWord = (kind: SatKind, count: number) => (kind === 'team' || kind === 'question' ? t(`workspace.sat.${kind}`, { count }) : '');
 
   function key(e: KeyboardEvent) {
     if (e.key !== 'Enter' && e.key !== ' ') return;
@@ -96,9 +95,7 @@
     {#each { length: disc.total } as _, i (i)}
       <rect class="seg" class:on={i < disc.done} x={-GAUGE / 2 + i * (seg + 3)} y="22" width={seg} height="6" rx="3" />
     {/each}
-    <text class="pct" y="48" text-anchor="middle"
-      >{t('workspace.progress', { done: disc.done, total: disc.total, percent })}</text
-    >
+    <text class="pct" y="48" text-anchor="middle">{t('workspace.progress', { done: disc.done, total: disc.total, percent })}</text>
   {:else}
     <text class="pct" y="34" text-anchor="middle">{t('workspace.noPlan')}</text>
   {/if}

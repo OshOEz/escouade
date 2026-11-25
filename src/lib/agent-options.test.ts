@@ -9,7 +9,11 @@ describe('agent options', () => {
     // A harness of one mode alone, as Composer.test's (ESC-489).
     app.engines = [
       CLAUDE_ENGINE,
-      { ...BARE_ENGINE, name: 'Unharnessed', caps: { ...BARE_ENGINE.caps, modes: [{ id: 'bypassPermissions', meaning: 'Ne demande jamais.' }] } },
+      {
+        ...BARE_ENGINE,
+        name: 'Unharnessed',
+        caps: { ...BARE_ENGINE.caps, modes: [{ id: 'bypassPermissions', meaning: 'Ne demande jamais.' }] },
+      },
     ];
     const plan = modeChoicesOf(app.agents.a1).find((c) => c.value === 'plan');
     expect(plan).toMatchObject({ disabled: true });

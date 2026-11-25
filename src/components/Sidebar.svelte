@@ -152,7 +152,9 @@
   const selectedAgentId = $derived(app.agent?.id);
   const termSelected = $derived(app.selectedTerm[project.id] ?? null);
   /** Another view (terminal, launch log, board) fills the main area: no agent is highlighted. */
-  const otherView = $derived(!!termSelected || !!app.pageShown || !!app.runCommand || app.boardOn || app.docsOn || app.prsOn || app.workspaceOn);
+  const otherView = $derived(
+    !!termSelected || !!app.pageShown || !!app.runCommand || app.boardOn || app.docsOn || app.prsOn || app.workspaceOn,
+  );
   /** The contents of the split screen's panes (ESC-392), when it is on screen: each is highlighted, the active one more. */
   const paneKeys = $derived(app.panesOn && app.panes ? new Set(leaves(app.panes.root).map(itemKey)) : null);
   const inPane = (key: string) => !!paneKeys?.has(key) && app.panes?.active !== key;
