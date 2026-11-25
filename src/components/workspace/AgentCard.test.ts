@@ -171,7 +171,7 @@ describe('the card of an agent on the workspace', () => {
     backend = fakeBackend({ get_conversation: () => [questionItem('q1', { sub: 's1' })] });
     const plan = planWith([], { agents: [{ ...sub('s1'), kind: 'Explore' }] });
     resetApp({ agents: [agent({ id: 'a1', status: 'waiting', pending: ['q1'], requests: [req('q1')], plan })] });
-    const { container } = render(AgentCard, { agent: app.agents.a1 });
+    const { container } = render(AgentCard, { agent: app.agents.a1, shown: ['s1'] });
     expect(await screen.findByText('question de Explore')).toBeTruthy();
     expect(screen.queryByText('Question q1 ?')).toBeNull();
     expect(container.querySelector('.agent')?.classList).toContain('sub-asks');
@@ -191,5 +191,14 @@ describe('the card of an agent on the workspace', () => {
     const onsize = vi.fn();
     render(AgentCard, { agent: app.agents.a1, onsize });
     await vi.waitFor(() => expect(onsize).toHaveBeenCalled());
+  });
+
+  it('shows the request of a subagent that has no card, saying whose it is', async () => {
+    backend = fakeBackend({ get_conversation: () => [questionItem('q1', { sub: 's1' })] });
+    const plan = planWith([], { agents: [{ ...sub('s1', 'done'), kind: 'Explore' }] });
+    resetApp({ agents: [agent({ id: 'a1', status: 'waiting', pending: ['q1'], requests: [req('q1')], plan })] });
+    render(AgentCard, { agent: app.agents.a1, shown: [] });
+    expect(await screen.findByText('Question q1 ?')).toBeTruthy();
+    expect(screen.getByText('question de Explore')).toBeTruthy();
   });
 });

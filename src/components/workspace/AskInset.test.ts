@@ -29,7 +29,7 @@ describe('the questions on a card of the workspace', () => {
   });
 
   it("shows the agent's own requests with the conversation's cards", async () => {
-    render(AskInset, { agent: app.agents.a1, sub: undefined, maxH: 700 });
+    render(AskInset, { agent: app.agents.a1, mine: (s?: string) => !s, maxH: 700 });
     expect(await screen.findByText('Question q1 ?')).toBeTruthy();
     expect(screen.getByText('rm -rf dist')).toBeTruthy();
     // That of the subagent s1 is on its own card.
@@ -37,25 +37,25 @@ describe('the questions on a card of the workspace', () => {
   });
 
   it('shows those of a subagent on its card', async () => {
-    render(AskInset, { agent: app.agents.a1, sub: 's1', maxH: 700 });
+    render(AskInset, { agent: app.agents.a1, mine: (s?: string) => s === 's1', maxH: 700 });
     expect(await screen.findByText('Question q2 ?')).toBeTruthy();
     expect(screen.queryByText('Question q1 ?')).toBeNull();
   });
 
   it("answers by the conversation's card", async () => {
-    render(AskInset, { agent: app.agents.a1, sub: undefined, maxH: 700 });
+    render(AskInset, { agent: app.agents.a1, mine: (s?: string) => !s, maxH: 700 });
     await fireEvent.click(await screen.findByRole('button', { name: 'Oui' }));
     expect(backend.called('answer_question')[0].args).toMatchObject({ id: 'a1', requestId: 'q1', answers: { 'Question q1 ?': 'Oui' } });
   });
 
   it('shows no answer key: several cards may wait at once, none takes the keys', async () => {
-    const { container } = render(AskInset, { agent: app.agents.a1, sub: undefined, maxH: 700 });
+    const { container } = render(AskInset, { agent: app.agents.a1, mine: (s?: string) => !s, maxH: 700 });
     await screen.findByText('Question q1 ?');
     expect(container.querySelector('kbd')).toBeNull();
   });
 
   it('scrolls past its height', async () => {
-    const { container } = render(AskInset, { agent: app.agents.a1, sub: undefined, maxH: 420 });
+    const { container } = render(AskInset, { agent: app.agents.a1, mine: (s?: string) => !s, maxH: 420 });
     await screen.findByText('Question q1 ?');
     expect((container.querySelector('.ask') as HTMLElement).style.maxHeight).toBe('420px');
   });
@@ -64,14 +64,14 @@ describe('the questions on a card of the workspace', () => {
     dropConversation('a1');
     backend = fakeBackend({ get_conversation: () => new Promise(() => {}) });
     let_go = conversationOf('a1').show();
-    render(AskInset, { agent: app.agents.a1, sub: undefined, maxH: 700 });
+    render(AskInset, { agent: app.agents.a1, mine: (s?: string) => !s, maxH: 700 });
     expect(screen.getByText('Chargement de la question…')).toBeTruthy();
   });
 
   it('shows nothing once answered', async () => {
-    const { container, rerender } = render(AskInset, { agent: app.agents.a1, sub: undefined, maxH: 700 });
+    const { container, rerender } = render(AskInset, { agent: app.agents.a1, mine: (s?: string) => !s, maxH: 700 });
     await screen.findByText('Question q1 ?');
-    await rerender({ agent: { ...app.agents.a1, status: 'running', pending: [], requests: [] }, sub: undefined, maxH: 700 });
+    await rerender({ agent: { ...app.agents.a1, status: 'running', pending: [], requests: [] }, mine: (s?: string) => !s, maxH: 700 });
     expect(container.querySelector('.ask')).toBeNull();
   });
 });

@@ -299,5 +299,14 @@ describe('the workspace', () => {
       expect(screen.queryByRole('textbox', { name: 'Écrire à deux' })).toBeNull();
       expect(screen.getByRole('button', { name: /^deux,/ })).toBeTruthy();
     });
+
+    it('shows the request of a subagent folded in the pile on the agent card', async () => {
+      fakeBackend({ get_conversation: () => [questionItem('q1', { sub: 's1' })] });
+      const plan = planWith([], { agents: [{ ...sub('s1', 'done'), kind: 'Explore' }] });
+      resetApp({ agents: [agent({ id: 'a1', name: 'un', status: 'waiting', pending: ['q1'], requests: [req('q1')], plan })] });
+      show();
+      expect(await screen.findByText('Question q1 ?')).toBeTruthy();
+      expect(screen.getByText('question de Explore')).toBeTruthy();
+    });
   });
 });

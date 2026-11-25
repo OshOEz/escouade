@@ -1,32 +1,38 @@
 <script lang="ts">
   // The requests an agent waits on, in its card on the « Workspace » (spec 2026-11-25-vue-workspace-design.md, « La
-  // question ») : the conversation's own cards, mounted as they are. `sub`: those of that subagent, on its card; none,
-  // the agent's own. Its conversation is kept loaded by its card (AgentCard) while it waits.
+  // question ») : the conversation's own cards, mounted as they are. `mine`: whether a request of that subagent (none: the
+  // agent's own) is this card's; `label`: say whose a subagent's request is. Its conversation is kept loaded by its card
+  // (AgentCard) while it waits.
   import { conversationOf } from '../../lib/conversations.svelte';
   import { t } from '../../lib/i18n';
+  import { subName } from '../../lib/workspace-layout';
   import type { Agent, PermissionItem, QuestionItem } from '../../lib/types';
   import PermissionCard from '../conv/PermissionCard.svelte';
   import QuestionCard from '../conv/QuestionCard.svelte';
 
-  let { agent, sub, maxH }: { agent: Agent; sub: string | undefined; maxH: number } = $props();
+  let {
+    agent,
+    mine,
+    maxH,
+    label = false,
+  }: { agent: Agent; mine: (sub: string | undefined) => boolean; maxH: number; label?: boolean } = $props();
 
   const conv = $derived(conversationOf(agent.id));
   const asks = $derived(
     agent.pending
       .map((id) => conv.items.find((i) => i.id === id))
-      .filter(
-        (i): i is QuestionItem | PermissionItem => (i?.kind === 'question' || i?.kind === 'permission') && (i.sub ?? undefined) === sub,
-      ),
+      .filter((i): i is QuestionItem | PermissionItem => (i?.kind === 'question' || i?.kind === 'permission') && mine(i.sub ?? undefined)),
   );
 </script>
 
-{#if agent.pending.length && !conv.loaded && !sub}
+{#if agent.pending.length && !conv.loaded && mine(undefined)}
   <p class="loading">{t('workspace.ask.loading')}</p>
 {:else if asks.length}
   <!-- On the canvas, the wheel scrolls the inset rather than pans (a pinch still zooms). -->
   <!-- `current` false: no card takes the answer keys nor shows them, several may wait on screen at once. -->
   <div class="ask" style:max-height="{maxH}px" onwheel={(e) => !e.ctrlKey && !e.metaKey && e.stopPropagation()}>
     {#each asks as item (item.id)}
+      {#if label && item.sub}<p class="from">{t('workspace.ask.fromSub', { name: subName(agent, conv.items, item.sub) })}</p>{/if}
       {#if item.kind === 'question'}
         <QuestionCard {item} agentId={agent.id} pending current={false} />
       {:else}
@@ -44,6 +50,13 @@
     margin-top: 6px;
     overflow: auto;
     overscroll-behavior: contain;
+  }
+  .from {
+    margin: 0;
+    padding-left: 16px;
+    color: var(--wait);
+    font-size: 12px;
+    font-weight: 550;
   }
   .loading {
     margin: 6px 0 0;

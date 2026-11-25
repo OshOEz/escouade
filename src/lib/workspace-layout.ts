@@ -4,8 +4,8 @@
 import { bgRows, isRunning, ownerOf, type BgRow } from './bgtasks';
 import { drivenAgents } from './later';
 import { planView } from './plan';
-import { sidebarSubs } from './subagents';
-import type { Agent, SubAgent, Ticket } from './types';
+import { sidebarSubs, subagentInfo } from './subagents';
+import type { Agent, ConvItem, SubAgent, Ticket } from './types';
 import type { Box, Size } from './workspace-camera';
 
 export type DiscState = 'run' | 'wait' | 'error' | 'done' | 'idle';
@@ -103,6 +103,12 @@ export const cardMaxH = (windowH: number): number => Math.round(0.7 * windowH);
 
 /** It waits for the user: a question or a permission. Such an agent is unfolded at every altitude. */
 export const waits = (agent: Agent): boolean => agent.status === 'waiting' || agent.pending.length > 0;
+
+/** A subagent's name on the canvas: its type, else its title (its plan's row, else its call in the conversation). */
+export function subName(agent: Agent, items: ConvItem[], call: string): string {
+  const info = subagentInfo(agent, items, call);
+  return info?.kind ?? info?.title ?? call;
+}
 
 /**
  * The east of `agent`: its subagents running, its background tasks running, then the ended subagents folded in one pile

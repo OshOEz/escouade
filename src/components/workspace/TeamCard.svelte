@@ -137,7 +137,7 @@
         .join(' · ')}
     </p>
     {#if sub.doing}<p class="doing mono">{sub.doing}</p>{/if}
-    {#if asks}<AskInset {agent} sub={sub.id} maxH={cardMaxH(innerHeight) - SUB.h} />{/if}
+    {#if asks}<AskInset {agent} mine={(s) => s === sub.id} maxH={cardMaxH(innerHeight) - SUB.h} />{/if}
     {#if canWrite}
       <div class="bar">
         <input

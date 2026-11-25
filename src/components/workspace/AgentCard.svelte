@@ -22,7 +22,7 @@
   import { cardActivity, cardSpend } from '../../lib/sidebar';
   import { app } from '../../lib/state.svelte';
   import type { Agent } from '../../lib/types';
-  import { CARD, cardMaxH, waits } from '../../lib/workspace-layout';
+  import { CARD, cardMaxH, subName, waits } from '../../lib/workspace-layout';
   import AskInset from './AskInset.svelte';
   import EngineMark from '../EngineMark.svelte';
   import HeatFigure from '../HeatFigure.svelte';
@@ -30,7 +30,8 @@
   import MicButton from '../MicButton.svelte';
   import StatusDot from '../StatusDot.svelte';
 
-  let { agent, onsize }: { agent: Agent; onsize?: (h: number) => void } = $props();
+  // `shown`: the subagents that have a card on the canvas; a request of another is shown here.
+  let { agent, onsize, shown = [] }: { agent: Agent; onsize?: (h: number) => void; shown?: string[] } = $props();
 
   const agentId = untrack(() => agent.id);
   let text = $state(getDraft(agentId).text);
@@ -50,12 +51,14 @@
   });
   // Read only while it waits (lazy), and apart: a conversation made inside a derived would not be tracked by it.
   const conv = $derived(conversationOf(agentId));
-  // The subagents asking, by name: their requests are on their own cards.
+  /** A request is this card's: the agent's own, or one of a subagent with no card of its own (folded, dropped). */
+  const mine = (sub: string | undefined) => !sub || !shown.includes(sub);
+  // The subagents asking that have a card, by name: their requests are on their own cards.
   const asking = $derived.by(() => {
     if (!agent.pending.length) return [];
     const items = conv.items;
-    const subs = new Set(agent.pending.map((id) => (items.find((i) => i.id === id) as { sub?: string } | undefined)?.sub).filter(Boolean));
-    return (agent.plan?.agents ?? []).filter((s) => subs.has(s.id)).map((s) => s.kind ?? s.title);
+    const subs = agent.pending.map((id) => (items.find((i) => i.id === id) as { sub?: string } | undefined)?.sub);
+    return [...new Set(subs.filter((s): s is string => !!s && !mine(s)))].map((s) => subName(agent, items, s));
   });
   let innerHeight = $state(window.innerHeight);
   // shortcut: the card's own lines counted as its default height, a line of progress or « paused » more lets it pass 70 % by
@@ -206,7 +209,7 @@
     <span class="spend">{cardSpend(agent)}</span>
   </div>
   {#if asking.length}<p class="from">{t('workspace.ask.fromSub', { name: asking.join(', ') })}</p>{/if}
-  <AskInset {agent} sub={undefined} maxH={askH} />
+  <AskInset {agent} {mine} label maxH={askH} />
   <!-- S10 (ESC-537): the connection to the server cut, sending waits; said as the composer says it. -->
   {#if sendPaused()}<p class="paused" role="status">{t('servers.composer.paused')}</p>{/if}
   <div class="bar">

@@ -22,7 +22,9 @@
 
 <div class="compass" data-agent={frame.agentId} style={at(frame)}>
   {#if frame.north}<div class="slot" style={at(frame.north)}><PlanBand {agent} /></div>{/if}
-  <div class="slot" style={at(frame.centre)}><AgentCard {agent} onsize={(h) => onsize?.('centre', h)} /></div>
+  <div class="slot" style={at(frame.centre)}>
+    <AgentCard {agent} shown={frame.team.filter((i) => i.kind === 'sub').map((i) => i.id)} onsize={(h) => onsize?.('centre', h)} />
+  </div>
   {#each frame.team as item (item.id)}
     <div class="slot" style={at(item)}><TeamCard {agent} {item} ontoggle={() => ontoggle(agent.id)} {onsize} /></div>
   {/each}
