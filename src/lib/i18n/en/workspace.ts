@@ -13,7 +13,6 @@ export default defineZone('workspace', {
   zoomOut: 'Zoom out',
   zoom: '{percent} %',
   fit: 'Fit',
-  state: { run: 'Running', wait: 'Your turn', error: 'Error', done: 'Done', idle: 'Ready' },
   waiting: 'waits for your answer',
   noPlan: 'no plan',
   progress: '{done}/{total} · {percent} %',
@@ -22,12 +21,6 @@ export default defineZone('workspace', {
     question: { one: 'question', other: 'questions' },
   },
   launched: 'launched',
-  plan: {
-    chip: 'Plan',
-    count: '{done}/{total} tasks · {percent} %',
-    folded: { one: '{count} done', other: '{count} done' },
-    hidden: { one: '+ {count} more', other: '+ {count} more' },
-  },
   team: {
     task: 'task {n}',
     write: 'Write to {name}',

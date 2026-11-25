@@ -42,7 +42,7 @@ describe('the disc of an agent', () => {
     renderDisc(
       agent({ name: 'audit', status: 'waiting', requests: [req('q1'), req('q2')], plan: planWith(['done', 'pending', 'pending']) }),
     );
-    expect(screen.getByRole('button', { name: 'audit, À toi, 1 tâche faite sur 3, 2 questions' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'audit, Question, 1 tâche faite sur 3, 2 questions' })).toBeTruthy();
   });
 
   it('is picked by a click and by Enter', async () => {

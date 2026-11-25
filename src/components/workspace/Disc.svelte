@@ -9,7 +9,8 @@
 
   let { disc, agent, onpick }: { disc: Placed<Disc>; agent: Agent; onpick: (agentId: string, side?: Side) => void } = $props();
 
-  const state = $derived(t(`workspace.state.${disc.state}`));
+  // The sidebar's words for its state (« En cours », « Question »…).
+  const state = $derived(t(`nav.sidebar.status.${agent.status}`));
   const percent = $derived(disc.total ? Math.round((disc.done / disc.total) * 100) : 0);
   // Said to a screen reader: what the colours and the satellites show.
   const label = $derived(
@@ -118,8 +119,9 @@
 </g>
 
 <style>
+  /* The tones of the sidebar's card: green at work, yellow when it asks, red in error, muted otherwise. */
   .disc {
-    --c: var(--idle);
+    --c: var(--muted);
     cursor: pointer;
     outline: none;
   }
@@ -132,19 +134,21 @@
   .disc.error {
     --c: var(--del);
   }
-  .disc.done {
-    --c: var(--done);
-  }
   .core {
     fill: var(--raise);
     stroke: var(--c);
-    stroke-width: 2;
+    stroke-width: 1.5;
+  }
+  .done .core,
+  .idle .core {
+    stroke: var(--line-2);
   }
   .wait .core {
-    fill: color-mix(in oklch, var(--wait) 9%, var(--raise));
+    fill: var(--wait-bg);
   }
   .disc:focus-visible .core {
-    stroke-width: 4;
+    stroke: var(--p-ink);
+    stroke-width: 3;
   }
   .halo {
     fill: none;
@@ -168,13 +172,12 @@
   }
   .st {
     fill: var(--c);
-    font: 600 9.5px var(--font);
-    letter-spacing: 0.1em;
-    text-transform: uppercase;
+    font: 550 11.5px var(--font);
   }
   .name {
     fill: var(--text);
-    font: 700 17px var(--font);
+    font: 590 17px var(--font);
+    letter-spacing: -0.01em;
   }
   .act {
     fill: var(--muted);

@@ -3,7 +3,7 @@
 
 import { bgRows, isRunning, ownerOf, type BgRow } from './bgtasks';
 import { drivenAgents } from './later';
-import { planView, type PlanRow } from './plan';
+import { planView } from './plan';
 import { sidebarSubs } from './subagents';
 import type { Agent, SubAgent, Ticket } from './types';
 import type { Box, Size } from './workspace-camera';
@@ -62,17 +62,18 @@ export type Side = 'north' | 'west' | 'centre' | 'east' | 'south';
 /** The side of the compass a satellite stands for. */
 export const SIDE_OF: Record<SatKind, Side> = { team: 'east', tools: 'west', deliverables: 'south', ci: 'south', question: 'centre' };
 
-export const CARD = { w: 360, h: 184 } as const;
-export const SUB = { w: 240, h: 116 } as const;
-export const BG = { w: 240, h: 86 } as const;
-export const TILE = { w: 156, h: 96 } as const;
-export const BAND_H = 150;
+export const CARD = { w: 360, h: 128 } as const;
+export const SUB = { w: 240, h: 100 } as const;
+export const BG = { w: 240, h: 60 } as const;
+/**
+ * The conversation's plan banner (`PlanBanner`), north of the card, as measured in the window: its head and gauge
+ * (`head`, 10 px less folded: no gap before a list), a row of 30 px a task in a list padded by 6 px, 232 px at most and
+ * scrolling past it (its CSS).
+ */
+export const PLAN = { w: 560, head: 72, folded: 62, row: 30, pad: 6, list: 232 } as const;
 export const GAP = 48;
-/** The tiles a plan's band shows at most: past them, the tasks done fold into one. */
-export const MAX_TILES = 9;
-/** The pile of the ended subagents, and the gap between two tiles of the band and two cards of the team. */
+/** The pile of the ended subagents, and the gap between two cards of the team. */
 const FOLDED_H = 40;
-const TILE_GAP = 12;
 const STACK_GAP = 16;
 /** The plan keeps 30 subagents at most: at that many, more may have ended. */
 const PLAN_SUBS_MAX = 30;
@@ -90,21 +91,11 @@ export type Link = { id: string; state: LinkState; d: string };
 export type Edge = { id: string; state: LinkState; x1: number; y1: number; x2: number; y2: number; straight?: boolean };
 
 export type Frame = { agentId: string; w: number; h: number; centre: Box; north: Box | null; team: Placed<TeamItem>[]; links: Edge[] };
-/** `teamOpen`: its pile of ended subagents unfolded; `seenAt`: when it was unfolded last; `centreH`: its card's height. */
-export type FrameOpts = { teamOpen?: boolean; seenAt?: number; centreH?: number };
-
 /**
- * The tiles of the plan's band: all of them up to 9, else the tasks done folded and the others, in order; past 9 tiles
- * still, the last says how many are `hidden`.
+ * `teamOpen`: its pile of ended subagents unfolded; `seenAt`: when it was unfolded last; `centreH`: its card's height;
+ * `planOpen`: its plan's banner unfolded, as in its conversation (default).
  */
-export function bandTiles(rows: PlanRow[]): { folded: number; rows: PlanRow[]; hidden: number } {
-  if (rows.length <= MAX_TILES) return { folded: 0, rows, hidden: 0 };
-  const left = rows.filter((r) => r.state !== 'done');
-  const folded = rows.length - left.length;
-  const slots = MAX_TILES - (folded ? 1 : 0);
-  if (left.length <= slots) return { folded, rows: left, hidden: 0 };
-  return { folded, rows: left.slice(0, slots - 1), hidden: left.length - (slots - 1) };
-}
+export type FrameOpts = { teamOpen?: boolean; seenAt?: number; centreH?: number; planOpen?: boolean };
 
 /**
  * The east of `agent`: its subagents running, its background tasks running, then the ended subagents folded in one pile
@@ -153,7 +144,7 @@ const frames = new WeakMap<Agent, { key: string; frame: Frame }>();
  * column on the right. A subagent whose parent is in the team, and a background task whose subagent is, lie right of it.
  */
 export function frameOf(agent: Agent, opts: FrameOpts = {}): Frame {
-  const key = `${!!opts.teamOpen}|${opts.seenAt ?? 0}|${opts.centreH ?? ''}`;
+  const key = `${!!opts.teamOpen}|${opts.seenAt ?? 0}|${opts.centreH ?? ''}|${opts.planOpen !== false}`;
   const known = frames.get(agent);
   if (known?.key === key) return known.frame;
   const frame = computeFrame(agent, opts);
@@ -165,11 +156,10 @@ function computeFrame(agent: Agent, opts: FrameOpts): Frame {
   const rows = planView(agent)?.rows ?? [];
   let north: Box | null = null;
   if (rows.length) {
-    const b = bandTiles(rows);
-    const n = b.rows.length + (b.folded ? 1 : 0) + (b.hidden ? 1 : 0);
-    north = { x: 0, y: 0, w: Math.max(CARD.w, n * (TILE.w + TILE_GAP) + TILE_GAP), h: BAND_H };
+    const h = opts.planOpen === false ? PLAN.folded : PLAN.head + Math.min(rows.length * PLAN.row + PLAN.pad, PLAN.list);
+    north = { x: 0, y: 0, w: PLAN.w, h };
   }
-  const centre: Box = { x: 0, y: north ? BAND_H + GAP : 0, w: CARD.w, h: opts.centreH ?? CARD.h };
+  const centre: Box = { x: 0, y: north ? north.h + GAP : 0, w: CARD.w, h: opts.centreH ?? CARD.h };
   const links: Edge[] = [];
   if (north) {
     const x = CARD.w / 2;

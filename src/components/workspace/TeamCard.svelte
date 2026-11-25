@@ -14,6 +14,7 @@
   import type { Agent } from '../../lib/types';
   import type { TeamItem } from '../../lib/workspace-layout';
   import MicButton from '../MicButton.svelte';
+  import StatusDot from '../StatusDot.svelte';
 
   let { agent, item, ontoggle }: { agent: Agent; item: TeamItem; ontoggle: () => void } = $props();
 
@@ -27,6 +28,8 @@
     const i = sub?.planTask ? (agent.plan?.tasks.findIndex((x) => x.id === sub.planTask) ?? -1) : -1;
     return i >= 0 ? i + 1 : null;
   });
+  // Its dot is an agent's: green while it runs, red failed, grey ended.
+  const dot = $derived(sub?.status === 'running' ? 'running' : sub?.status === 'failed' ? 'error' : 'done');
   const canWrite = $derived(!!sub && canWriteSub(agent, sub));
   // What is typed to it is the app's, as in its view: it outlives the card and a change of altitude.
   const draftKey = $derived(sub ? `${agent.id}:${sub.id}` : '');
@@ -88,7 +91,10 @@
     data-side="east"
     aria-label={t('workspace.card.label', { name: kindLabel(item.row.kind), state: t(`bgtasks.status.${item.row.status}`) })}
   >
-    <header><b>{kindLabel(item.row.kind)}</b>{#if ms !== null}<span class="dur mono">{fDur(ms)}</span>{/if}</header>
+    <header>
+      <StatusDot status={item.row.status === 'running' ? 'running' : 'done'} />
+      <b class="name">{kindLabel(item.row.kind)}</b>{#if ms !== null}<span class="st num">{fDur(ms)}</span>{/if}
+    </header>
     <p class="cmd mono">{rowTitle(item.row)}</p>
   </article>
 {:else if sub}
@@ -102,12 +108,12 @@
     bind:this={wrap}
   >
     <header>
-      <span class="dot" aria-hidden="true"></span>
+      <StatusDot status={dot} />
       <b class="name">{name}</b>
       {#if task}<span class="task">{t('workspace.team.task', { n: task })}</span>{/if}
       <span class="st">{word}</span>
     </header>
-    <p class="meta mono">
+    <p class="meta">
       {[sub.model ? modelLabel(sub.model, app.models) : '', ms !== null ? fDur(ms) : '', sub.tokens ? fTok(sub.tokens) : '']
         .filter(Boolean)
         .join(' · ')}
@@ -130,78 +136,77 @@
 {/if}
 
 <style>
+  /* The agent's card in smaller: the sidebar's card on the canvas. */
   .card {
-    --c: var(--line-2);
+    --tone: var(--muted);
     display: flex;
     flex-direction: column;
-    gap: 4px;
+    gap: 3px;
     box-sizing: border-box;
     width: 100%;
     height: 100%;
-    padding: 10px 12px;
-    border-radius: 10px;
-    background: var(--raise);
-    box-shadow: inset 0 0 0 1.5px var(--c);
+    padding: 8px 10px 9px;
+    border-radius: 9px;
+    background: color-mix(in oklch, var(--text) 6%, var(--panel));
+    box-shadow: inset 0 0 0 1px var(--line-2);
     color: var(--text);
-    font-size: 12px;
+    font-size: 12.5px;
   }
   .card.running {
-    --c: var(--run);
+    --tone: var(--run);
   }
   .card.failed {
-    --c: var(--del);
+    --tone: var(--del);
   }
+  /* A background task: a dotted edge. */
   .card.bg {
     box-shadow: none;
-    outline: 1.5px dashed var(--c);
-    outline-offset: -1.5px;
+    outline: 1px dashed var(--line-3);
+    outline-offset: -1px;
   }
   header {
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: 8px;
     min-width: 0;
   }
-  .dot {
-    flex: none;
-    width: 6px;
-    height: 6px;
-    border-radius: 50%;
-    background: var(--c);
-  }
   .name {
+    flex: 1;
+    min-width: 0;
     overflow: hidden;
-    white-space: nowrap;
+    font-weight: 590;
+    letter-spacing: -0.01em;
     text-overflow: ellipsis;
+    white-space: nowrap;
   }
   .task {
     flex: none;
     padding: 0 6px;
     border-radius: 99px;
-    background: var(--line);
+    background: var(--hover);
     color: var(--soft);
-    font-size: 10px;
+    font-size: 11px;
   }
-  .st,
-  .dur {
-    margin-left: auto;
-    color: var(--muted);
-    font-size: 10px;
+  .st {
+    flex: none;
+    color: var(--tone);
+    font-size: 11.5px;
+    font-weight: 550;
     white-space: nowrap;
-  }
-  .running .st {
-    color: var(--run);
-  }
-  .failed .st {
-    color: var(--del);
   }
   p {
     margin: 0;
     overflow: hidden;
-    color: var(--soft);
-    font-size: 10.5px;
+    padding-left: 16px;
+    color: var(--muted);
+    font-size: 12px;
     white-space: nowrap;
     text-overflow: ellipsis;
+  }
+  .doing,
+  .cmd {
+    color: var(--soft);
+    font-size: 11px;
   }
   .bar {
     display: flex;
@@ -209,12 +214,14 @@
     gap: 2px;
     margin-top: auto;
     padding: 2px 2px 2px 8px;
-    border-radius: 7px;
-    background: var(--well);
+    border-radius: var(--r-sm);
+    background: var(--raise);
     box-shadow: inset 0 0 0 1px var(--line-2);
   }
   .bar:focus-within {
-    box-shadow: inset 0 0 0 1px var(--p);
+    box-shadow:
+      inset 0 0 0 1px color-mix(in oklch, var(--p) 55%, transparent),
+      0 0 0 3px color-mix(in oklch, var(--p) 14%, transparent);
   }
   input {
     flex: 1;
@@ -223,22 +230,25 @@
     background: none;
     color: var(--text);
     font: inherit;
-    font-size: 11.5px;
+    font-size: 12px;
     outline: none;
   }
+  /* The pile: a pill of the app. */
   .folded {
     width: 100%;
     height: 100%;
-    border: 0;
-    border-radius: 99px;
-    background: var(--raise);
+    border: none;
+    border-radius: 999px;
+    background: rgba(var(--fg-rgb), 0.04);
     box-shadow: inset 0 0 0 1px var(--line-2);
     color: var(--soft);
     font: inherit;
-    font-size: 11.5px;
+    font-size: 12px;
+    font-weight: 550;
     cursor: pointer;
   }
   .folded:hover {
+    background: var(--hover);
     color: var(--text);
   }
 </style>

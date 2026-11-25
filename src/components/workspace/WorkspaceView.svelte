@@ -36,7 +36,10 @@
   const far = $derived(layoutFar(ordered.order.map(discOf)));
   const near = $derived(
     layoutNear(
-      ordered.order.map((a) => frameOf(a, { teamOpen: teamOpen[a.id], seenAt: seenAt[a.id] })),
+      ordered.order.map((a) =>
+        // Its banner open or folded as in its conversation (PlanBanner: the reader's choice, else a window of 760 px).
+        frameOf(a, { teamOpen: teamOpen[a.id], seenAt: seenAt[a.id], planOpen: app.planOpen[a.id] ?? window.innerHeight >= 760 }),
+      ),
       ordered.launched,
     ),
   );
@@ -189,7 +192,7 @@
     <p class="empty">{t('workspace.empty')}</p>
   {/if}
 
-  <button class="hud exit" onclick={() => app.closeWorkspace(project.id)}>
+  <button class="hud exit btn" onclick={() => app.closeWorkspace(project.id)}>
     <Icon name="left" size={14} /><span>{t('workspace.exit')}</span>
   </button>
   <div class="hud bar">
@@ -205,6 +208,7 @@
 </div>
 
 <style>
+  /* The work area's own surface (App.svelte, `.work`), with discreet dots. */
   .ws {
     position: relative;
     flex: 1;
@@ -213,8 +217,8 @@
     overflow: hidden;
     cursor: grab;
     touch-action: none;
-    background-color: var(--well);
-    background-image: radial-gradient(var(--line-2) 1.2px, transparent 1.2px);
+    background-color: var(--panel);
+    background-image: radial-gradient(var(--line-2) 1px, transparent 1px);
   }
   .ws.pan {
     cursor: grabbing;
@@ -237,49 +241,53 @@
     margin: 0;
     color: var(--muted);
   }
+  /* Above the canvas, with the shadow of the app's floating surfaces. */
   .hud {
     position: absolute;
     top: 14px;
     z-index: 1;
-    display: flex;
-    align-items: center;
-    gap: 4px;
-    background: var(--raise);
-    border: 1px solid var(--line-2);
-    box-shadow: 0 6px 16px rgb(0 0 0 / 0.2);
-    color: var(--soft);
+    box-shadow:
+      inset 0 0 0 1px var(--line-2),
+      0 8px 24px -6px rgba(0, 0, 0, calc(0.5 * var(--shade)));
   }
   .exit {
     left: 16px;
-    padding: 6px 12px 6px 9px;
-    border-radius: var(--r-sm);
-    color: var(--text);
-    cursor: pointer;
+    background: var(--raise);
   }
+  /* A pill of the app: its buttons are those of the composer's chips. */
   .bar {
     left: 50%;
-    transform: translateX(-50%);
-    padding: 4px 8px;
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    height: 32px;
+    padding: 0 4px;
     border-radius: 999px;
+    background: var(--raise);
+    color: var(--soft);
+    font-size: 12.5px;
     white-space: nowrap;
+    transform: translateX(-50%);
   }
   .bar button {
+    height: 24px;
+    padding: 0 10px;
     border: none;
+    border-radius: 999px;
     background: none;
     color: var(--text);
-    border-radius: 999px;
-    padding: 4px 10px;
+    font: inherit;
+    font-weight: 550;
     cursor: pointer;
   }
-  .bar button:hover,
-  .exit:hover {
+  .bar button:hover {
     background: var(--hover);
   }
   .bar i {
     width: 1px;
     height: 14px;
-    background: var(--line-2);
     margin: 0 4px;
+    background: var(--line-2);
   }
   .pct {
     min-width: 44px;

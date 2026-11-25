@@ -12,20 +12,16 @@ describe('the plan of an agent on the workspace', () => {
     resetApp();
   });
 
-  it('shows the plan, its count and a tile per task', () => {
+  it("shows the conversation's banner: its count, its share and a row per task", () => {
     render(PlanBand, { agent: agent({ plan: planWith(['done', 'done', 'done', 'inProgress', 'pending', 'pending', 'pending']) }) });
-    expect(screen.getByText('3/7 tâches · 43 %')).toBeTruthy();
+    expect(screen.getAllByText('3/7 tâches').length).toBeGreaterThan(0); // its count, and what a screen reader is told
+    expect(screen.getByText('43 %')).toBeTruthy();
     expect(screen.getAllByRole('listitem')).toHaveLength(7);
+    expect(screen.getByText('04')).toBeTruthy();
   });
 
-  it('folds the tasks done past 9', () => {
-    render(PlanBand, { agent: agent({ plan: planWith([...Array(8).fill('done'), 'inProgress', 'pending']) }) });
-    expect(screen.getByText('8 faites')).toBeTruthy();
-  });
-
-  it('says how many tasks it does not show', () => {
+  it('keeps every task of a long plan, in its list that scrolls', () => {
     render(PlanBand, { agent: agent({ plan: planWith(['done', 'inProgress', ...Array(10).fill('pending')]) }) });
-    expect(screen.getByText('+ 4 autres')).toBeTruthy();
-    expect(screen.getAllByRole('listitem')).toHaveLength(9);
+    expect(screen.getAllByRole('listitem')).toHaveLength(12);
   });
 });

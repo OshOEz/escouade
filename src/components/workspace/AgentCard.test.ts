@@ -6,6 +6,7 @@ import { dropConversation } from '../../lib/conversations.svelte';
 import { forgetDraft, getDraft, setDraft } from '../../lib/drafts';
 import { setLang } from '../../lib/i18n';
 import { menu } from '../../lib/menu.svelte';
+import { cardSpend } from '../../lib/sidebar';
 import { app } from '../../lib/state.svelte';
 import { agent, fakeBackend, resetApp } from '../../test/ipc';
 import AgentCard from './AgentCard.svelte';
@@ -132,5 +133,21 @@ describe('the card of an agent on the workspace', () => {
     setDraft('a1', { text: '', files: [image('a.png')] });
     await typeAndEnter('');
     await vi.waitFor(() => expect(backend.called('send_message')[0]?.args).toMatchObject({ id: 'a1', text: '' }));
+  });
+
+  it("says its state as the sidebar's card does, with its spend", () => {
+    resetApp({ agents: [agent({ id: 'a1', name: 'un', status: 'waiting' })] });
+    const { container } = render(AgentCard, { agent: app.agents.a1 });
+    expect(screen.getByText('Question')).toBeTruthy();
+    expect(screen.getByRole('article', { name: 'un, Question' })).toBeTruthy();
+    // Its spaces are the narrow ones of the French figures, which the text queries normalise away.
+    expect(container.querySelector('.spend')?.textContent?.trim()).toBe(cardSpend(app.agents.a1));
+  });
+
+  it('sends by its « Envoyer » button too', async () => {
+    render(AgentCard, { agent: app.agents.a1 });
+    await fireEvent.input(screen.getByRole('textbox'), { target: { value: 'Bonjour' } });
+    await fireEvent.click(screen.getByRole('button', { name: 'Envoyer' }));
+    await vi.waitFor(() => expect(backend.called('send_message')[0]?.args).toMatchObject({ id: 'a1', text: 'Bonjour' }));
   });
 });

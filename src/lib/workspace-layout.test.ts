@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { agent } from '../test/ipc';
 import { planWith, planWithRunning, req, sub } from '../test/workspace';
 import { planView } from './plan';
-import { bandTiles, canvasOrder, DISC, discOf, frameOf, GAP, layoutFar, layoutNear, packRows, SUB, teamOf } from './workspace-layout';
+import { canvasOrder, DISC, discOf, frameOf, GAP, layoutFar, layoutNear, packRows, SUB, teamOf } from './workspace-layout';
 
 describe('the discs of the workspace', () => {
   it('says the state in one word', () => {
@@ -46,12 +46,11 @@ describe('the discs of the workspace', () => {
 });
 
 describe('the compass of the workspace', () => {
-  it('folds the plan past 9 tasks', () => {
-    const rows = planView(agent({ plan: planWith([...Array(6).fill('done'), 'inProgress', ...Array(5).fill('pending')]) }))!.rows;
-    const b = bandTiles(rows);
-    expect(b.folded).toBe(6);
-    expect(b.rows[0].state).toBe('run');
-    expect(b.rows).toHaveLength(6);
+  it("sizes the north to the conversation's banner: a row a task, up to its list's height, less folded", () => {
+    const north = (n: number, planOpen?: boolean) => frameOf(agent({ plan: planWith(Array(n).fill('pending')) }), { planOpen }).north!.h;
+    expect(north(7)).toBeGreaterThan(north(3));
+    expect(north(30)).toBe(north(40));
+    expect(north(7, false)).toBeLessThan(north(3));
   });
   it('puts the team on the east, folds the ended, keeps a failure not seen', () => {
     const a = agent({ plan: planWith([], { agents: [sub('s1'), sub('s2', 'done'), sub('s3', 'failed')] }) });
@@ -99,13 +98,6 @@ describe('the compass of the workspace', () => {
     expect(r.links[1].d.endsWith(`${a.w + GAP} ${b.centre.y + b.centre.h / 2}`)).toBe(true);
   });
 
-  it('says the tasks it cuts, 9 tiles at most in all', () => {
-    const rows = planView(agent({ plan: planWith(['done', 'inProgress', ...Array(10).fill('pending')]) }))!.rows;
-    const b = bandTiles(rows);
-    expect(b).toMatchObject({ folded: 1, hidden: 4 });
-    expect(b.rows).toHaveLength(7);
-    expect(bandTiles(rows.slice(0, 5)).hidden).toBe(0);
-  });
   it('computes the frame of an agent once, while it and its options stay the same', () => {
     const a = agent({ id: 'a', plan: planWith(['inProgress'], { agents: [sub('s1')] }) });
     const f = frameOf(a, { seenAt: 5 });

@@ -1,6 +1,7 @@
 <script lang="ts">
   // The card of an agent near, at the centre of its compass (spec 2026-11-25-vue-workspace-design.md, « Au centre ») :
-  // its state, its model and spend, what it does, and a bar to write to it. Enter sends by the conversation's path
+  // the sidebar's card (its dot, name and state, model · duration and heat, what it does and its spend), and a bar to
+  // write to it. Enter sends by the conversation's path
   // (`submitDraft`), from the agent's own draft: what is typed here is in its conversation once the canvas is left.
   import { untrack } from 'svelte';
   import { conversationOf } from '../../lib/conversations.svelte';
@@ -13,15 +14,17 @@
   import { t } from '../../lib/i18n';
   import { interactiveOf } from '../../lib/interactive';
   import { menu, type MenuItem } from '../../lib/menu.svelte';
-  import { EFFORTS, modelLabel } from '../../lib/models';
+  import { modelLabel } from '../../lib/models';
   import { pendingItemOf, sendPaused, submitDraft } from '../../lib/send.svelte';
   import { tip } from '../../lib/tip';
   import { cardActivity, cardSpend } from '../../lib/sidebar';
   import { app } from '../../lib/state.svelte';
   import type { Agent } from '../../lib/types';
-  import { discOf } from '../../lib/workspace-layout';
+  import EngineMark from '../EngineMark.svelte';
+  import HeatFigure from '../HeatFigure.svelte';
   import Icon from '../Icon.svelte';
   import MicButton from '../MicButton.svelte';
+  import StatusDot from '../StatusDot.svelte';
 
   let { agent }: { agent: Agent } = $props();
 
@@ -31,17 +34,10 @@
   let field = $state<HTMLInputElement>();
   let wrap = $state<HTMLElement>();
 
-  const disc = $derived(discOf(agent));
-  const stateWord = $derived(t(`workspace.state.${disc.state}`));
-  const effort = $derived(EFFORTS.find((e) => e.value === agent.effort)?.label);
+  // The sidebar's words for its state (« En cours », « Question »…).
+  const stateWord = $derived(t(`nav.sidebar.status.${agent.status}`));
   const duration = $derived(fDur(agent.activeMs + (agent.activeSince ? app.now - agent.activeSince : 0)));
-  const activity = $derived.by(() => {
-    const act = cardActivity(agent, 0);
-    if (act?.kind === 'doing') return act.what ? `${act.verb} ${act.what}` : act.verb;
-    if (act?.kind === 'thinking') return t('stats.overview.thinking');
-    if (act?.kind === 'over') return `${t('nav.sidebar.over')} · ${act.goes}`;
-    return disc.state === 'wait' ? t('workspace.waiting') : '';
-  });
+  const act = $derived(cardActivity(agent, 0));
 
   // Its conversation is loaded while it waits: what is typed answers the request there, as in the conversation.
   const waits = $derived(agent.status === 'waiting' || agent.pending.length > 0);
@@ -152,22 +148,36 @@
 </script>
 
 <article
-  class="card {disc.state}"
+  class="agent {agent.status}"
   data-side="centre"
   aria-label={t('workspace.card.label', { name: agent.name, state: stateWord })}
   ondblclick={open}
   bind:this={wrap}
 >
-  <header>
-    <span class="dot" aria-hidden="true"></span>
-    <b class="name">{agent.name}</b>
-    <span class="st">{stateWord}</span>
-  </header>
-  <p class="meta mono">
-    {[modelLabel(agent.model, app.models), effort, duration, cardSpend(agent)].filter(Boolean).join(' · ')}
-  </p>
-  {#if activity}<p class="act mono">{activity}</p>{/if}
-  {#if agent.progressLine}<p class="said">{agent.progressLine}</p>{/if}
+  <div class="a-top">
+    <StatusDot status={agent.status} />
+    <span class="name">{agent.name}</span>
+    <span class="a-state">{stateWord}</span>
+  </div>
+  {#if agent.progressLine}<div class="said">{agent.progressLine}</div>{/if}
+  <div class="a-meta">
+    <EngineMark engine={agent.engine} />
+    <span class="model">{modelLabel(agent.model, app.models)}</span>
+    <span class="sep">·</span><span class="num">{duration}</span>
+    <HeatFigure {agent} />
+  </div>
+  <div class="a-act">
+    {#if agent.status === 'waiting'}
+      <span class="tgt">{t('workspace.waiting')}</span>
+    {:else if act?.kind === 'doing'}
+      <b>{act.verb}</b>{#if act.what}<span class="tgt mono">{act.what}</span>{/if}
+    {:else if act?.kind === 'thinking'}
+      <span class="tgt">{t('stats.overview.thinking')}</span>
+    {:else if act?.kind === 'over'}
+      <span class="ok"><Icon name="check" size={14} /></span><span class="tgt">{t('nav.sidebar.over')} · {act.goes}</span>
+    {/if}
+    <span class="spend">{cardSpend(agent)}</span>
+  </div>
   <!-- S10 (ESC-537): the connection to the server cut, sending waits; said as the composer says it. -->
   {#if sendPaused()}<p class="paused" role="status">{t('servers.composer.paused')}</p>{/if}
   <div class="bar">
@@ -184,101 +194,149 @@
       <Icon name="sliders" size={14} />
     </button>
     <MicButton target={dictated} panel={false} />
+    <button type="button" class="btn primary send" disabled={!text.trim() && !files} onclick={send}>{t('composer.send.label')}</button>
   </div>
 </article>
 
 <style>
-  .card {
-    --c: var(--line-2);
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
+  /* The sidebar's card (Sidebar.svelte, `.agent`), as it is when selected: on the canvas it stands alone. */
+  .agent {
+    --tone: var(--run);
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    align-content: start;
+    gap: 3px;
     box-sizing: border-box;
     width: 100%;
     min-height: 100%;
-    padding: 14px 16px 12px;
-    border-radius: 12px;
-    background: var(--raise);
-    box-shadow: inset 0 0 0 1.5px var(--c);
+    padding: 8px 10px 9px;
+    border-radius: 9px;
+    background: color-mix(in oklch, var(--text) 6%, var(--panel));
+    box-shadow: inset 0 0 0 1px var(--line-2);
     color: var(--text);
+    font-size: 13px;
   }
-  .card.run {
-    --c: var(--run);
+  .agent.waiting {
+    --tone: var(--wait);
+    background: color-mix(in oklch, var(--wait-bg), var(--panel));
+    box-shadow: inset 0 0 0 1px var(--wait-line);
   }
-  .card.wait {
-    --c: var(--wait);
-    background: color-mix(in oklch, var(--wait) 9%, var(--raise));
-    animation: halo 1.8s ease-in-out infinite;
+  .agent.done,
+  .agent.idle {
+    --tone: var(--muted);
   }
-  .card.error {
-    --c: var(--del);
+  .agent.error {
+    --tone: var(--del);
   }
-  header {
+  .a-top {
     display: flex;
     align-items: center;
     gap: 8px;
     min-width: 0;
   }
-  .dot {
-    flex: none;
-    width: 7px;
-    height: 7px;
-    border-radius: 50%;
-    background: var(--c);
-  }
   .name {
+    flex: 1;
+    min-width: 0;
     overflow: hidden;
-    font-size: 15px;
-    white-space: nowrap;
+    font-weight: 590;
+    letter-spacing: -0.01em;
     text-overflow: ellipsis;
+    white-space: nowrap;
   }
-  .st {
-    margin-left: auto;
-    color: var(--c);
-    font-size: 10px;
-    font-weight: 600;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
+  .a-state {
+    flex: none;
+    color: var(--tone);
+    font-size: 11.5px;
+    font-weight: 550;
+    white-space: nowrap;
   }
-  .idle .st,
-  .done .st {
+  .agent.done .a-state,
+  .agent.idle .a-state {
+    font-weight: 500;
+  }
+  .a-meta,
+  .a-act,
+  .said {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+    padding-left: 16px;
     color: var(--muted);
+    font-size: 12px;
+    white-space: nowrap;
   }
-  p {
-    margin: 0;
+  .a-meta {
     overflow: hidden;
-    white-space: nowrap;
+  }
+  .a-meta .sep {
+    color: var(--sep);
+  }
+  .a-meta .model {
+    flex: none;
+    max-width: 45%;
+    overflow: hidden;
     text-overflow: ellipsis;
-  }
-  .meta {
-    color: var(--soft);
-    font-size: 11px;
-  }
-  .act {
-    color: var(--muted);
-    font-size: 11px;
   }
   .said {
+    display: block;
+    overflow: hidden;
     color: var(--soft);
-    font-size: 12px;
+    text-overflow: ellipsis;
+  }
+  .a-act {
+    color: var(--soft);
+  }
+  .a-act b {
+    flex: none;
+    font-weight: 550;
+  }
+  .a-act .tgt {
+    min-width: 0;
+    overflow: hidden;
+    color: var(--muted);
+    text-overflow: ellipsis;
+  }
+  .a-act .mono {
+    font-size: 0.92em;
+    letter-spacing: -0.01em;
+  }
+  .a-act .ok {
+    display: inline-flex;
+    color: var(--add);
+  }
+  .a-act .spend {
+    flex: none;
+    margin-left: auto;
+    padding-left: 8px;
+    color: var(--muted);
+    font-size: 11.5px;
+    font-variant-numeric: tabular-nums;
   }
   .paused {
+    margin: 0;
+    padding-left: 16px;
     color: var(--warn-ink);
     font-size: 11.5px;
-    white-space: normal;
   }
+  /* The composer's field, in one line. */
   .bar {
     display: flex;
     align-items: center;
     gap: 4px;
-    margin-top: auto;
+    margin-top: 8px;
     padding: 4px 4px 4px 10px;
-    border-radius: 8px;
-    background: var(--well);
+    border-radius: var(--r-sm);
+    background: var(--raise);
     box-shadow: inset 0 0 0 1px var(--line-2);
   }
   .bar:focus-within {
-    box-shadow: inset 0 0 0 1px var(--p);
+    box-shadow:
+      inset 0 0 0 1px color-mix(in oklch, var(--p) 55%, transparent),
+      0 0 0 3px color-mix(in oklch, var(--p) 14%, transparent);
+  }
+  .agent.waiting .bar {
+    box-shadow: inset 0 0 0 1px var(--wait-line);
   }
   input {
     flex: 1;
@@ -295,7 +353,7 @@
     flex: none;
     padding: 1px 6px;
     border-radius: 99px;
-    background: var(--line);
+    background: var(--hover);
     color: var(--soft);
     font-size: 10.5px;
   }
@@ -311,19 +369,12 @@
     cursor: pointer;
   }
   .icon:hover {
-    background: var(--line);
+    background: var(--hover);
     color: var(--text);
   }
-  @keyframes halo {
-    50% {
-      box-shadow:
-        inset 0 0 0 1.5px var(--c),
-        0 0 0 6px color-mix(in oklch, var(--wait) 22%, transparent);
-    }
-  }
-  @media (prefers-reduced-motion: reduce) {
-    .card.wait {
-      animation: none;
-    }
+  .send {
+    height: 26px;
+    padding: 0 10px;
+    font-size: 12px;
   }
 </style>

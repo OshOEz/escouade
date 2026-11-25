@@ -14,7 +14,6 @@ export default {
   zoomOut: 'Dézoomer',
   zoom: '{percent} %',
   fit: 'Ajuster',
-  state: { run: 'En cours', wait: 'À toi', error: 'Erreur', done: 'Terminé', idle: 'Prêt' },
   /** The line of a disc whose agent waits for an answer. */
   waiting: 'attend ta réponse',
   noPlan: 'sans plan',
@@ -26,14 +25,6 @@ export default {
   },
   /** The word on the dotted link from an agent to one it launched. */
   launched: 'a lancé',
-  /** The plan's band, north of the card. */
-  plan: {
-    chip: 'Plan',
-    count: '{done}/{total} tâches · {percent} %',
-    folded: { one: '{count} faite', other: '{count} faites' },
-    /** The tasks past the band's 9 tiles. */
-    hidden: { one: '+ {count} autre', other: '+ {count} autres' },
-  },
   /** The team, east of the card: its subagents and background tasks. */
   team: {
     task: 'tâche {n}',
