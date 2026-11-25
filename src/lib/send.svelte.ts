@@ -56,9 +56,15 @@ const inflight = new Map<string, Promise<void>>();
 
 /**
  * Sends what was typed for `agent` (`owner`: the draft it was typed in, given back if refused), by the conversation's
- * path and the canvas's alike.
+ * path and the canvas's alike. `pending`: the request it answers, null for none (the canvas: only one its card shows).
  */
-export function submitDraft(agent: Agent, owner: string, text: string, files: DraftAttachment[]): Submitted {
+export function submitDraft(
+  agent: Agent,
+  owner: string,
+  text: string,
+  files: DraftAttachment[],
+  pending: ConvItem | null = pendingItemOf(agent) ?? null,
+): Submitted {
   const body = text.trim();
   if (sendPaused()) return { cleared: 'none', done: Promise.resolve() };
   // The one before waits for the worktree, which can take minutes: this one is not dropped without a word.
@@ -66,7 +72,7 @@ export function submitDraft(agent: Agent, owner: string, text: string, files: Dr
     app.toast(t('composer.send.alreadyWaiting'));
     return { cleared: 'none', done: Promise.resolve() };
   }
-  const route = routeOf(agent, body, pendingItemOf(agent));
+  const route = routeOf(agent, body, pending ?? undefined);
   if (route.kind === 'hold') {
     hold(agent.id, body, files.slice(), route.mode);
     return { cleared: 'all', done: Promise.resolve() };

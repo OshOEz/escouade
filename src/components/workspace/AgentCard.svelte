@@ -17,7 +17,8 @@
   import { menu, type MenuItem } from '../../lib/menu.svelte';
   import { modelLabel } from '../../lib/models';
   import { observeHeight } from '../../lib/resize';
-  import { pendingItemOf, sendPaused, submitDraft } from '../../lib/send.svelte';
+  import { HOLD_MS } from '../../lib/answer-keys.svelte';
+  import { sendPaused, submitDraft } from '../../lib/send.svelte';
   import { tip } from '../../lib/tip';
   import { cardActivity, cardSpend } from '../../lib/sidebar';
   import { app } from '../../lib/state.svelte';
@@ -53,6 +54,19 @@
   const conv = $derived(conversationOf(agentId));
   /** A request is this card's: the agent's own, or one of a subagent with no card of its own (folded, dropped). */
   const mine = (sub: string | undefined) => !sub || !shown.includes(sub);
+  /** The request what is typed here answers: the first this card shows; one shown on another card is not answered here. */
+  const answerable = $derived(
+    agent.pending.length
+      ? agent.pending
+          .map((id) => conv.items.find((i) => i.id === id))
+          .find((i) => (i?.kind === 'question' || i?.kind === 'permission') && mine(i.sub ?? undefined))
+      : undefined,
+  );
+  // Enter waits HOLD_MS once a request shows, as in the conversation: pressed as it comes, it would answer it unread.
+  let shownAt = 0;
+  $effect(() => {
+    if (answerable?.id) shownAt = performance.now();
+  });
   // The subagents asking that have a card, by name: their requests are on their own cards.
   const asking = $derived.by(() => {
     if (!agent.pending.length) return [];
@@ -102,11 +116,11 @@
     if (!body && !d.files.length) return;
     // An interactive command of its harness never goes as a message: its conversation opens, the text kept in the draft.
     if (interactiveOf(agent.engine, body)) return app.selectAgent(agentId);
-    // Its request not read yet: the text would leave as a new message instead of answering it.
-    if (agent.pending.length && !pendingItemOf(agent)) return;
+    // Its requests not read yet: the text would leave as a new message instead of answering one.
+    if (agent.pending.length && !conv.loaded) return;
     // A file still being copied has no path yet: it would be dropped on the way, as the composer waits for it.
     if (d.files.some((f) => f.copying)) return;
-    const s = submitDraft(agent, agentId, text, d.files);
+    const s = submitDraft(agent, agentId, text, d.files, answerable ?? null);
     if (s.cleared === 'none') return;
     setDraft(agentId, { text: '', files: s.cleared === 'all' ? [] : d.files });
     read();
@@ -120,6 +134,7 @@
   function key(e: KeyboardEvent) {
     if (e.key !== 'Enter' || e.isComposing) return;
     e.preventDefault();
+    if (answerable && performance.now() - shownAt < HOLD_MS) return;
     send();
   }
 

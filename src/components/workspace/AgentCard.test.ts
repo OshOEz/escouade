@@ -2,6 +2,7 @@ import { fireEvent, render, screen } from '@testing-library/svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { DraftAttachment } from '../../lib/attachments';
 import { connection, type ServerInfo } from '../../lib/connection.svelte';
+import { HOLD_MS } from '../../lib/answer-keys.svelte';
 import { conversationOf, dropConversation } from '../../lib/conversations.svelte';
 import { forgetDraft, getDraft, setDraft } from '../../lib/drafts';
 import { setLang } from '../../lib/i18n';
@@ -9,7 +10,7 @@ import { menu } from '../../lib/menu.svelte';
 import { cardSpend } from '../../lib/sidebar';
 import { app } from '../../lib/state.svelte';
 import { agent, fakeBackend, resetApp } from '../../test/ipc';
-import { planWith, questionItem, req, sub } from '../../test/workspace';
+import { permissionItem, planWith, questionItem, req, sub } from '../../test/workspace';
 import AgentCard from './AgentCard.svelte';
 
 const image = (name: string): DraftAttachment => ({ kind: 'image', name, mediaType: 'image/png', data: 'AA==', size: 1 });
@@ -87,7 +88,8 @@ describe('the card of an agent on the workspace', () => {
     expect(field.value).toBe('Oui');
     loaded([question]);
     await vi.waitFor(() => expect(backend.called('get_conversation').length).toBeGreaterThan(0));
-    await new Promise((r) => setTimeout(r, 0));
+    // The request just shown: Enter waits HOLD_MS, as in the conversation.
+    await new Promise((r) => setTimeout(r, HOLD_MS + 20));
     await fireEvent.keyDown(field, { key: 'Enter' });
     await vi.waitFor(() =>
       expect(backend.called('answer_question')[0]?.args).toMatchObject({ id: 'a1', requestId: 'q1', answers: { 'Q ?': 'Oui' } }),
@@ -200,5 +202,36 @@ describe('the card of an agent on the workspace', () => {
     render(AgentCard, { agent: app.agents.a1, shown: [] });
     expect(await screen.findByText('Question q1 ?')).toBeTruthy();
     expect(screen.getByText('question de Explore')).toBeTruthy();
+  });
+
+  it("sends a message, not an answer, while only a subagent's request on its own card waits", async () => {
+    backend = fakeBackend({ get_conversation: () => [permissionItem('p1', 'rm -rf dist', { sub: 's1' })] });
+    const plan = planWith([], { agents: [sub('s1')] });
+    resetApp({ agents: [agent({ id: 'a1', name: 'un', status: 'waiting', pending: ['p1'], requests: [req('p1', 'permission')], plan })] });
+    render(AgentCard, { agent: app.agents.a1, shown: ['s1'] });
+    await vi.waitFor(() => expect(backend.called('get_conversation').length).toBeGreaterThan(0));
+    await new Promise((r) => setTimeout(r, HOLD_MS + 20));
+    const field = screen.getByRole('textbox', { name: 'Écrire à un' });
+    await fireEvent.input(field, { target: { value: 'Bonjour' } });
+    await fireEvent.keyDown(field, { key: 'Enter' });
+    await vi.waitFor(() => expect(backend.called('send_message')[0]?.args).toMatchObject({ id: 'a1', text: 'Bonjour' }));
+    expect(backend.called('answer_permission')).toHaveLength(0);
+  });
+
+  it('does not answer unread a request that comes while one types', async () => {
+    backend = fakeBackend({ get_conversation: () => [questionItem('q1')] });
+    const { rerender } = render(AgentCard, { agent: app.agents.a1 });
+    const field = screen.getByRole('textbox', { name: 'Écrire à un' });
+    await fireEvent.input(field, { target: { value: 'Oui' } });
+    app.agents.a1 = { ...app.agents.a1, status: 'waiting', pending: ['q1'], requests: [req('q1')] };
+    await rerender({ agent: app.agents.a1 });
+    await screen.findByText('Question q1 ?');
+    await fireEvent.keyDown(field, { key: 'Enter' });
+    expect(backend.called('answer_question')).toHaveLength(0);
+    expect(backend.called('send_message')).toHaveLength(0);
+    expect((field as HTMLInputElement).value).toBe('Oui');
+    await new Promise((r) => setTimeout(r, HOLD_MS + 20));
+    await fireEvent.keyDown(field, { key: 'Enter' });
+    await vi.waitFor(() => expect(backend.called('answer_question')[0]?.args).toMatchObject({ id: 'a1', requestId: 'q1' }));
   });
 });
