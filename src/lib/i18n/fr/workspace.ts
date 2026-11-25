@@ -24,6 +24,18 @@ export default {
     team: { one: 'équipe', other: 'équipe' },
     question: { one: 'question', other: 'questions' },
   },
+  /** The card of an agent near (its compass's centre) and its bar to write to it. */
+  card: {
+    write: 'Écrire à {name}',
+    settings: 'Paramètres',
+    model: 'Modèle',
+    effort: 'Effort',
+    mode: 'Mode',
+    attach: 'Joindre un fichier',
+    allModels: 'Tous les modèles…',
+    files: { one: '{count} fichier', other: '{count} fichiers' },
+    label: '{name}, {state}',
+  },
   /** A disc, for a screen reader: « release-2-3, En cours ». */
   discLabel: '{name}, {state}',
   /** What a screen reader hears after it: the plan, then the questions. */

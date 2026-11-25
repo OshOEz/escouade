@@ -21,6 +21,17 @@ export default defineZone('workspace', {
     team: { one: 'team', other: 'team' },
     question: { one: 'question', other: 'questions' },
   },
+  card: {
+    write: 'Write to {name}',
+    settings: 'Settings',
+    model: 'Model',
+    effort: 'Effort',
+    mode: 'Mode',
+    attach: 'Attach a file',
+    allModels: 'All models…',
+    files: { one: '{count} file', other: '{count} files' },
+    label: '{name}, {state}',
+  },
   discLabel: '{name}, {state}',
   discProgress: { one: '{count} of {total} task done', other: '{count} of {total} tasks done' },
 });
