@@ -47,8 +47,16 @@
       teamH: heights[a.id],
     });
   function sized(agentId: string, id: string, h: number) {
-    // 0: not laid out (yet), its size by default.
-    if (h && heights[agentId]?.[id] !== h) heights[agentId] = { ...heights[agentId], [id]: h };
+    const mine = heights[agentId];
+    if (h) {
+      if (mine?.[id] !== h) heights[agentId] = { ...mine, [id]: h };
+      return;
+    }
+    // 0: not laid out (yet), or gone: its size by default, and nothing kept of a card no longer there.
+    if (!mine || !(id in mine)) return;
+    const { [id]: _, ...rest } = mine;
+    if (Object.keys(rest).length) heights[agentId] = rest;
+    else delete heights[agentId];
   }
   // From afar, an agent that waits is unfolded among the discs (« toujours déplié, quelle que soit l'altitude »).
   const far = $derived(layoutFarOpen(ordered.order.map(discOf), new Map(ordered.order.filter(waits).map((a) => [a.id, frameAt(a)]))));

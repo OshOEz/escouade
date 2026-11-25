@@ -68,9 +68,13 @@ describe('the team of an agent on the workspace', () => {
     dropConversation('a1');
   });
 
-  it('reports its height by its id', async () => {
+  it('reports its height by its id, and 0 once gone', async () => {
     const onsize = vi.fn();
-    render(TeamCard, { agent: agent(), item: { kind: 'sub', id: 's1', sub: sub('s1') }, ontoggle: () => {}, onsize });
-    await vi.waitFor(() => expect(onsize).toHaveBeenCalledWith('s1', expect.any(Number)));
+    vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockReturnValue(140);
+    const { unmount } = render(TeamCard, { agent: agent(), item: { kind: 'sub', id: 's1', sub: sub('s1') }, ontoggle: () => {}, onsize });
+    await vi.waitFor(() => expect(onsize).toHaveBeenCalledWith('s1', 140));
+    unmount();
+    expect(onsize).toHaveBeenLastCalledWith('s1', 0);
+    vi.restoreAllMocks();
   });
 });
