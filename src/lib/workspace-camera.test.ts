@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { altitude, clampZoom, fit, pan, zoomAt } from './workspace-camera';
+import { altitude, clampZoom, fit, fitBest, keepAnchor, nearest, pan, zoomAt } from './workspace-camera';
 
 describe('the camera of the workspace', () => {
   it('clamps the zoom', () => {
@@ -40,5 +40,27 @@ describe('the camera of the workspace', () => {
   it('tells the altitude', () => {
     expect(altitude(0.44)).toBe('far');
     expect(altitude(0.45)).toBe('near');
+  });
+  it('caps the zoom of a fit', () => {
+    expect(fit({ w: 10, h: 10 }, { w: 2000, h: 2000 }, 32, 0.44).zoom).toBe(0.44);
+  });
+  it('fits the compasses when they hold at 45 % or more, else the discs', () => {
+    const view = { w: 1000, h: 800 };
+    expect(fitBest({ far: { w: 300, h: 300 }, near: { w: 900, h: 600 } }, view).zoom).toBeGreaterThanOrEqual(0.45);
+    const c = fitBest({ far: { w: 1500, h: 700 }, near: { w: 6000, h: 3000 } }, view);
+    expect(altitude(c.zoom)).toBe('far');
+  });
+  it('keeps an agent where it was on screen', () => {
+    const cam = { x: 100, y: 50, zoom: 1 };
+    const c = keepAnchor(cam, { x: 0, y: 0, w: 300, h: 300 }, { x: 1000, y: 400, w: 800, h: 600 });
+    // centre de `from` à l'écran : (250, 200) ; celui de `to`, (1400, 700), y tombe
+    expect([1400 * c.zoom + c.x, 700 * c.zoom + c.y]).toEqual([250, 200]);
+  });
+  it('finds the box nearest the middle of the screen', () => {
+    const items = [
+      { id: 'a', x: 0, y: 0, w: 100, h: 100 },
+      { id: 'b', x: 400, y: 0, w: 100, h: 100 },
+    ];
+    expect(nearest(items, { x: 0, y: 0, zoom: 1 }, { w: 900, h: 100 })?.id).toBe('b');
   });
 });

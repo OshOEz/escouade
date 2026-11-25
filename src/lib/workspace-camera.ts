@@ -26,11 +26,53 @@ export function zoomAt(cam: Camera, factor: number, px: number, py: number): Cam
 
 export const pan = (cam: Camera, dx: number, dy: number): Camera => ({ x: cam.x + dx, y: cam.y + dy, zoom: cam.zoom });
 
-/** The camera that shows the whole world in the view, centred, with `margin` around it. */
-export function fit(world: { w: number; h: number }, view: { w: number; h: number }, margin = 32): Camera {
+export type Size = { w: number; h: number };
+export type Box = { x: number; y: number; w: number; h: number };
+
+/** The camera that shows the whole world in the view, centred, with `margin` around it, and no closer than `max`. */
+export function fit(world: Size, view: Size, margin = 32, max = ZOOM_MAX): Camera {
   if (!world.w || !world.h) return { x: view.w / 2, y: view.h / 2, zoom: 1 };
-  const zoom = clampZoom(Math.min((view.w - 2 * margin) / world.w, (view.h - 2 * margin) / world.h));
+  const zoom = Math.min(max, clampZoom(Math.min((view.w - 2 * margin) / world.w, (view.h - 2 * margin) / world.h)));
   return { x: (view.w - world.w * zoom) / 2, y: (view.h - world.h * zoom) / 2, zoom };
 }
 
 export const altitude = (zoom: number): Altitude => (zoom < FAR_BELOW ? 'far' : 'near');
+
+/** The altitudes and the zooms each is seen at, from the closest to the farthest. */
+export const ALTITUDES: { name: Altitude; min: number; max: number }[] = [
+  { name: 'near', min: FAR_BELOW, max: ZOOM_MAX },
+  { name: 'far', min: ZOOM_MIN, max: FAR_BELOW - 0.001 },
+];
+
+/** Fits the closest altitude whose world holds in the view at its zoom; the farthest otherwise. */
+export function fitBest(worlds: Record<Altitude, Size>, view: Size): Camera {
+  let cam: Camera = { x: 0, y: 0, zoom: 1 };
+  for (const a of ALTITUDES) {
+    cam = fit(worlds[a.name], view, 32, a.max);
+    if (cam.zoom >= a.min) return cam;
+  }
+  return cam;
+}
+
+const centre = (b: Box) => ({ x: b.x + b.w / 2, y: b.y + b.h / 2 });
+
+/** At the zoom of `cam`, the camera that draws the centre of `to` where the centre of `from` was on screen. */
+export function keepAnchor(cam: Camera, from: Box, to: Box): Camera {
+  const f = centre(from);
+  const t = centre(to);
+  return { x: f.x * cam.zoom + cam.x - t.x * cam.zoom, y: f.y * cam.zoom + cam.y - t.y * cam.zoom, zoom: cam.zoom };
+}
+
+/** The box whose centre is drawn the nearest the middle of the screen. */
+export function nearest<T extends Box>(items: T[], cam: Camera, view: Size): T | undefined {
+  const mx = (view.w / 2 - cam.x) / cam.zoom;
+  const my = (view.h / 2 - cam.y) / cam.zoom;
+  let best: T | undefined;
+  let d = Infinity;
+  for (const it of items) {
+    const c = centre(it);
+    const di = (c.x - mx) ** 2 + (c.y - my) ** 2;
+    if (di < d) [best, d] = [it, di];
+  }
+  return best;
+}
