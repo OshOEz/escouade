@@ -3,6 +3,7 @@
   // its state, its model and spend, what it does, and a bar to write to it. Enter sends by the conversation's path
   // (`submitDraft`), from the agent's own draft: what is typed here is in its conversation once the canvas is left.
   import { untrack } from 'svelte';
+  import { conversationOf } from '../../lib/conversations.svelte';
   import { effortChoicesOf, modeChoicesOf, modelChoicesOf, setAgentOption, type OptionChoice } from '../../lib/agent-options';
   import { insertAt } from '../../lib/dictation';
   import type { DictationTarget } from '../../lib/dictation.svelte';
@@ -13,7 +14,7 @@
   import { interactiveOf } from '../../lib/interactive';
   import { menu, type MenuItem } from '../../lib/menu.svelte';
   import { EFFORTS, modelLabel } from '../../lib/models';
-  import { submitDraft } from '../../lib/send.svelte';
+  import { pendingItemOf, submitDraft } from '../../lib/send.svelte';
   import { tip } from '../../lib/tip';
   import { cardActivity, cardSpend } from '../../lib/sidebar';
   import { app } from '../../lib/state.svelte';
@@ -40,6 +41,12 @@
     if (act?.kind === 'thinking') return t('stats.overview.thinking');
     if (act?.kind === 'over') return `${t('nav.sidebar.over')} · ${act.goes}`;
     return disc.state === 'wait' ? t('workspace.waiting') : '';
+  });
+
+  // Its conversation is loaded while it waits: what is typed answers the request there, as in the conversation.
+  const waits = $derived(agent.status === 'waiting' || agent.pending.length > 0);
+  $effect(() => {
+    if (waits) return untrack(() => conversationOf(agentId).show());
   });
 
   // A message given back to the draft (refused), or the draft changed by the conversation: read again.
@@ -78,16 +85,23 @@
     if (!body) return;
     // An interactive command of its harness never goes as a message: its conversation opens, the text kept in the draft.
     if (interactiveOf(agent.engine, body)) return app.selectAgent(agentId);
+    // Its request not read yet: the text would leave as a new message instead of answering it.
+    if (agent.pending.length && !pendingItemOf(agent)) return;
     const d = getDraft(agentId);
+    // A file still being copied has no path yet: it would be dropped on the way, as the composer waits for it.
+    if (d.files.some((f) => f.copying)) return;
     const s = submitDraft(agent, agentId, text, d.files);
     if (s.cleared === 'none') return;
     setDraft(agentId, { text: '', files: s.cleared === 'all' ? [] : d.files });
     read();
+    // Refused for want of an account: the conversation says it, which the canvas does not show.
+    void s.done.then(() => {
+      const missing = conversationOf(agentId).noAccount;
+      if (missing) app.toast(missing.text, 'error');
+    });
   }
 
   function key(e: KeyboardEvent) {
-    // The canvas's keys (+, −, 0, Échap) are not for it while one types.
-    e.stopPropagation();
     if (e.key !== 'Enter' || e.isComposing) return;
     e.preventDefault();
     send();

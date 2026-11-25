@@ -30,7 +30,28 @@ describe('the team of an agent on the workspace', () => {
   it('says the pile, and unfolds it on a click', async () => {
     const ontoggle = vi.fn();
     render(TeamCard, { agent: agent(), item: { kind: 'folded', id: 'folded', done: 4, failed: 1, capped: false }, ontoggle });
-    await fireEvent.click(screen.getByRole('button', { name: '+ 4 terminés · 1 échecs' }));
+    await fireEvent.click(screen.getByRole('button', { name: '+ 4 terminés · 1 échec' }));
     expect(ontoggle).toHaveBeenCalled();
+  });
+
+  it('says the pile in good French, failures only when there are', () => {
+    const pile = (done: number, failed: number, capped = false) =>
+      render(TeamCard, { agent: agent(), item: { kind: 'folded', id: 'folded', done, failed, capped }, ontoggle: () => {} });
+    pile(1, 0);
+    expect(screen.getByRole('button', { name: '+ 1 terminé' })).toBeTruthy();
+    pile(29, 1, true);
+    expect(screen.getByRole('button', { name: '+ 30+ terminés · 1 échec' })).toBeTruthy();
+    pile(3, 2);
+    expect(screen.getByRole('button', { name: '+ 3 terminés · 2 échecs' })).toBeTruthy();
+  });
+
+  it("leaves the app's shortcuts to the app while one types to a subagent", async () => {
+    const heard = vi.fn();
+    window.addEventListener('keydown', heard);
+    const s = { ...sub('s1'), kind: 'Explore', taskId: 't1', background: true };
+    render(TeamCard, { agent: agent({ id: 'a1' }), item: { kind: 'sub', id: 's1', sub: s }, ontoggle: () => {} });
+    await fireEvent.keyDown(screen.getByRole('textbox'), { key: 'k', metaKey: true });
+    window.removeEventListener('keydown', heard);
+    expect(heard).toHaveBeenCalled();
   });
 });

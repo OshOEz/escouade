@@ -1,6 +1,7 @@
 import { fireEvent, render, screen } from '@testing-library/svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { DraftAttachment } from '../../lib/attachments';
+import { dropConversation } from '../../lib/conversations.svelte';
 import { forgetDraft, getDraft, setDraft } from '../../lib/drafts';
 import { setLang } from '../../lib/i18n';
 import { menu } from '../../lib/menu.svelte';
@@ -29,6 +30,7 @@ describe('the card of an agent on the workspace', () => {
   afterEach(() => {
     menu.close();
     forgetDraft('a1');
+    dropConversation('a1');
   });
 
   it("sends by Enter through the conversation's path", async () => {
@@ -66,5 +68,52 @@ describe('the card of an agent on the workspace', () => {
     await fireEvent.dblClick(screen.getByRole('article'));
     expect(app.workspaceOn).toBe(false);
     expect(app.ui.selectedAgent.p1).toBe('a1');
+  });
+
+  it('answers the question waiting, its conversation not opened before', async () => {
+    dropConversation('a1');
+    let loaded!: (items: unknown[]) => void;
+    const question = { kind: 'question', id: 'q1', toolUseId: 't', questions: [{ question: 'Q ?', options: [] }], answers: null, ts: 1 };
+    backend = fakeBackend({ get_conversation: () => new Promise((r) => (loaded = r)) });
+    resetApp({ agents: [agent({ id: 'a1', name: 'un', status: 'waiting', pending: ['q1'] })] });
+    // Not loaded yet: the text stays, nothing leaves as a new message.
+    const field = await typeAndEnter('Oui');
+    expect(backend.called('send_message')).toHaveLength(0);
+    expect(field.value).toBe('Oui');
+    loaded([question]);
+    await vi.waitFor(() => expect(backend.called('get_conversation').length).toBeGreaterThan(0));
+    await new Promise((r) => setTimeout(r, 0));
+    await fireEvent.keyDown(field, { key: 'Enter' });
+    await vi.waitFor(() => expect(backend.called('answer_question')[0]?.args).toMatchObject({ id: 'a1', requestId: 'q1', answers: { 'Q ?': 'Oui' } }));
+    expect(backend.called('send_message')).toHaveLength(0);
+  });
+
+  it('says why a message is refused for want of an account', async () => {
+    backend = fakeBackend({
+      get_conversation: () => [],
+      send_message: () => {
+        throw 'no-account:codex|Aucun compte Codex : ajoute-en un dans Réglages › Comptes et harness.';
+      },
+    });
+    const field = await typeAndEnter('Bonjour');
+    await vi.waitFor(() => expect(app.toasts.map((x) => x.text)).toContain('Aucun compte Codex : ajoute-en un dans Réglages › Comptes et harness.'));
+    await vi.waitFor(() => expect(field.value).toBe('Bonjour'));
+  });
+
+  it("leaves the app's shortcuts to the app while one types", async () => {
+    const heard = vi.fn();
+    window.addEventListener('keydown', heard);
+    const field = await typeAndEnter('');
+    await fireEvent.keyDown(field, { key: 'k', metaKey: true });
+    window.removeEventListener('keydown', heard);
+    expect(heard).toHaveBeenCalledWith(expect.objectContaining({ key: 'k', metaKey: true }));
+  });
+
+  it('sends nothing while a file of the draft is being copied', async () => {
+    setDraft('a1', { text: '', files: [{ ...image('a.png'), kind: 'file', copying: true }] });
+    const field = await typeAndEnter('Bonjour');
+    await new Promise((r) => setTimeout(r, 0));
+    expect(backend.called('send_message')).toHaveLength(0);
+    expect(field.value).toBe('Bonjour');
   });
 });

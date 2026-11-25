@@ -36,8 +36,10 @@ export default {
   team: {
     task: 'tâche {n}',
     write: 'Écrire à {name}',
-    folded: '+ {done} terminés · {failed} échecs',
-    foldedCapped: '+ 30+ terminés · {failed} échecs',
+    folded: { one: '+ {count} terminé', other: '+ {count} terminés' },
+    /** The plan keeps 30 subagents at most: more may have ended. */
+    foldedCapped: '+ 30+ terminés',
+    failed: { one: '{count} échec', other: '{count} échecs' },
   },
   /** The card of an agent near (its compass's centre) and its bar to write to it. */
   card: {

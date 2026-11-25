@@ -224,7 +224,7 @@ describe('the workspace', () => {
     resetApp({ agents: [agent({ id: 'a1', plan: planWith([], { agents: [sub('s1'), sub('s2', 'done')] }) })] });
     const { container } = show();
     await zoomTo(1);
-    await fireEvent.click(screen.getByRole('button', { name: /terminés/ }));
+    await fireEvent.click(screen.getByRole('button', { name: /terminé/ }));
     expect(container.querySelectorAll('path.link.run')).toHaveLength(1);
     expect(container.querySelectorAll('path.link.done')).toHaveLength(1);
   });

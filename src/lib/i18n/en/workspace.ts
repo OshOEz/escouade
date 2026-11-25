@@ -30,8 +30,9 @@ export default defineZone('workspace', {
   team: {
     task: 'task {n}',
     write: 'Write to {name}',
-    folded: '+ {done} ended · {failed} failed',
-    foldedCapped: '+ 30+ ended · {failed} failed',
+    folded: { one: '+ {count} ended', other: '+ {count} ended' },
+    foldedCapped: '+ 30+ ended',
+    failed: { one: '{count} failed', other: '{count} failed' },
   },
   card: {
     write: 'Write to {name}',

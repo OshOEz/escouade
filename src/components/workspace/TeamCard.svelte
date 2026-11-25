@@ -61,8 +61,6 @@
   }
 
   function key(e: KeyboardEvent) {
-    // The canvas's keys are not for it while one types.
-    e.stopPropagation();
     if (e.key !== 'Enter' || e.isComposing) return;
     e.preventDefault();
     void send();
@@ -76,9 +74,12 @@
 
 {#if item.kind === 'folded'}
   <button type="button" class="folded" data-side="east" onclick={ontoggle}>
-    {item.capped
-      ? t('workspace.team.foldedCapped', { failed: item.failed })
-      : t('workspace.team.folded', { done: item.done, failed: item.failed })}
+    {[
+      item.capped ? t('workspace.team.foldedCapped') : t('workspace.team.folded', { count: item.done }),
+      item.failed ? t('workspace.team.failed', { count: item.failed }) : '',
+    ]
+      .filter(Boolean)
+      .join(' · ')}
   </button>
 {:else if item.kind === 'bg'}
   {@const ms = bgDuration(item.row, app.now)}
