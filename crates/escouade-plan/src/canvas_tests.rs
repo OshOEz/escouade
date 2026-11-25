@@ -155,3 +155,137 @@ fn the_caps_spare_what_runs() {
         ("a0", "a2")
     );
 }
+
+const URL: &str = "https://claude.ai/artifact/AbC_12-x";
+
+#[test]
+fn finds_the_address_an_artifact_was_published_at() {
+    assert_eq!(
+        artifact_url(&format!("Published to {URL}.")),
+        Some(URL.into())
+    );
+    assert_eq!(
+        artifact_url("see https://team.claude.ai/artifact/z9"),
+        Some("https://team.claude.ai/artifact/z9".into())
+    );
+    assert_eq!(artifact_url("x/https://claude.ai/artifact/z9"), None);
+    assert_eq!(artifact_url("nothing"), None);
+}
+
+#[test]
+fn a_page_published_again_is_one_artifact() {
+    let mut c = Canvas::default();
+    c.on_tool_use(
+        None,
+        "p1",
+        "Artifact",
+        &json!({"file_path": "/tmp/report.html"}),
+        1,
+    );
+    assert_eq!(c.publishing[0].name, "report.html");
+    assert_eq!(
+        c.on_tool_result("p1", false, &format!("Published {URL}"), 2),
+        Change::Saved
+    );
+    for (i, call) in ["p2", "p3"].iter().enumerate() {
+        c.on_tool_use(
+            None,
+            call,
+            "Artifact",
+            &json!({"title": "Rapport", "file_path": "/tmp/report.html"}),
+            3 + i as i64,
+        );
+        c.on_tool_result(call, false, &format!("Updated {URL}"), 4 + i as i64);
+    }
+    assert!(c.publishing.is_empty());
+    assert_eq!(c.artifacts.len(), 1);
+    assert_eq!(
+        (c.artifacts[0].versions, c.artifacts[0].title.as_str()),
+        (3, "Rapport")
+    );
+}
+
+#[test]
+fn a_failed_or_other_artifact_call_lands_nothing() {
+    let mut c = Canvas::default();
+    c.on_tool_use(None, "p1", "Artifact", &json!({"title": "x"}), 1);
+    c.on_tool_result("p1", true, URL, 2);
+    c.on_tool_use(None, "p2", "Artifact", &json!({"action": "list"}), 3);
+    assert!(c.artifacts.is_empty() && c.publishing.is_empty());
+}
+
+#[test]
+fn keeps_the_last_commands_of_each_thread() {
+    let mut c = Canvas::default();
+    for i in 0..7 {
+        c.on_tool_use(
+            None,
+            &format!("b{i}"),
+            "Bash",
+            &json!({"command": format!("echo {i}")}),
+            i,
+        );
+    }
+    c.on_tool_use(
+        Some("a1"),
+        "sb",
+        "Bash",
+        &json!({"command": " cargo test "}),
+        20,
+    );
+    c.on_tool_use(
+        None,
+        "bg",
+        "Bash",
+        &json!({"command": "npm run dev", "run_in_background": true}),
+        21,
+    );
+    assert_eq!(c.commands.len(), MAX_COMMANDS);
+    assert_eq!(c.commands[0].command, "echo 2");
+    assert_eq!(
+        (
+            c.subs[0].call.as_str(),
+            c.subs[0].commands[0].command.as_str()
+        ),
+        ("a1", "cargo test")
+    );
+}
+
+#[test]
+fn a_command_ends_failed_or_not_by_its_result_and_is_cut_on_a_character() {
+    let mut c = Canvas::default();
+    c.on_tool_use(None, "b1", "Bash", &json!({"command": "é".repeat(400)}), 1);
+    c.on_tool_use(Some("a1"), "b2", "Bash", &json!({"command": "npm test"}), 2);
+    assert_eq!(c.commands[0].command.chars().count(), MAX_COMMAND);
+    assert_eq!(
+        c.on_tool_result("b1", true, "exit code 101", 5),
+        Change::View
+    );
+    c.on_tool_result("b2", false, "", 6);
+    assert_eq!(
+        (c.commands[0].ended_at, c.commands[0].failed),
+        (Some(5), true)
+    );
+    assert_eq!(
+        (c.subs[0].commands[0].ended_at, c.subs[0].commands[0].failed),
+        (Some(6), false)
+    );
+}
+
+#[test]
+fn a_command_cut_short_ends_failed() {
+    let mut c = Canvas::default();
+    c.on_tool_use(None, "b1", "Bash", &json!({"command": "cargo test"}), 1);
+    c.close_running(5);
+    assert_eq!(
+        (c.commands[0].ended_at, c.commands[0].failed),
+        (Some(5), true)
+    );
+}
+
+#[test]
+fn a_summary_with_only_artifacts_or_commands_is_not_empty() {
+    let mut c = Canvas::default();
+    c.on_tool_use(Some("a1"), "b1", "Bash", &json!({"command": "ls"}), 1);
+    assert!(!c.is_empty());
+}

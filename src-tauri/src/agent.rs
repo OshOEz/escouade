@@ -485,6 +485,9 @@ impl AgentRt {
         if let Some(plan) = meta.plan.as_mut() {
             plan.close_running(now_ms());
         }
+        if let Some(canvas) = meta.canvas.as_mut() {
+            canvas.close_running(now_ms());
+        }
         // Saved before Remote Control had a source: the user turned it on for this agent.
         if meta.remote_control && meta.remote_source.is_none() {
             meta.remote_source = Some(RemoteSource::Hand);
@@ -4194,12 +4197,43 @@ npm test")
     }
 
     #[test]
+    fn the_canvas_lands_an_artifact_published() {
+        let mut a = rt();
+        call(&mut a, None, "p1", "Artifact", json!({"title": "R"}));
+        returns(
+            &mut a,
+            "p1",
+            "Published https://claude.ai/artifact/z9",
+            Value::Null,
+        );
+        let v = serde_json::to_value(a.view()).unwrap();
+        let art = &v["canvas"]["artifacts"][0];
+        assert_eq!(art["url"], "https://claude.ai/artifact/z9");
+        assert_eq!(art["title"], "R");
+        assert_eq!(art["versions"], 1);
+    }
+
+    #[test]
     fn a_reloaded_agent_has_no_call_of_its_canvas_running() {
         let mut a = rt();
         call(&mut a, None, "k1", "Skill", json!({"skill": "x"}));
         let meta: AgentMeta =
             serde_json::from_value(serde_json::to_value(&a.meta).unwrap()).unwrap();
         assert_eq!(meta.canvas.unwrap().tools[0].running, 0);
+    }
+
+    #[test]
+    fn a_reloaded_agent_has_no_command_of_its_canvas_running() {
+        let mut a = rt();
+        call(&mut a, None, "b1", "Bash", json!({"command": "cargo test"}));
+        let meta: AgentMeta =
+            serde_json::from_value(serde_json::to_value(&a.meta).unwrap()).unwrap();
+        let back = AgentRt::new(
+            meta,
+            &std::env::temp_dir().join(format!("ccm-agent-tests-{}", std::process::id())),
+        );
+        let c = back.meta.canvas.unwrap();
+        assert!(c.commands[0].ended_at.is_some() && c.commands[0].failed);
     }
 
     fn system(a: &mut AgentRt, f: Value) -> Effects {
