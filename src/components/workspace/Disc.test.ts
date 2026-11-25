@@ -1,13 +1,13 @@
 import { cleanup, fireEvent, render, screen } from '@testing-library/svelte';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { setLang } from '../../lib/i18n';
-import { discOf } from '../../lib/workspace-layout';
+import { discOf, type Side } from '../../lib/workspace-layout';
 import type { Agent } from '../../lib/types';
 import { agent } from '../../test/ipc';
-import { planWith, req } from '../../test/workspace';
+import { planWith, planWithRunning, req } from '../../test/workspace';
 import DiscHost from './Disc.host.test.svelte';
 
-const renderDisc = (a: Agent, onpick: (id: string) => void = () => {}) =>
+const renderDisc = (a: Agent, onpick: (id: string, side?: Side) => void = () => {}) =>
   render(DiscHost, { disc: { ...discOf(a), x: 0, y: 0, w: 300, h: 300 }, agent: a, onpick });
 
 describe('the disc of an agent', () => {
@@ -52,5 +52,13 @@ describe('the disc of an agent', () => {
     await fireEvent.click(screen.getByRole('button'));
     expect(onpick).toHaveBeenNthCalledWith(1, 'a9');
     expect(onpick).toHaveBeenCalledTimes(2);
+  });
+
+  it('picks the side of a satellite', async () => {
+    const onpick = vi.fn();
+    const { container } = renderDisc(agent({ id: 'a9', plan: planWithRunning(1, 0) }), onpick);
+    await fireEvent.click(container.querySelector('.sat.team')!);
+    expect(onpick).toHaveBeenCalledWith('a9', 'east');
+    expect(onpick).toHaveBeenCalledTimes(1);
   });
 });

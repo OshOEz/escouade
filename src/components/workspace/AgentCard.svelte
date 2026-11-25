@@ -14,6 +14,7 @@
   import { menu, type MenuItem } from '../../lib/menu.svelte';
   import { EFFORTS, modelLabel } from '../../lib/models';
   import { submitDraft } from '../../lib/send.svelte';
+  import { tip } from '../../lib/tip';
   import { cardActivity, cardSpend } from '../../lib/sidebar';
   import { app } from '../../lib/state.svelte';
   import type { Agent } from '../../lib/types';
@@ -163,7 +164,7 @@
       onkeydown={key}
     />
     {#if files}<span class="files">{t('workspace.card.files', { count: files })}</span>{/if}
-    <button type="button" class="icon" aria-label={t('workspace.card.settings')} title={t('workspace.card.settings')} onclick={settings}>
+    <button type="button" class="icon" aria-label={t('workspace.card.settings')} use:tip={t('workspace.card.settings')} onclick={settings}>
       <Icon name="sliders" size={14} />
     </button>
     <MicButton target={dictated} panel={false} />

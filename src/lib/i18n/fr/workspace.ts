@@ -24,6 +24,8 @@ export default {
     team: { one: 'équipe', other: 'équipe' },
     question: { one: 'question', other: 'questions' },
   },
+  /** The word on the dotted link from an agent to one it launched. */
+  launched: 'a lancé',
   /** The plan's band, north of the card. */
   plan: {
     chip: 'Plan',

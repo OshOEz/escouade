@@ -1,26 +1,52 @@
 <script lang="ts">
   // The « Workspace » of a project (spec 2026-11-25-vue-workspace-design.md, « La toile »): its agents on a dotted
-  // canvas one moves and zooms, each a disc seen from afar. The canvas is one world, transformed by the camera; the
-  // controls float above it.
+  // canvas one moves and zooms, each a disc seen from afar, its compass from 45 %. The canvas is one world, transformed
+  // by the camera; the controls float above it.
   import { untrack } from 'svelte';
   import { t } from '../../lib/i18n';
   import { menu } from '../../lib/menu.svelte';
   import { app } from '../../lib/state.svelte';
   import type { Project } from '../../lib/types';
-  import { DOT, fit, pan, ZOOM_STEP, zoomAt, type Camera } from '../../lib/workspace-camera';
-  import { discOf, layoutFar } from '../../lib/workspace-layout';
+  import {
+    altitude,
+    DOT,
+    fitBest,
+    keepAnchor,
+    nearest,
+    pan,
+    ZOOM_STEP,
+    zoomAt,
+    type Altitude,
+    type Box,
+    type Camera,
+  } from '../../lib/workspace-camera';
+  import { canvasOrder, discOf, frameOf, layoutFar, layoutNear, type Side } from '../../lib/workspace-layout';
   import Icon from '../Icon.svelte';
+  import Compass from './Compass.svelte';
   import Disc from './Disc.svelte';
+  import Links from './Links.svelte';
 
   let { project }: { project: Project } = $props();
 
   const agents = $derived(app.projectAgents.filter((a) => a.projectId === project.id && !a.archived));
-  const world = $derived(layoutFar(agents.map(discOf)));
+  const ordered = $derived(canvasOrder(agents, app.agents, app.tickets));
+  /** Its pile of ended subagents unfolded, by agent; when it was unfolded last (a failure since stays out of the pile). */
+  let teamOpen = $state<Record<string, boolean>>({});
+  let seenAt = $state<Record<string, number>>({});
+  const far = $derived(layoutFar(ordered.order.map(discOf)));
+  const near = $derived(
+    layoutNear(
+      ordered.order.map((a) => frameOf(a, { teamOpen: teamOpen[a.id], seenAt: seenAt[a.id] })),
+      ordered.launched,
+    ),
+  );
   const byId = $derived(new Map(agents.map((a) => [a.id, a])));
   const questions = $derived(agents.reduce((n, a) => n + (a.requests?.length ?? 0), 0));
 
   let view: HTMLDivElement | undefined = $state();
   let cam = $state<Camera>({ x: 0, y: 0, zoom: 1 });
+  const alt = $derived(altitude(cam.zoom));
+  const world = $derived(alt === 'far' ? far : near);
   let drag: { x: number; y: number } | null = $state(null);
   /** The user placed the camera: a resize of the window no longer fits it. */
   let moved = false;
@@ -33,7 +59,7 @@
 
   // Fitted on opening, and on « Ajuster »: the camera is not kept.
   function fitAll() {
-    cam = fit(world, size());
+    cam = fitBest({ far, near }, size());
     moved = false;
   }
   const place = (next: Camera) => {
@@ -45,22 +71,41 @@
     if (view) untrack(fitAll);
   });
 
+  /** Where each agent is at an altitude: its disc from afar, its card near (the card does not move on screen). */
+  const anchors = (a: Altitude): (Box & { agentId: string })[] =>
+    a === 'far'
+      ? far.items
+      : near.items.map((f) => ({ agentId: f.agentId, x: f.x + f.centre.x, y: f.y + f.centre.y, w: f.centre.w, h: f.centre.h }));
+
+  /** Zooms by `factor` around (px, py); past 45 %, the agent nearest the middle stays where it was on screen. */
+  function zoomAround(factor: number, px: number, py: number) {
+    let c = cam;
+    const to = altitude(zoomAt(c, factor, px, py).zoom);
+    if (to !== alt) {
+      const from = nearest(anchors(alt), c, size());
+      const there = from && anchors(to).find((b) => b.agentId === from.agentId);
+      if (from && there) c = keepAnchor(c, from, there);
+    }
+    place(zoomAt(c, factor, px, py));
+  }
+
   const zoomBy = (factor: number) => {
     const [px, py] = centre();
-    place(zoomAt(cam, factor, px, py));
+    zoomAround(factor, px, py);
   };
 
   function wheel(e: WheelEvent) {
     e.preventDefault();
     if (e.ctrlKey || e.metaKey) {
       const r = view!.getBoundingClientRect();
-      place(zoomAt(cam, Math.exp(-e.deltaY * 0.01), e.clientX - r.left, e.clientY - r.top));
+      zoomAround(Math.exp(-e.deltaY * 0.01), e.clientX - r.left, e.clientY - r.top);
     } else place(pan(cam, -e.deltaX, -e.deltaY));
   }
 
   function down(e: PointerEvent) {
     // The main button alone: a right click keeps its menu, a middle click its own use.
-    if (e.button > 0 || (e.target as Element).closest('button, [role="button"]')) return;
+    // Nor on a card or in its field: one selects text there.
+    if (e.button > 0 || (e.target as Element).closest('button, [role="button"], input, textarea, article, [data-side]')) return;
     drag = { x: e.clientX, y: e.clientY };
     view?.setPointerCapture?.(e.pointerId);
   }
@@ -71,12 +116,24 @@
   }
   const up = () => (drag = null);
 
-  // A disc picked: it comes to the centre at a zoom of 1 (its compass, lot 2, will open there).
-  function pick(agentId: string) {
-    const d = world.items.find((i) => i.agentId === agentId);
-    if (!d) return;
+  // A disc picked: its compass at a zoom of 1, centred on the side asked (its card for a side not built yet).
+  function pick(agentId: string, side: Side = 'centre') {
+    const f = near.items.find((i) => i.agentId === agentId);
+    if (!f) return;
+    let b: Box = f.centre;
+    if (side === 'north' && f.north) b = f.north;
+    if (side === 'east' && f.team.length) {
+      const x = Math.min(...f.team.map((i) => i.x));
+      const y = Math.min(...f.team.map((i) => i.y));
+      b = { x, y, w: Math.max(...f.team.map((i) => i.x + i.w)) - x, h: Math.max(...f.team.map((i) => i.y + i.h)) - y };
+    }
     const [px, py] = centre();
-    place({ zoom: 1, x: px - (d.x + d.w / 2), y: py - (d.y + d.h / 2) });
+    place({ zoom: 1, x: px - (f.x + b.x + b.w / 2), y: py - (f.y + b.y + b.h / 2) });
+  }
+
+  function toggleTeam(agentId: string) {
+    teamOpen[agentId] = !teamOpen[agentId];
+    if (teamOpen[agentId]) seenAt[agentId] = Date.now();
   }
 
   // Escape leaves the canvas, unless the focus is in a field, or a menu, a dialog or a popover is open (it is theirs).
@@ -113,12 +170,20 @@
 >
   {#if world.items.length}
     <div class="world" style:transform="translate({cam.x}px, {cam.y}px) scale({cam.zoom})">
-      <svg width={world.w} height={world.h} viewBox="0 0 {world.w} {world.h}" overflow="visible">
-        {#each world.items as d (d.agentId)}
-          {@const a = byId.get(d.agentId)}
-          {#if a}<Disc disc={d} agent={a} onpick={pick} />{/if}
+      {#if alt === 'far'}
+        <svg width={far.w} height={far.h} viewBox="0 0 {far.w} {far.h}" overflow="visible">
+          {#each far.items as d (d.agentId)}
+            {@const a = byId.get(d.agentId)}
+            {#if a}<Disc disc={d} agent={a} onpick={pick} />{/if}
+          {/each}
+        </svg>
+      {:else}
+        <Links links={near.links} w={near.w} h={near.h} />
+        {#each near.items as f (f.agentId)}
+          {@const a = byId.get(f.agentId)}
+          {#if a}<Compass frame={f} agent={a} ontoggle={toggleTeam} />{/if}
         {/each}
-      </svg>
+      {/if}
     </div>
   {:else}
     <p class="empty">{t('workspace.empty')}</p>

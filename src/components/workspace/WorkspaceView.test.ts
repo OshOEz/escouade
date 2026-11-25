@@ -3,12 +3,44 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { setLang } from '../../lib/i18n';
 import { app } from '../../lib/state.svelte';
 import { agent, fakeBackend, project, resetApp } from '../../test/ipc';
-import { req } from '../../test/workspace';
+import { planWith, planWithRunning, req, sub } from '../../test/workspace';
 import WorkspaceView from './WorkspaceView.svelte';
 
 const show = () => render(WorkspaceView, { project: app.projects[0] });
 /** The zoom the bar shows (jsdom has no size: the canvas opens fitted at its lowest zoom). */
 const zoomShown = () => document.querySelector('.bar .pct')?.textContent;
+
+/** Clicks « Zoomer » or « Dézoomer » until the bar says `z`; for 1, clicks the first disc, which brings it to 100 %. */
+async function zoomTo(z: number) {
+  const want = `${Math.round(z * 100)} %`;
+  if (z === 1) return fireEvent.click(document.querySelector('.disc')!);
+  for (let i = 0; i < 20 && zoomShown() !== want; i++) {
+    const shown = parseInt(zoomShown() ?? '0');
+    await fireEvent.click(screen.getByRole('button', { name: shown < z * 100 ? 'Zoomer' : 'Dézoomer' }));
+  }
+  expect(zoomShown()).toBe(want);
+}
+
+/**
+ * The centre on screen of an agent, from the world's transform: its disc's `<g>` from afar, its card in its compass
+ * near (positions written in `left`/`top` of the world).
+ */
+function centreOf(container: HTMLElement, agentId: string): [number, number] {
+  const m = (container.querySelector('.world') as HTMLElement).style.transform.match(/translate\((.+)px, (.+)px\) scale\((.+)\)/)!;
+  const [x, y, z] = m.slice(1).map(Number);
+  const g = container.querySelector(`g[data-agent="${agentId}"]`);
+  let wx: number;
+  let wy: number;
+  if (g) [wx, wy] = g.getAttribute('transform')!.match(/translate\((.+) (.+)\)/)!.slice(1).map(Number);
+  else {
+    const frame = container.querySelector(`div[data-agent="${agentId}"]`) as HTMLElement;
+    const slot = frame.querySelector('[data-side="centre"]')!.parentElement as HTMLElement;
+    const px = (el: HTMLElement, k: 'left' | 'top' | 'width' | 'height') => parseFloat(el.style[k]);
+    wx = px(frame, 'left') + px(slot, 'left') + px(slot, 'width') / 2;
+    wy = px(frame, 'top') + px(slot, 'top') + px(slot, 'height') / 2;
+  }
+  return [Math.round(wx * z + x), Math.round(wy * z + y)];
+}
 
 describe('the workspace', () => {
   beforeEach(() => {
@@ -146,5 +178,54 @@ describe('the workspace', () => {
     field.remove();
     await fireEvent.keyDown(window, { key: 'Escape' });
     expect(app.workspaceOn).toBe(false);
+  });
+
+  it('shows the compasses from 45 %, the discs below', async () => {
+    resetApp({ agents: [agent({ id: 'a1', name: 'un' })] });
+    show(); // jsdom : la toile s'ouvre au zoom le plus bas, donc de loin
+    expect(screen.queryByRole('textbox', { name: 'Écrire à un' })).toBeNull();
+    for (let i = 0; i < 3; i++) await fireEvent.click(screen.getByRole('button', { name: 'Zoomer' })); // 0,3 → 0,59
+    expect(screen.getByRole('textbox', { name: 'Écrire à un' })).toBeTruthy();
+  });
+
+  it('keeps the agent in the middle when the altitude changes', async () => {
+    // Three in a row: the middle one is at the centre of the screen (jsdom's is its corner), where the zoom keeps it.
+    resetApp({ agents: [agent({ id: 'a1' }), agent({ id: 'a2' }), agent({ id: 'a3' })] });
+    const { container } = show();
+    const before = centreOf(container, 'a2');
+    await zoomTo(0.59);
+    expect(container.querySelector('g[data-agent]')).toBeNull();
+    expect(centreOf(container, 'a2')).toEqual(before);
+  });
+
+  it('zooms on the team when its satellite is clicked', async () => {
+    resetApp({ agents: [agent({ id: 'a1', plan: planWithRunning(2, 0) })] });
+    const { container } = show();
+    await fireEvent.click(container.querySelector('.sat.team')!);
+    expect(zoomShown()).toBe('100 %');
+    expect(screen.getAllByRole('article', { name: /sous-agent/ }).length).toBe(2);
+  });
+
+  it("leaves the card's field alone", async () => {
+    resetApp({ agents: [agent({ id: 'a1', name: 'un' })] });
+    app.openWorkspace('p1');
+    show();
+    await zoomTo(1);
+    const field = screen.getByRole('textbox', { name: 'Écrire à un' });
+    field.focus();
+    for (const key of ['+', '-', '0', 'Escape']) await fireEvent.keyDown(field, { key });
+    expect(zoomShown()).toBe('100 %');
+    expect(app.workspaceOn).toBe(true);
+    await fireEvent.pointerDown(field, { clientX: 0, clientY: 0 });
+    expect(document.querySelector('.ws.pan')).toBeNull();
+  });
+
+  it('animates only the links of what runs', async () => {
+    resetApp({ agents: [agent({ id: 'a1', plan: planWith([], { agents: [sub('s1'), sub('s2', 'done')] }) })] });
+    const { container } = show();
+    await zoomTo(1);
+    await fireEvent.click(screen.getByRole('button', { name: /terminés/ }));
+    expect(container.querySelectorAll('path.link.run')).toHaveLength(1);
+    expect(container.querySelectorAll('path.link.done')).toHaveLength(1);
   });
 });

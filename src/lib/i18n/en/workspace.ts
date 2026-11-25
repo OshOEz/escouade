@@ -21,6 +21,7 @@ export default defineZone('workspace', {
     team: { one: 'team', other: 'team' },
     question: { one: 'question', other: 'questions' },
   },
+  launched: 'launched',
   plan: {
     chip: 'Plan',
     count: '{done}/{total} tasks · {percent} %',

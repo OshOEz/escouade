@@ -5,9 +5,9 @@
   import { t } from '../../lib/i18n';
   import { cardActivity } from '../../lib/sidebar';
   import type { Agent } from '../../lib/types';
-  import { DISC, type Disc, type Placed, type SatKind } from '../../lib/workspace-layout';
+  import { DISC, SIDE_OF, type Disc, type Placed, type SatKind, type Side } from '../../lib/workspace-layout';
 
-  let { disc, agent, onpick }: { disc: Placed<Disc>; agent: Agent; onpick: (agentId: string) => void } = $props();
+  let { disc, agent, onpick }: { disc: Placed<Disc>; agent: Agent; onpick: (agentId: string, side?: Side) => void } = $props();
 
   const state = $derived(t(`workspace.state.${disc.state}`));
   const percent = $derived(disc.total ? Math.round((disc.done / disc.total) * 100) : 0);
@@ -76,6 +76,7 @@
 <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
 <g
   class="disc {disc.state}"
+  data-agent={disc.agentId}
   transform="translate({disc.x + disc.w / 2} {disc.y + disc.h / 2})"
   role="button"
   tabindex="0"
@@ -101,7 +102,16 @@
     <text class="pct" y="34" text-anchor="middle">{t('workspace.noPlan')}</text>
   {/if}
   {#each arcs as s (s.kind)}
-    <path class="sat {s.kind}" d={s.d} />
+    <!-- Clicked, it brings the side it stands for; not a stop of the Tab key of its own: a button in a button is not read. -->
+    <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
+    <path
+      class="sat {s.kind}"
+      d={s.d}
+      onclick={(e) => {
+        e.stopPropagation();
+        onpick(disc.agentId, SIDE_OF[s.kind]);
+      }}
+    />
     <text class="sat-n" x={s.cx} y={s.cy - 1} text-anchor="middle">{s.count}</text>
     <text class="sat-l" x={s.cx} y={s.cy + 10} text-anchor="middle">{satWord(s.kind, s.count)}</text>
   {/each}
