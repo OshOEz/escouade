@@ -4,23 +4,24 @@
   // edge on top: « de la doc, pas un agent ». While one of its calls runs, a green ring and the word.
   import { t } from '../../lib/i18n';
   import { tip } from '../../lib/tip';
-  import type { ToolCard } from '../../lib/workspace-layout';
+  import { toolName, type ToolCard } from '../../lib/workspace-layout';
   import Icon from '../Icon.svelte';
 
   let { tool }: { tool: ToolCard } = $props();
 
   const calls = $derived(t('workspace.tool.calls', { count: tool.calls }));
+  const name = $derived(toolName(tool));
+  const label = $derived(
+    [t('workspace.tool.label', { kind: t(`workspace.tool.${tool.kind}`), name, calls }), tool.running ? t('workspace.tool.running') : '']
+      .filter(Boolean)
+      .join(', '),
+  );
 </script>
 
-<article
-  class="tool {tool.kind}"
-  class:running={tool.running}
-  data-side="west"
-  aria-label={t('workspace.tool.label', { kind: t(`workspace.tool.${tool.kind}`), name: tool.name, calls })}
->
+<article class="tool {tool.kind}" class:running={tool.running} data-side="west" aria-label={label}>
   <header>
     <span class="ico"><Icon name={tool.kind === 'skill' ? 'scroll' : 'box'} size={14} /></span>
-    <b class="name" use:tip={tool.name}>{tool.name}</b>
+    <b class="name" use:tip={tool.name}>{name}</b>
   </header>
   <p>
     <span class="kind">{t(`workspace.tool.${tool.kind}`)}</span> · <span class="num">{calls}</span>

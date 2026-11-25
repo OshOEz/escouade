@@ -35,11 +35,14 @@
   /** Its pile of ended subagents unfolded, by agent; when it was unfolded last (a failure since stays out of the pile). */
   let teamOpen = $state<Record<string, boolean>>({});
   let seenAt = $state<Record<string, number>>({});
+  /** The agents whose tools are all shown, their pile unfolded. */
+  let toolsOpen = $state<Record<string, boolean>>({});
   /** The height measured of each card, by agent then by card (`centre`: the agent's): a card that grows moves the others. */
   let heights = $state<Record<string, Record<string, number>>>({});
   const frameAt = (a: Agent) =>
     frameOf(a, {
       teamOpen: teamOpen[a.id],
+      toolsOpen: toolsOpen[a.id],
       seenAt: seenAt[a.id],
       // Its banner open or folded as in its conversation (PlanBanner: the reader's choice, else a window of 760 px).
       planOpen: app.planOpen[a.id] ?? window.innerHeight >= 760,
@@ -216,7 +219,14 @@
         {#if d}
           <svg class="one" width="1" height="1" overflow="visible"><Disc disc={d} agent={a} onpick={pick} /></svg>
         {:else if f}
-          <Compass frame={f} agent={a} ontoggle={toggleTeam} onsize={(id, h) => sized(a.id, id, h)} zoom={cam.zoom} />
+          <Compass
+            frame={f}
+            agent={a}
+            ontoggle={toggleTeam}
+            ontoggletools={(id) => (toolsOpen[id] = !toolsOpen[id])}
+            onsize={(id, h) => sized(a.id, id, h)}
+            zoom={cam.zoom}
+          />
         {/if}
       {/each}
     </div>

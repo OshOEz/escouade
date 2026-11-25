@@ -115,6 +115,21 @@ note « Ruling: ».
     `failed = true`.
   - `is_empty` compte aussi `artifacts` et `commands`.
 
+Ce que le lot 4 laisse à changer dans `canvas.rs` (constaté à sa revue finale) :
+- `on_tool_use` commence par `let Some((kind, kit)) = kit_of(name, input) else { return Change::None; };` puis
+  `self.seen.first_time(id)` : un appel `Artifact` ou `Bash` repart avant d'être vu. Traiter `Artifact` et `Bash`
+  avant ce `let … else` (chacun appelle d'abord `self.seen.first_time(id)` et rend `Change::None` s'il est déjà vu),
+  puis garder le `let … else` pour les skills et les plugins.
+- `open` (`HashMap<String, (Option<String>, KitKind, String)>`) ne tient que les appels de skills et de plugins :
+  `on_tool_result` rend `Change::None` dès qu'il n'y trouve pas l'appel. Chercher le `Publishing` et le `CommandRun`
+  de l'appel avant ce retour (ou ajouter à `open` une variante pour eux).
+- `is_empty` ne compte que `tools` et les `tools` de `subs` : y ajouter `artifacts`, `commands`, `publishing` et les
+  `commands` de chaque `ThreadKit`, sinon `canvas_apply` (agent.rs) jette un résumé qui n'a que des artefacts.
+- `MAX_THREADS` évince d'abord un fil sans appel en cours : le test de `close_running` d'un fil doit compter ses
+  `commands` sans `ended_at` comme « en cours ».
+- `agent.rs` (`plan_tool_use`) ne passe plus au résumé un appel que la conversation tient déjà terminé (relu après un
+  redémarrage) : rien à faire pour les artefacts et les commandes, la règle vaut pour eux.
+
 Choix du plan : le cœur garde les cinq derniers appels de terminal de chaque fil sans les trier ; c'est la fenêtre qui
 reconnaît les tests, avec le réglage `testCommand` qu'elle a sous la main (l'agent du cœur ne connaît pas son Kanban).
 Limite : un passage de tests suivi de cinq autres appels de terminal du même fil n'a plus de carte ; une tâche de fond

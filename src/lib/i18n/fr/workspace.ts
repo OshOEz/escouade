@@ -33,8 +33,11 @@ export default {
     plugin: 'Plugin',
     calls: { one: '{count} appel', other: '{count} appels' },
     running: 'en cours',
-    /** The tags of a subagent's card: its tools. */
-    tags: 'Outils : {names}',
+    /** The tags of a subagent's card: its tools, named for a screen reader. */
+    tags: 'Outils de {name}',
+    /** The pile of the tools past the most recent, and its button once unfolded. */
+    more: { one: '+ {count} outil', other: '+ {count} outils' },
+    fold: 'Replier les outils',
   },
   /** The team, east of the card: its subagents and background tasks. */
   team: {

@@ -28,7 +28,10 @@ export default defineZone('workspace', {
     plugin: 'Plugin',
     calls: { one: '{count} call', other: '{count} calls' },
     running: 'running',
-    tags: 'Tools: {names}',
+    tags: 'Tools of {name}',
+    /** The pile of the tools past the most recent, and its button once unfolded. */
+    more: { one: '+ {count} tool', other: '+ {count} tools' },
+    fold: 'Fold the tools',
   },
   team: {
     task: 'task {n}',

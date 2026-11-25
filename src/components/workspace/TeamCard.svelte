@@ -8,13 +8,14 @@
   import { insertAt } from '../../lib/dictation';
   import { fDur, fTok } from '../../lib/format';
   import { t } from '../../lib/i18n';
+  import { tip } from '../../lib/tip';
   import { api } from '../../lib/ipc';
   import { modelLabel } from '../../lib/models';
   import { observeHeight } from '../../lib/resize';
   import { app } from '../../lib/state.svelte';
   import { canWriteSub, subDuration } from '../../lib/subagents';
   import type { Agent } from '../../lib/types';
-  import { askMaxH, SUB, type TeamItem } from '../../lib/workspace-layout';
+  import { askMaxH, SUB, toolName, type TeamItem } from '../../lib/workspace-layout';
   import AskInset from './AskInset.svelte';
   import MicButton from '../MicButton.svelte';
   import Icon from '../Icon.svelte';
@@ -153,11 +154,13 @@
     </p>
     {#if sub.doing}<p class="doing mono">{sub.doing}</p>{/if}
     {#if kits.length}
-      <p class="kits" aria-label={t('workspace.tool.tags', { names: kits.map((k) => k.name).join(', ') })}>
-        {#each kits as k (`${k.kind}:${k.name}`)}<span class="kit {k.kind}" class:running={k.running > 0}
-            ><Icon name={k.kind === 'skill' ? 'scroll' : 'box'} size={11} />{k.name}</span
+      <div class="kits" role="group" aria-label={t('workspace.tool.tags', { name })}>
+        {#each kits as k (`${k.kind}:${k.name}`)}<span class="kit {k.kind}" class:running={k.running > 0} use:tip={k.name}
+            ><Icon name={k.kind === 'skill' ? 'scroll' : 'box'} size={11} />{toolName(k)}{#if k.running > 0}<span class="sr"
+                >, {t('workspace.tool.running')}</span
+              >{/if}</span
           >{/each}
-      </p>
+      </div>
     {/if}
     {#if asks}<AskInset {agent} mine={(s) => s === sub.id} onfocusback={focusBack} maxH={askMaxH(innerHeight, zoom, SUB.h)} />{/if}
     {#if canWrite}
@@ -259,9 +262,12 @@
     font-size: 11px;
   }
   /* Its tools: small tags, squared as their cards, coloured by kind. */
+  /* As many rows as they need: the card's height is measured, the team below moves. */
   .kits {
     display: flex;
+    flex-wrap: wrap;
     gap: 4px;
+    padding-left: 16px;
   }
   .kit {
     display: inline-flex;
@@ -282,6 +288,14 @@
   }
   .kit.running {
     box-shadow: inset 0 0 0 1px var(--run);
+  }
+  .sr {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
   }
   .bar {
     display: flex;

@@ -2364,6 +2364,8 @@ export interface KitUse {
   calls: number;
   /** Its calls running now. */
   running: number;
+  /** Its first call (absent: saved before it was kept). */
+  firstAt?: number;
   lastAt: number;
 }
 

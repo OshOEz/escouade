@@ -42,10 +42,37 @@ export function discOf(agent: Agent): Disc {
   };
 }
 
-/** A skill or a plugin of an agent, its subagents' calls added; `runningIn`: the subagent's call a call of it runs in. */
-export type ToolCard = { kind: 'skill' | 'plugin'; name: string; calls: number; running: boolean; runningIn: string | null };
+/**
+ * A skill or a plugin of an agent, its subagents' calls added; `runningIn`: the subagent's call a call of it runs in;
+ * `firstAt`, `lastAt`: its first and its latest call, of all its threads.
+ */
+export type ToolCard = {
+  kind: 'skill' | 'plugin';
+  name: string;
+  calls: number;
+  running: boolean;
+  runningIn: string | null;
+  firstAt: number;
+  lastAt: number;
+};
 
-/** The tools of `agent` and of its subagents, one card a tool: the skills then the plugins, each by name (a card never jumps). */
+/**
+ * The name a tool is shown by. Claude Code names the server of a plugin `plugin_<plugin>_<server>`: its server, or
+ * « <plugin> · <server> » when they differ (a plugin's name has no `_`). Any other name is shown whole.
+ */
+export function toolName(t: Pick<ToolCard, 'kind' | 'name'>): string {
+  if (t.kind !== 'plugin' || !t.name.startsWith('plugin_')) return t.name;
+  const rest = t.name.slice('plugin_'.length);
+  const i = rest.indexOf('_');
+  if (i <= 0 || i === rest.length - 1) return rest;
+  const [plugin, server] = [rest.slice(0, i), rest.slice(i + 1)];
+  return plugin === server ? server : `${plugin} · ${server}`;
+}
+
+/**
+ * The tools of `agent` and of its subagents, one card a tool, in the order of their first use (a new one comes last:
+ * it never moves the others; the agent's thread before its subagents' at the same time).
+ */
 export function toolCards(agent: Agent): ToolCard[] {
   const canvas = agent.canvas;
   if (!canvas) return [];
@@ -54,12 +81,16 @@ export function toolCards(agent: Agent): ToolCard[] {
   for (const [call, tools] of threads)
     for (const k of tools) {
       const key = `${k.kind}:${k.name}`;
-      const card = cards.get(key) ?? { kind: k.kind, name: k.name, calls: 0, running: false, runningIn: null };
+      const first = k.firstAt ?? 0;
+      const card = cards.get(key) ?? { kind: k.kind, name: k.name, calls: 0, running: false, runningIn: null, firstAt: first, lastAt: 0 };
       card.calls += k.calls;
+      card.firstAt = Math.min(card.firstAt, first);
+      card.lastAt = Math.max(card.lastAt, k.lastAt);
       if (k.running > 0 && !card.running) [card.running, card.runningIn] = [true, call];
       cards.set(key, card);
     }
-  return [...cards.values()].sort((a, b) => (a.kind === b.kind ? a.name.localeCompare(b.name) : a.kind === 'skill' ? -1 : 1));
+  // A stable sort: same time, the order of the threads.
+  return [...cards.values()].sort((a, b) => a.firstAt - b.firstAt);
 }
 
 /** The discs in rows of `perRow`, in the order given. */
@@ -99,6 +130,10 @@ export const GAP = 48;
  * card, where the plan's link runs; `row`: between two rows; `drop`: from the last row to the card, for a flow to show.
  */
 export const TOOL = { w: 168, h: 60, aisle: 24, row: 12, drop: 32 } as const;
+/** The tool cards shown, the most recently called; the others in a pile (« + n outils ») that unfolds them. */
+export const TOOLS_SHOWN = 8;
+/** The pile of the tools: `hidden` of them folded in it, or `open` (it folds them back). */
+export type ToolPile = { hidden: number; open: boolean };
 /** The pile of the ended subagents, and the gap between two cards of the team. */
 const FOLDED_H = 40;
 const STACK_GAP = 16;
@@ -115,7 +150,17 @@ export type LinkState = 'run' | 'done' | 'failed' | 'plan' | 'launched';
 /** `d`: the SVG path, in the world's coordinates. */
 export type Link = { id: string; state: LinkState; d: string };
 /** A link of a frame, from (x1, y1) to (x2, y2) in the frame's coordinates: a curve, or a straight line. */
-export type Edge = { id: string; state: LinkState; x1: number; y1: number; x2: number; y2: number; straight?: boolean };
+export type Edge = {
+  id: string;
+  state: LinkState;
+  x1: number;
+  y1: number;
+  x2: number;
+  y2: number;
+  straight?: boolean;
+  /** Straight segments through these points: the way around the cards. */
+  via?: [number, number][];
+};
 
 /** `west`: the tools, drawn above the card (the user's choice); the name is the side's, for the keyboard's order. */
 export type Frame = {
@@ -125,15 +170,24 @@ export type Frame = {
   centre: Box;
   north: Box | null;
   west: Placed<ToolCard>[];
+  /** The pile of the tools past `TOOLS_SHOWN`, after them; none with fewer. */
+  westMore: Placed<ToolPile> | null;
   team: Placed<TeamItem>[];
   links: Edge[];
 };
 /**
  * `teamOpen`: its pile of ended subagents unfolded; `seenAt`: when it was unfolded last; `centreH`: its card's height;
  * `planOpen`: its plan's banner unfolded, as in its conversation (default); `teamH`: the height measured of a card of
- * its team, by its id (none or 0: its size by default).
+ * its team, by its id (none or 0: its size by default); `toolsOpen`: its pile of tools unfolded.
  */
-export type FrameOpts = { teamOpen?: boolean; seenAt?: number; centreH?: number; planOpen?: boolean; teamH?: Record<string, number> };
+export type FrameOpts = {
+  teamOpen?: boolean;
+  seenAt?: number;
+  centreH?: number;
+  planOpen?: boolean;
+  teamH?: Record<string, number>;
+  toolsOpen?: boolean;
+};
 
 /** The highest a card grows (an agent that waits, its questions in it), at a zoom of 1: past it, its inset scrolls. */
 export const cardMaxH = (windowH: number): number => Math.round(0.7 * windowH);
@@ -193,6 +247,10 @@ function curve(x1: number, y1: number, x2: number, y2: number): string {
 /** The link of an edge of a frame drawn at (dx, dy) of the world. */
 function linkOf(e: Edge, dx: number, dy: number): Link {
   const [x1, y1, x2, y2] = [e.x1 + dx, e.y1 + dy, e.x2 + dx, e.y2 + dy];
+  if (e.via) {
+    const pts = e.via.map(([x, y]) => `L ${x + dx} ${y + dy}`).join(' ');
+    return { id: e.id, state: e.state, d: `M ${x1} ${y1} ${pts} L ${x2} ${y2}` };
+  }
   return { id: e.id, state: e.state, d: e.straight ? `M ${x1} ${y1} L ${x2} ${y2}` : curve(x1, y1, x2, y2) };
 }
 
@@ -204,7 +262,7 @@ const frames = new WeakMap<Agent, { key: string; frame: Frame }>();
  * column on the right. A subagent whose parent is in the team, and a background task whose subagent is, lie right of it.
  */
 export function frameOf(agent: Agent, opts: FrameOpts = {}): Frame {
-  const key = `${!!opts.teamOpen}|${opts.seenAt ?? 0}|${opts.centreH ?? ''}|${opts.planOpen !== false}|${JSON.stringify(opts.teamH ?? {})}`;
+  const key = `${!!opts.teamOpen}|${opts.seenAt ?? 0}|${opts.centreH ?? ''}|${opts.planOpen !== false}|${JSON.stringify(opts.teamH ?? {})}|${!!opts.toolsOpen}`;
   const known = frames.get(agent);
   if (known?.key === key) return known.frame;
   const frame = computeFrame(agent, opts);
@@ -220,14 +278,27 @@ function computeFrame(agent: Agent, opts: FrameOpts): Frame {
     north = { x: 0, y: 0, w: PLAN.w, h };
   }
   const top = north ? north.h + GAP : 0;
-  const west: Placed<ToolCard>[] = toolCards(agent).map((t, i) => ({
-    ...t,
+  const all = toolCards(agent);
+  let shown = all;
+  let pile: ToolPile | null = null;
+  if (all.length > TOOLS_SHOWN) {
+    if (opts.toolsOpen) pile = { hidden: 0, open: true };
+    else {
+      // The ones running first: a call that runs keeps its card, and its flow.
+      const recent = new Set([...all].sort((a, b) => Number(b.running) - Number(a.running) || b.lastAt - a.lastAt).slice(0, TOOLS_SHOWN));
+      shown = all.filter((t) => recent.has(t));
+      pile = { hidden: all.length - TOOLS_SHOWN, open: false };
+    }
+  }
+  const slot = (i: number) => ({
     x: (i % 2) * (TOOL.w + TOOL.aisle),
     y: top + Math.floor(i / 2) * (TOOL.h + TOOL.row),
     w: TOOL.w,
     h: TOOL.h,
-  }));
-  const rows = Math.ceil(west.length / 2);
+  });
+  const west: Placed<ToolCard>[] = shown.map((t, i) => ({ ...t, ...slot(i) }));
+  const westMore = pile && { ...pile, ...slot(west.length) };
+  const rows = Math.ceil((west.length + (westMore ? 1 : 0)) / 2);
   const centreY = rows ? top + rows * (TOOL.h + TOOL.row) - TOOL.row + TOOL.drop : top;
   const centre: Box = { x: 0, y: centreY, w: CARD.w, h: opts.centreH ?? CARD.h };
   const links: Edge[] = [];
@@ -290,17 +361,39 @@ function computeFrame(agent: Agent, opts: FrameOpts): Frame {
     links.push({ id: `${agent.id}:${i.id}`, state, x1: from.x + from.w, y1: from.y + from.h / 2, x2: i.x, y2: i.y + i.h / 2 });
   }
 
-  // A flow from a tool only while one of its calls runs: to the subagent it runs in when it has a card, else to the agent.
-  // shortcut: a flow from an upper row passes under the cards below it; route it down the aisle if that reads badly.
+  // A flow from a tool only while one of its calls runs, under no card: from the tool's side on the aisle, down the aisle
+  // (off its middle, the plan's link), then to the agent's card, or along the gap above the card and down right of it to
+  // the subagent it runs in when that one has a card.
+  const aisle = TOOL.w + TOOL.aisle / 2;
+  const gapY = centre.y - TOOL.drop / 2;
   for (const t of west) {
     if (!t.running) continue;
     const id = `tool:${t.kind}:${t.name}`;
+    const left = t.x === 0;
+    const [x1, y1] = [left ? t.x + t.w : t.x, t.y + t.h / 2];
+    const lane = aisle + (left ? -6 : 6);
     const to = t.runningIn ? placed.get(t.runningIn) : undefined;
-    if (to) links.push({ id, state: 'run', x1: t.x + t.w, y1: t.y + t.h / 2, x2: to.x, y2: to.y + to.h / 2 });
-    else links.push({ id, state: 'run', x1: t.x + t.w / 2, y1: t.y + t.h, x2: t.x + t.w / 2, y2: centre.y, straight: true });
+    if (to) {
+      const x = CARD.w + GAP;
+      const y2 = to.y + to.h / 2;
+      links.push({
+        id,
+        state: 'run',
+        x1,
+        y1,
+        x2: to.x,
+        y2,
+        via: [
+          [lane, y1],
+          [lane, gapY],
+          [x, gapY],
+          [x, y2],
+        ],
+      });
+    } else links.push({ id, state: 'run', x1, y1, x2: lane, y2: centre.y, via: [[lane, y1]] });
   }
 
-  const boxes: Box[] = [centre, ...(north ? [north] : []), ...west, ...team];
+  const boxes: Box[] = [centre, ...(north ? [north] : []), ...west, ...(westMore ? [westMore] : []), ...team];
   return {
     agentId: agent.id,
     w: Math.max(...boxes.map((b) => b.x + b.w)),
@@ -308,6 +401,7 @@ function computeFrame(agent: Agent, opts: FrameOpts): Frame {
     centre,
     north,
     west,
+    westMore,
     team,
     links,
   };

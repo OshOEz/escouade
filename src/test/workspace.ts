@@ -76,4 +76,11 @@ export const permissionItem = (id: string, command: string, over: Partial<Permis
 });
 
 /** A skill or a plugin of a canvas summary, with its calls and those running. */
-export const kit = (kind: KitUse['kind'], name: string, calls = 1, running = 0): KitUse => ({ kind, name, calls, running, lastAt: 1 });
+export const kit = (kind: KitUse['kind'], name: string, calls = 1, running = 0): KitUse => ({
+  kind,
+  name,
+  calls,
+  running,
+  firstAt: 1,
+  lastAt: 1,
+});

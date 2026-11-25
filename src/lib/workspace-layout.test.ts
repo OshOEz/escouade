@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { agent } from '../test/ipc';
+import type { KitUse } from './types';
 import { kit, planWith, planWithRunning, req, sub } from '../test/workspace';
 import { planView } from './plan';
 import type { Box } from './workspace-camera';
@@ -20,6 +21,8 @@ import {
   teamOf,
   TOOL,
   toolCards,
+  toolName,
+  TOOLS_SHOWN,
   waits,
 } from './workspace-layout';
 
@@ -55,10 +58,28 @@ describe('the discs of the workspace', () => {
       canvas: { tools: [kit('plugin', 'github', 2), kit('skill', 'tdd')], subs: [{ call: 's1', tools: [kit('plugin', 'github', 3, 1)] }] },
     });
     expect(toolCards(a)).toEqual([
-      { kind: 'skill', name: 'tdd', calls: 1, running: false, runningIn: null },
-      { kind: 'plugin', name: 'github', calls: 5, running: true, runningIn: 's1' },
+      { kind: 'plugin', name: 'github', calls: 5, running: true, runningIn: 's1', firstAt: 1, lastAt: 1 },
+      { kind: 'skill', name: 'tdd', calls: 1, running: false, runningIn: null, firstAt: 1, lastAt: 1 },
     ]);
     expect(toolCards(agent())).toEqual([]);
+  });
+
+  it('keeps the order of first use: a new tool never moves the others', () => {
+    const at = (k: KitUse, firstAt: number) => ({ ...k, firstAt });
+    const before = {
+      tools: [at(kit('plugin', 'zeta'), 1), at(kit('skill', 'beta'), 5)],
+      subs: [{ call: 's1', tools: [at(kit('skill', 'alpha'), 3)] }],
+    };
+    expect(toolCards(agent({ canvas: before })).map((c) => c.name)).toEqual(['zeta', 'alpha', 'beta']);
+    const after = { ...before, tools: [...before.tools, at(kit('skill', 'aaa'), 9)] };
+    expect(toolCards(agent({ canvas: after })).map((c) => c.name)).toEqual(['zeta', 'alpha', 'beta', 'aaa']);
+  });
+
+  it('names a plugin of Claude Code by its server, and keeps a name with « __ » whole', () => {
+    expect(toolName({ kind: 'plugin', name: 'plugin_github_github' })).toBe('github');
+    expect(toolName({ kind: 'plugin', name: 'plugin_superpowers_chrome' })).toBe('superpowers · chrome');
+    expect(toolName({ kind: 'plugin', name: 'my__server' })).toBe('my__server');
+    expect(toolName({ kind: 'skill', name: 'plugin_x_y' })).toBe('plugin_x_y');
   });
 
   it('puts the tools satellite in its place', () => {
@@ -133,6 +154,65 @@ describe('the compass of the workspace', () => {
     expect(link.y2).toBe(f.centre.y);
     expect(f.h).toBe(f.centre.y + f.centre.h);
   });
+  it('shows the most recent tools, the others in a pile that unfolds', () => {
+    const tools = Array.from({ length: 10 }, (_, i) => ({ ...kit('skill', `s${i}`), firstAt: i, lastAt: i === 0 ? 99 : i }));
+    const a = agent({ canvas: { tools, subs: [] } });
+    const f = frameOf(a);
+    expect(f.west).toHaveLength(TOOLS_SHOWN);
+    expect(f.west.map((t) => t.name)).toEqual(['s0', 's3', 's4', 's5', 's6', 's7', 's8', 's9']);
+    expect(f.westMore).toMatchObject({ hidden: 2, open: false });
+    expect(f.westMore!.y + f.westMore!.h).toBeLessThan(f.centre.y);
+    const open = frameOf(a, { toolsOpen: true });
+    expect(open.west).toHaveLength(10);
+    expect(open.westMore).toMatchObject({ hidden: 0, open: true });
+    expect(discOf(a).satellites[0]).toEqual({ kind: 'tools', count: 10 });
+    expect(frameOf(agent({ canvas: { tools: tools.slice(0, 8), subs: [] } })).westMore).toBeNull();
+    // A call that runs keeps its card out of the pile, with its flow.
+    const long = { tools: [{ ...kit('plugin', 'slow', 1, 1), firstAt: 0, lastAt: 0 }, ...tools], subs: [] };
+    expect(frameOf(agent({ canvas: long })).west.map((t) => t.name)).toContain('slow');
+  });
+
+  /** The points of a path of straight segments (`M x y L x y …`). */
+  const pointsOf = (d: string) => [...d.matchAll(/(-?[\d.]+) (-?[\d.]+)/g)].map((m) => [Number(m[1]), Number(m[2])]);
+  /** A segment, vertical or horizontal, passing inside a box (its edges excluded). */
+  const crosses = ([x1, y1]: number[], [x2, y2]: number[], b: Box) =>
+    Math.max(x1, x2) > b.x && Math.min(x1, x2) < b.x + b.w && Math.max(y1, y2) > b.y && Math.min(y1, y2) < b.y + b.h;
+  const clear = (d: string, boxes: Box[]) => {
+    const p = pointsOf(d);
+    expect(d).not.toContain('C');
+    for (let i = 1; i < p.length; i++)
+      for (const b of boxes) expect(crosses(p[i - 1], p[i], b), `${p[i - 1]} → ${p[i]} in ${JSON.stringify(b)}`).toBe(false);
+  };
+
+  it('sends a flow down the aisle, under no card', () => {
+    const tools = [kit('skill', 'a', 1, 1), kit('skill', 'b', 1, 1), kit('skill', 'c'), kit('skill', 'd'), kit('skill', 'e')];
+    const f = frameOf(agent({ canvas: { tools, subs: [] } }));
+    const r = layoutNear([f]);
+    for (const id of ['tool:skill:a', 'tool:skill:b']) {
+      const d = r.links.find((l) => l.id === id)!.d;
+      clear(
+        d,
+        [...f.west, f.centre].filter((t) => !('name' in t) || `tool:skill:${t.name}` !== id),
+      );
+      const end = pointsOf(d).at(-1)!;
+      expect(end[1]).toBe(f.centre.y);
+      expect(end[0]).toBeGreaterThan(TOOL.w);
+      expect(end[0]).toBeLessThan(TOOL.w + TOOL.aisle);
+    }
+  });
+
+  it("sends the flow of a subagent's call around the cards to the subagent", () => {
+    const tools = [kit('skill', 'a'), kit('skill', 'b'), kit('skill', 'c')];
+    const a = agent({
+      plan: planWith([], { agents: [sub('s1')] }),
+      canvas: { tools, subs: [{ call: 's1', tools: [kit('plugin', 'github', 1, 1)] }] },
+    });
+    const f = frameOf(a);
+    const gh = f.west.find((t) => t.name === 'github')!;
+    const d = layoutNear([f]).links.find((l) => l.id === 'tool:plugin:github')!.d;
+    clear(d, [...f.west.filter((t) => t !== gh), f.centre, ...f.team]);
+  });
+
   it("sends the flow of a subagent's call to the subagent", () => {
     const a = agent({
       plan: planWith([], { agents: [sub('s1')] }),

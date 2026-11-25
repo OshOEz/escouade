@@ -1,3 +1,6 @@
+import { readFileSync } from 'node:fs';
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { fireEvent, render, screen } from '@testing-library/svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { dropConversation } from '../../lib/conversations.svelte';
@@ -259,19 +262,36 @@ describe('the workspace', () => {
     expect(container.querySelectorAll('path.link.run')).toHaveLength(1);
   });
 
+  it('folds the tools past the most recent in a pile that unfolds and folds back', async () => {
+    const tools = Array.from({ length: 11 }, (_, i) => ({ ...kit('skill', `t${i}`), lastAt: i }));
+    resetApp({ agents: [agent({ id: 'a1', canvas: { tools, subs: [] } })] });
+    const { container } = show();
+    await zoomTo(1);
+    expect(container.querySelectorAll('article.tool')).toHaveLength(8);
+    await fireEvent.click(screen.getByRole('button', { name: '+ 3 outils' }));
+    expect(container.querySelectorAll('article.tool')).toHaveLength(11);
+    await fireEvent.click(screen.getByRole('button', { name: 'Replier les outils' }));
+    expect(container.querySelectorAll('article.tool')).toHaveLength(8);
+  });
+
   it('shows the tools of a subagent as tags in its own card', async () => {
     resetApp({
       agents: [
         agent({
           id: 'a1',
           plan: planWith([], { agents: [sub('s1')] }),
-          canvas: { tools: [], subs: [{ call: 's1', tools: [kit('skill', 'tdd')] }] },
+          canvas: { tools: [], subs: [{ call: 's1', tools: [kit('skill', 'tdd', 1, 1)] }] },
         }),
       ],
     });
     show();
     await zoomTo(1);
-    expect(screen.getByRole('article', { name: /sous-agent s1/ }).querySelector('.kit')?.textContent).toContain('tdd');
+    const tags = screen.getByRole('group', { name: 'Outils de sous-agent s1' });
+    expect(tags.textContent).toContain('tdd');
+    expect(tags.textContent).toContain('en cours');
+    // jsdom lays out nothing: the stylesheet says the tags wrap, the card's height being measured.
+    const source = readFileSync(resolve(dirname(fileURLToPath(import.meta.url)), 'TeamCard.svelte'), 'utf8');
+    expect(source.slice(source.indexOf('  .kits {'), source.indexOf('}', source.indexOf('  .kits {')))).toContain('flex-wrap: wrap');
   });
 
   describe('an agent that waits', () => {

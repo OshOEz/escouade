@@ -3,6 +3,7 @@
   // world, with its plan north, its card at the centre and its team east. Their order in the DOM is the keyboard's:
   // north, west (its tools, drawn above the card), centre, east, south (lot 5 puts the south after the team).
   // `onsize` tells the height of its cards, by their id (the agent's: `centre`): a card that grows moves the others.
+  import { t } from '../../lib/i18n';
   import type { Agent } from '../../lib/types';
   import type { Box, Size } from '../../lib/workspace-camera';
   import type { Frame, Placed } from '../../lib/workspace-layout';
@@ -15,12 +16,14 @@
     frame,
     agent,
     ontoggle,
+    ontoggletools,
     onsize,
     zoom = 1,
   }: {
     frame: Placed<Frame>;
     agent: Agent;
     ontoggle: (agentId: string) => void;
+    ontoggletools?: (agentId: string) => void;
     onsize?: (id: string, h: number) => void;
     zoom?: number;
   } = $props();
@@ -33,6 +36,13 @@
   {#each frame.west as tool (`${tool.kind}:${tool.name}`)}
     <div class="slot" style={at(tool)}><ToolCard {tool} /></div>
   {/each}
+  {#if frame.westMore}
+    <div class="slot" style={at(frame.westMore)}>
+      <button type="button" class="more" data-side="west" onclick={() => ontoggletools?.(agent.id)}>
+        {frame.westMore.open ? t('workspace.tool.fold') : t('workspace.tool.more', { count: frame.westMore.hidden })}
+      </button>
+    </div>
+  {/if}
   <div class="slot" style={at(frame.centre)}>
     <AgentCard {agent} shown={frame.team.filter((i) => i.kind === 'sub').map((i) => i.id)} onsize={(h) => onsize?.('centre', h)} {zoom} />
   </div>
@@ -45,5 +55,23 @@
   .compass,
   .slot {
     position: absolute;
+  }
+  /* The pile of the tools: squared as their cards, dotted as a pile. */
+  .more {
+    width: 100%;
+    height: 100%;
+    border: none;
+    border-radius: 3px;
+    background: rgba(var(--fg-rgb), 0.04);
+    box-shadow: inset 0 0 0 1px var(--line-2);
+    color: var(--soft);
+    font: inherit;
+    font-size: 12px;
+    font-weight: 550;
+    cursor: pointer;
+  }
+  .more:hover {
+    background: var(--hover);
+    color: var(--text);
   }
 </style>
