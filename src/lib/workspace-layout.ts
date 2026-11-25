@@ -7,11 +7,12 @@ import { planView } from './plan';
 import { sidebarSubs, subagentInfo } from './subagents';
 import type { Agent, ConvItem, KitUse, SubAgent, Ticket } from './types';
 import type { Box, Size } from './workspace-camera';
+import type { Landing, RibbonState } from './workspace-landing';
 
 export type DiscState = 'run' | 'wait' | 'error' | 'done' | 'idle';
 /** The satellites, in their order from top to bottom; each lot of the spec brings its own. */
 export type SatKind = 'team' | 'tools' | 'deliverables' | 'ci' | 'question';
-export type Satellite = { kind: SatKind; count: number };
+export type Satellite = { kind: SatKind; count: number; state?: RibbonState };
 
 /** An agent seen from afar. `total` is 0 without a plan. */
 export type Disc = { agentId: string; name: string; state: DiscState; done: number; total: number; satellites: Satellite[] };
@@ -23,7 +24,7 @@ export const DISC = { r: 92, orbit: 122, w: 300, h: 300, gap: 70 } as const;
 
 const STATE: Record<Agent['status'], DiscState> = { waiting: 'wait', error: 'error', running: 'run', done: 'done', idle: 'idle' };
 
-export function discOf(agent: Agent): Disc {
+export function discOf(agent: Agent, landing: Landing[] = []): Disc {
   const mini = planView(agent)?.mini;
   const team = (agent.plan?.agents.filter(isRunning).length ?? 0) + (agent.plan?.bgTasks.filter(isRunning).length ?? 0);
   const questions = agent.requests?.length ?? 0;
@@ -31,6 +32,14 @@ export function discOf(agent: Agent): Disc {
   if (team) satellites.push({ kind: 'team', count: team });
   const tools = toolCards(agent).length;
   if (tools) satellites.push({ kind: 'tools', count: tools });
+  const deliverables = landing.filter((l) => l.kind === 'artifact').length;
+  if (deliverables) satellites.push({ kind: 'deliverables', count: deliverables });
+  // The remote CI and the deployments, the worst state first: the local tests are on their card.
+  const ci = landing.flatMap((l) => (l.kind === 'ci' || l.kind === 'deploy' ? [l.state] : []));
+  if (ci.length) {
+    const state = (['failure', 'running', 'success'] as const).find((s) => ci.includes(s));
+    satellites.push({ kind: 'ci', count: ci.length, state });
+  }
   if (questions) satellites.push({ kind: 'question', count: questions });
   return {
     agentId: agent.id,

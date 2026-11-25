@@ -1575,6 +1575,14 @@ export interface ProjectEnvironments {
   /** The host has no deployments (Gitea, Forgejo, Azure DevOps). */
   unsupported: boolean;
   host: string;
+  /** The deployments of a commit of the agents' own branches, previews included. */
+  branches?: BranchDeployment[];
+}
+
+/** A deployment of a commit of these agents' own branches. */
+export interface BranchDeployment {
+  deployment: Deployment;
+  agents: string[];
 }
 
 export type MergeStrategy = 'merge' | 'squash' | 'rebase' | 'semiLinear';
@@ -2372,7 +2380,23 @@ export interface KitUse {
 /** What the « Workspace » reads of an agent without its conversation: its tools, and each subagent's by its call. */
 export interface CanvasSummary {
   tools: KitUse[];
-  subs: { call: string; tools: KitUse[] }[];
+  /** Each subagent's tools and latest terminal calls. */
+  subs: { call: string; tools: KitUse[]; commands?: CommandRun[] }[];
+  /** The pages published with `Artifact`, by address, by any thread. */
+  artifacts?: { url: string; title: string; versions: number; at: number }[];
+  /** The publications running: their address comes with their result. */
+  publishing?: { call: string; name: string; since: number }[];
+  /** The agent's own latest terminal calls (5 at most). */
+  commands?: CommandRun[];
+}
+
+/** A terminal call (`Bash` in the foreground) of a thread: the window tells the test runs among them. */
+export interface CommandRun {
+  call: string;
+  command: string;
+  startedAt: number;
+  endedAt?: number | null;
+  failed: boolean;
 }
 
 /** How far an agent is through a plan: its task list, its subagents, its workflows. */

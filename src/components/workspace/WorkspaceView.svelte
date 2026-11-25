@@ -62,7 +62,12 @@
     else delete heights[agentId];
   }
   // From afar, an agent that waits is unfolded among the discs (« toujours déplié, quelle que soit l'altitude »).
-  const far = $derived(layoutFarOpen(ordered.order.map(discOf), new Map(ordered.order.filter(waits).map((a) => [a.id, frameAt(a)]))));
+  const far = $derived(
+    layoutFarOpen(
+      ordered.order.map((a) => discOf(a)),
+      new Map(ordered.order.filter(waits).map((a) => [a.id, frameAt(a)])),
+    ),
+  );
   const near = $derived(layoutNear(ordered.order.map(frameAt), ordered.launched));
   const questions = $derived(agents.reduce((n, a) => n + (a.requests?.length ?? 0), 0));
 

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { agent } from '../test/ipc';
 import type { KitUse } from './types';
-import { kit, planWith, planWithRunning, req, sub } from '../test/workspace';
+import { art, kit, planWith, planWithRunning, req, ribbon, sub } from '../test/workspace';
 import { planView } from './plan';
 import type { Box } from './workspace-camera';
 import {
@@ -317,5 +317,15 @@ describe('the cards that grow with a question', () => {
     const boxes = [...r.discs, ...r.frames];
     for (const p of boxes) for (const q of boxes) if (p !== q) expect(overlaps(p, q)).toBe(false);
     expect(r.w).toBeGreaterThan(0);
+  });
+});
+
+describe('the deliverables and the CI', () => {
+  it('says the deliverables and the worst CI on the disc', () => {
+    const landing = [art(true), art(false), ribbon('deploy', 'success'), ribbon('ci', 'failure')];
+    expect(discOf(agent(), landing).satellites).toEqual([
+      { kind: 'deliverables', count: 2 },
+      { kind: 'ci', count: 2, state: 'failure' },
+    ]);
   });
 });

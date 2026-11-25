@@ -1,5 +1,20 @@
 // Builders for the tests of the « Workspace »: plans and pending requests, smallest that the window accepts.
-import type { BgTask, KitUse, PendingRequest, PermissionItem, PlanState, PlanTask, QuestionItem, SubAgent } from '../lib/types';
+import type {
+  BgTask,
+  CheckState,
+  CommandRun,
+  KitUse,
+  PendingRequest,
+  PermissionItem,
+  PlanState,
+  PlanTask,
+  PrCheck,
+  PrDetail,
+  ProjectEnvironments,
+  QuestionItem,
+  SubAgent,
+} from '../lib/types';
+import type { ArtifactLanding, Ribbon, RibbonState } from '../lib/workspace-landing';
 
 const task = (i: number, status: PlanTask['status']): PlanTask => ({ id: String(i + 1), title: `Tâche ${i + 1}`, status });
 
@@ -83,4 +98,63 @@ export const kit = (kind: KitUse['kind'], name: string, calls = 1, running = 0):
   running,
   firstAt: 1,
   lastAt: 1,
+});
+
+/** A pull request's detail with nothing in it. */
+export const prDetail = (): PrDetail => ({
+  checks: [],
+  reviews: [],
+  comments: [],
+  deployments: [],
+  can: { checks: true, jobLogs: true, rerun: true, reviews: true, deployments: true },
+});
+
+/** A check of a pull request, in `state`, with no time. */
+export const check = (name: string, state: CheckState): PrCheck => ({
+  name,
+  state,
+  url: null,
+  job: null,
+  started: null,
+  finished: null,
+  cancelled: false,
+});
+
+/** A project's environments, none read. */
+export const projectEnvs = (): ProjectEnvironments => ({ projectId: 'p1', environments: [], unsupported: false, host: 'GitHub' });
+
+/** An artifact of the landing zone, landed (published) or not. */
+export const art = (landed: boolean): ArtifactLanding => ({
+  kind: 'artifact',
+  id: landed ? 'art:https://claude.ai/artifact/z' : 'art:p',
+  url: landed ? 'https://claude.ai/artifact/z' : null,
+  title: 'Rapport',
+  versions: landed ? 1 : 0,
+  at: 1,
+});
+
+/** A ribbon card with nothing but its kind and state. */
+export const ribbon = (kind: Ribbon['kind'], state: RibbonState): Ribbon => ({
+  kind,
+  id: `${kind}:${state}`,
+  number: null,
+  state,
+  since: null,
+  until: null,
+  line: '',
+  steps: null,
+  total: null,
+  failed: null,
+  where: '',
+  opens: null,
+});
+
+/** A terminal call, ended and passed. */
+export const cmd = (call: string, command: string, over: Partial<CommandRun> = {}): CommandRun => ({
+  call,
+  command,
+  startedAt: 1,
+  endedAt: 9,
+  failed: false,
+  ...over,
 });
