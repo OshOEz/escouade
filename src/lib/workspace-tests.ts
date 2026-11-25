@@ -160,7 +160,14 @@ export function testsOf(agent: Agent, testCommand: string): TestRun[] {
   for (const t of plan?.bgTasks ?? []) {
     if (t.kind !== 'command' || !t.command) continue;
     const code = exitCode(t);
-    const state: RibbonState = t.status === 'running' ? 'running' : t.status === 'done' && !code ? 'success' : 'failure';
+    const state: RibbonState =
+      t.status === 'running'
+        ? 'running'
+        : t.status === 'stopped' || t.status === 'interrupted'
+          ? 'stopped'
+          : t.status === 'done' && !code
+            ? 'success'
+            : 'failure';
     runs.push(run(ownerOf(plan, t)?.id ?? 'centre', t.id, t.command, state, t.startedAt, t.endedAt ?? null, { kind: 'task', task: t.id }));
   }
   const latest = new Map<string, TestRun>();

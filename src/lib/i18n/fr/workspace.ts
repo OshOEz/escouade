@@ -28,7 +28,9 @@ export default {
   },
   /** The landing zone, south of a compass: what the agent delivered, its remote CI, its deployments. */
   land: {
-    title: 'Zone d’atterrissage · {landed} posés, {coming} en approche',
+    title: 'Zone d’atterrissage · {landed}, {coming}',
+    landed: { one: '{count} posé', other: '{count} posés' },
+    coming: '{count} en approche',
     empty: 'Rien n’a encore atterri',
     artifact: 'Artefact · version {n} · {ago}',
     open: 'Ouvrir ↗',
@@ -39,7 +41,7 @@ export default {
     output: 'Sortie',
     checks: '{total} contrôles, {failed} en échec',
     kind: { tests: 'Tests', ci: 'CI', deploy: 'Déploiement' },
-    state: { running: 'en cours', success: 'réussi', failure: 'en échec' },
+    state: { running: 'en cours', success: 'réussi', failure: 'en échec', stopped: 'arrêté' },
   },
   /** The word on the dotted link from an agent to one it launched. */
   launched: 'a lancé',

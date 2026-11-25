@@ -24,7 +24,9 @@ export default defineZone('workspace', {
     ci: 'CI',
   },
   land: {
-    title: 'Landing zone · {landed} landed, {coming} on approach',
+    title: 'Landing zone · {landed}, {coming}',
+    landed: { one: '{count} landed', other: '{count} landed' },
+    coming: '{count} on approach',
     empty: 'Nothing has landed yet',
     artifact: 'Artifact · version {n} · {ago}',
     open: 'Open ↗',
@@ -34,7 +36,7 @@ export default defineZone('workspace', {
     output: 'Output',
     checks: '{total} checks, {failed} failed',
     kind: { tests: 'Tests', ci: 'CI', deploy: 'Deployment' },
-    state: { running: 'running', success: 'passed', failure: 'failed' },
+    state: { running: 'running', success: 'passed', failure: 'failed', stopped: 'stopped' },
   },
   launched: 'launched',
   tool: {

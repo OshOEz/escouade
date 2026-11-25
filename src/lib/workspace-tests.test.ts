@@ -87,4 +87,11 @@ describe('testsOf', () => {
     expect(testsOf(done('Background command "x" completed (exit code 1)'), '')[0].state).toBe('failure');
     expect(testsOf(done('Background command "x" completed (exit code 0)'), '')[0].state).toBe('success');
   });
+
+  it('says a run stopped before its end stopped, not failed', () => {
+    for (const status of ['stopped', 'interrupted'] as const) {
+      const a = agent({ plan: planWith([], { bgTasks: [{ ...bg('t'), command: 'npm test', status }] }) });
+      expect(testsOf(a, '')[0].state).toBe('stopped');
+    }
+  });
 });

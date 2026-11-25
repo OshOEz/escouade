@@ -87,6 +87,9 @@
   .card.failure {
     --tone: var(--del);
   }
+  .card.stopped {
+    --tone: var(--muted);
+  }
   .ribbon {
     position: absolute;
     inset: 0 0 auto;

@@ -34,4 +34,11 @@ describe('the card with a ribbon', () => {
     const { container } = render(RibbonCard, { agentId: 'a1', item: ribbon('deploy', 'running'), side: 'south' });
     expect(container.querySelector('.ribbon.dashes.running')).toBeTruthy();
   });
+
+  it('says a test run stopped before its end « arrêté », still and grey', () => {
+    resetApp({ agents: [agent({ id: 'a1' })] });
+    const { container } = render(RibbonCard, { agentId: 'a1', item: ribbon('tests', 'stopped'), side: 'centre' });
+    expect(screen.getByRole('article', { name: 'Tests, arrêté' })).toBeTruthy();
+    expect(container.querySelector('.ribbon.stopped:not(.running)')).toBeTruthy();
+  });
 });

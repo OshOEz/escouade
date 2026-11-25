@@ -12,6 +12,12 @@
 
   const down = $derived(items.filter(landed));
   const coming = $derived(items.filter((l) => !landed(l)));
+  const title = $derived(
+    t('workspace.land.title', {
+      landed: t('workspace.land.landed', { count: down.length }),
+      coming: t('workspace.land.coming', { count: coming.length }),
+    }),
+  );
 </script>
 
 {#snippet card(l: Landing)}
@@ -20,14 +26,9 @@
   </div>
 {/snippet}
 
-<section
-  class="zone"
-  data-side="south"
-  aria-label={t('workspace.land.title', { landed: down.length, coming: coming.length })}
-  use:observeHeight={onsize}
->
+<section class="zone" data-side="south" aria-label={title} use:observeHeight={onsize}>
   <i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i>
-  <h3>{t('workspace.land.title', { landed: down.length, coming: coming.length })}</h3>
+  <h3 class:above={coming.length > 0}>{title}</h3>
   {#if !items.length}
     <p class="empty">{t('workspace.land.empty')}</p>
   {/if}
@@ -88,6 +89,10 @@
     color: var(--muted);
     font-size: 11.5px;
     font-weight: 550;
+  }
+  /* Room for the row on approach: it hovers 14 px above its slot, its outline 3 px out. */
+  h3.above {
+    margin-bottom: 24px;
   }
   .empty {
     margin: 22px 0 0;

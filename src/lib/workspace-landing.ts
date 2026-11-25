@@ -4,7 +4,8 @@
 
 import type { Agent, PrDetail, ProjectEnvironments } from './types';
 
-export type RibbonState = 'running' | 'success' | 'failure';
+/** `stopped`: a test run stopped before its end, neither passed nor failed. */
+export type RibbonState = 'running' | 'success' | 'failure' | 'stopped';
 export type Step = { name: string; state: RibbonState };
 /** What the card's button opens: a background task's output, a call in the conversation, an address. */
 export type Opens = { kind: 'task'; task: string } | { kind: 'call'; call: string } | { kind: 'url'; url: string } | null;
