@@ -498,7 +498,7 @@ async fn an_agents_branch_deployed_is_told_and_main_is_not() {
         "main's production is no deployment of the agent"
     );
     assert_eq!(envs.branches[0].deployment.sha, own);
-    assert_eq!(envs.branches[0].agents, [id.clone()]);
+    assert_eq!(envs.branches[0].agents, std::slice::from_ref(&id));
     assert_eq!(
         serde_json::to_value(&envs).unwrap()["branches"][0]["agents"][0],
         json!(id)
