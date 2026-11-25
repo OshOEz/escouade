@@ -1,5 +1,5 @@
 import { fireEvent, render, screen } from '@testing-library/svelte';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { conversationOf, dropConversation } from '../../lib/conversations.svelte';
 import { setLang } from '../../lib/i18n';
 import { app } from '../../lib/state.svelte';
@@ -73,5 +73,16 @@ describe('the questions on a card of the workspace', () => {
     await screen.findByText('Question q1 ?');
     await rerender({ agent: { ...app.agents.a1, status: 'running', pending: [], requests: [] }, mine: (s?: string) => !s, maxH: 700 });
     expect(container.querySelector('.ask')).toBeNull();
+  });
+
+  it('gives the focus back to its card once the request it held is answered', async () => {
+    const back = vi.fn();
+    const { rerender } = render(AskInset, { agent: app.agents.a1, mine: (s?: string) => !s, maxH: 700, onfocusback: back });
+    const yes = await screen.findByRole('button', { name: 'Oui' });
+    yes.focus();
+    await fireEvent.click(yes);
+    await rerender({ agent: { ...app.agents.a1, pending: ['q2', 'p1'] }, mine: (s?: string) => !s, maxH: 700, onfocusback: back });
+    expect(screen.queryByText('Question q1 ?')).toBeNull();
+    expect(back).toHaveBeenCalledOnce();
   });
 });

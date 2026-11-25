@@ -118,6 +118,7 @@
   <article
     class="card sub {sub.status}"
     class:asks
+    tabindex={asks ? -1 : undefined}
     data-side="east"
     aria-label={t('workspace.card.label', { name, state: word })}
     style:min-height="{SUB.h}px"
@@ -137,7 +138,12 @@
         .join(' · ')}
     </p>
     {#if sub.doing}<p class="doing mono">{sub.doing}</p>{/if}
-    {#if asks}<AskInset {agent} mine={(s) => s === sub.id} maxH={cardMaxH(innerHeight) - SUB.h} />{/if}
+    {#if asks}<AskInset
+        {agent}
+        mine={(s) => s === sub.id}
+        onfocusback={() => (field ?? wrap)?.focus()}
+        maxH={cardMaxH(innerHeight) - SUB.h}
+      />{/if}
     {#if canWrite}
       <div class="bar">
         <input

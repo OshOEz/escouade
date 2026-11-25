@@ -15,7 +15,15 @@
     mine,
     maxH,
     label = false,
-  }: { agent: Agent; mine: (sub: string | undefined) => boolean; maxH: number; label?: boolean } = $props();
+    onfocusback,
+  }: {
+    agent: Agent;
+    mine: (sub: string | undefined) => boolean;
+    maxH: number;
+    label?: boolean;
+    /** The card it held the focus in went (answered): its card takes it back, the composer the cards give it to is not here. */
+    onfocusback?: () => void;
+  } = $props();
 
   const conv = $derived(conversationOf(agent.id));
   const asks = $derived(
@@ -23,6 +31,19 @@
       .map((id) => conv.items.find((i) => i.id === id))
       .filter((i): i is QuestionItem | PermissionItem => (i?.kind === 'question' || i?.kind === 'permission') && mine(i.sub ?? undefined)),
   );
+
+  let box = $state<HTMLElement>();
+  let held = false;
+  // Before the cards change, whether the focus is in one; after, whether it fell to the page with the one that went.
+  $effect.pre(() => {
+    void asks;
+    held = !!box?.contains(document.activeElement);
+  });
+  $effect(() => {
+    void asks;
+    if (held && (!document.activeElement || document.activeElement === document.body)) onfocusback?.();
+    held = false;
+  });
 </script>
 
 {#if agent.pending.length && !conv.loaded && mine(undefined)}
@@ -30,7 +51,7 @@
 {:else if asks.length}
   <!-- On the canvas, the wheel scrolls the inset rather than pans (a pinch still zooms). -->
   <!-- `current` false: no card takes the answer keys nor shows them, several may wait on screen at once. -->
-  <div class="ask" style:max-height="{maxH}px" onwheel={(e) => !e.ctrlKey && !e.metaKey && e.stopPropagation()}>
+  <div class="ask" bind:this={box} style:max-height="{maxH}px" onwheel={(e) => !e.ctrlKey && !e.metaKey && e.stopPropagation()}>
     {#each asks as item (item.id)}
       {#if label && item.sub}<p class="from">{t('workspace.ask.fromSub', { name: subName(agent, conv.items, item.sub) })}</p>{/if}
       {#if item.kind === 'question'}

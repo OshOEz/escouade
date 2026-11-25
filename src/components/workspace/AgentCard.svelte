@@ -224,7 +224,7 @@
     <span class="spend">{cardSpend(agent)}</span>
   </div>
   {#if asking.length}<p class="from">{t('workspace.ask.fromSub', { name: asking.join(', ') })}</p>{/if}
-  <AskInset {agent} {mine} label maxH={askH} />
+  <AskInset {agent} {mine} label maxH={askH} onfocusback={() => field?.focus()} />
   <!-- S10 (ESC-537): the connection to the server cut, sending waits; said as the composer says it. -->
   {#if sendPaused()}<p class="paused" role="status">{t('servers.composer.paused')}</p>{/if}
   <div class="bar">
