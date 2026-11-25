@@ -2,13 +2,14 @@ import { fireEvent, render, screen } from '@testing-library/svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { DraftAttachment } from '../../lib/attachments';
 import { connection, type ServerInfo } from '../../lib/connection.svelte';
-import { dropConversation } from '../../lib/conversations.svelte';
+import { conversationOf, dropConversation } from '../../lib/conversations.svelte';
 import { forgetDraft, getDraft, setDraft } from '../../lib/drafts';
 import { setLang } from '../../lib/i18n';
 import { menu } from '../../lib/menu.svelte';
 import { cardSpend } from '../../lib/sidebar';
 import { app } from '../../lib/state.svelte';
 import { agent, fakeBackend, resetApp } from '../../test/ipc';
+import { planWith, questionItem, req, sub } from '../../test/workspace';
 import AgentCard from './AgentCard.svelte';
 
 const image = (name: string): DraftAttachment => ({ kind: 'image', name, mediaType: 'image/png', data: 'AA==', size: 1 });
@@ -153,5 +154,42 @@ describe('the card of an agent on the workspace', () => {
     await fireEvent.input(screen.getByRole('textbox'), { target: { value: 'Bonjour' } });
     await fireEvent.click(screen.getByRole('button', { name: 'Envoyer' }));
     await vi.waitFor(() => expect(backend.called('send_message')[0]?.args).toMatchObject({ id: 'a1', text: 'Bonjour' }));
+  });
+
+  it('grows with its question, between its lines and its field', async () => {
+    backend = fakeBackend({ get_conversation: () => [questionItem('q1')] });
+    resetApp({ agents: [agent({ id: 'a1', name: 'un', status: 'waiting', pending: ['q1'], requests: [req('q1')] })] });
+    const { container } = render(AgentCard, { agent: app.agents.a1 });
+    await screen.findByText('Question q1 ?');
+    const order = [...container.querySelectorAll('.a-act, .ask, .bar input')].map((e) => (e.tagName === 'INPUT' ? 'INPUT' : e.className));
+    expect(order[0]).toContain('a-act');
+    expect(order[1]).toContain('ask');
+    expect(order[2]).toBe('INPUT');
+  });
+
+  it('says the question of its subagent, and leaves it to its card', async () => {
+    backend = fakeBackend({ get_conversation: () => [questionItem('q1', { sub: 's1' })] });
+    const plan = planWith([], { agents: [{ ...sub('s1'), kind: 'Explore' }] });
+    resetApp({ agents: [agent({ id: 'a1', status: 'waiting', pending: ['q1'], requests: [req('q1')], plan })] });
+    const { container } = render(AgentCard, { agent: app.agents.a1 });
+    expect(await screen.findByText('question de Explore')).toBeTruthy();
+    expect(screen.queryByText('Question q1 ?')).toBeNull();
+    expect(container.querySelector('.agent')?.classList).toContain('sub-asks');
+  });
+
+  it('lets its conversation go once answered', async () => {
+    const gone = vi.fn();
+    vi.spyOn(conversationOf('a1'), 'show').mockReturnValue(gone);
+    resetApp({ agents: [agent({ id: 'a1', name: 'un', status: 'waiting', pending: ['q1'], requests: [req('q1')] })] });
+    const { rerender } = render(AgentCard, { agent: app.agents.a1 });
+    expect(gone).not.toHaveBeenCalled();
+    await rerender({ agent: { ...app.agents.a1, status: 'running', pending: [], requests: [] } });
+    expect(gone).toHaveBeenCalled();
+  });
+
+  it('reports its height', async () => {
+    const onsize = vi.fn();
+    render(AgentCard, { agent: app.agents.a1, onsize });
+    await vi.waitFor(() => expect(onsize).toHaveBeenCalled());
   });
 });

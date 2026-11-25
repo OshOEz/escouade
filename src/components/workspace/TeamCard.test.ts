@@ -1,8 +1,10 @@
 import { fireEvent, render, screen } from '@testing-library/svelte';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { conversationOf, dropConversation } from '../../lib/conversations.svelte';
 import { setLang } from '../../lib/i18n';
+import { app } from '../../lib/state.svelte';
 import { agent, fakeBackend, resetApp } from '../../test/ipc';
-import { sub } from '../../test/workspace';
+import { questionItem, req, sub } from '../../test/workspace';
 import TeamCard from './TeamCard.svelte';
 
 describe('the team of an agent on the workspace', () => {
@@ -53,5 +55,22 @@ describe('the team of an agent on the workspace', () => {
     await fireEvent.keyDown(screen.getByRole('textbox'), { key: 'k', metaKey: true });
     window.removeEventListener('keydown', heard);
     expect(heard).toHaveBeenCalled();
+  });
+
+  it('shows the question of its subagent, and grows with it', async () => {
+    fakeBackend({ get_conversation: () => [questionItem('q1', { sub: 's1' })] });
+    resetApp({ agents: [agent({ id: 'a1', status: 'waiting', pending: ['q1'], requests: [req('q1')] })] });
+    const let_go = conversationOf('a1').show();
+    const { container } = render(TeamCard, { agent: app.agents.a1, item: { kind: 'sub', id: 's1', sub: sub('s1') }, ontoggle: () => {} });
+    expect(await screen.findByText('Question q1 ?')).toBeTruthy();
+    expect(container.querySelector('.card')?.classList).toContain('asks');
+    let_go();
+    dropConversation('a1');
+  });
+
+  it('reports its height by its id', async () => {
+    const onsize = vi.fn();
+    render(TeamCard, { agent: agent(), item: { kind: 'sub', id: 's1', sub: sub('s1') }, ontoggle: () => {}, onsize });
+    await vi.waitFor(() => expect(onsize).toHaveBeenCalledWith('s1', expect.any(Number)));
   });
 });

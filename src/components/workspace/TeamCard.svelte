@@ -1,22 +1,26 @@
 <script lang="ts">
   // One of the team of an agent near, east of its card (spec 2026-11-25-vue-workspace-design.md, « À l'est ») : a
   // subagent, the agent's card in smaller (a field to write to it while it runs in the background), a background task in
-  // dots, or the pile of the subagents that ended.
+  // dots, or the pile of the subagents that ended. A subagent that asks grows with its request (« La question »).
   import { bgDuration, kindLabel, rowTitle } from '../../lib/bgtasks';
+  import { conversationOf } from '../../lib/conversations.svelte';
   import type { DictationTarget } from '../../lib/dictation.svelte';
   import { insertAt } from '../../lib/dictation';
   import { fDur, fTok } from '../../lib/format';
   import { t } from '../../lib/i18n';
   import { api } from '../../lib/ipc';
   import { modelLabel } from '../../lib/models';
+  import { observeHeight } from '../../lib/resize';
   import { app } from '../../lib/state.svelte';
   import { canWriteSub, subDuration } from '../../lib/subagents';
   import type { Agent } from '../../lib/types';
-  import type { TeamItem } from '../../lib/workspace-layout';
+  import { cardMaxH, SUB, type TeamItem } from '../../lib/workspace-layout';
+  import AskInset from './AskInset.svelte';
   import MicButton from '../MicButton.svelte';
   import StatusDot from '../StatusDot.svelte';
 
-  let { agent, item, ontoggle }: { agent: Agent; item: TeamItem; ontoggle: () => void } = $props();
+  let { agent, item, ontoggle, onsize }: { agent: Agent; item: TeamItem; ontoggle: () => void; onsize?: (id: string, h: number) => void } =
+    $props();
 
   let field = $state<HTMLInputElement>();
   let wrap = $state<HTMLElement>();
@@ -31,6 +35,15 @@
   // Its dot is an agent's: green while it runs, red failed, grey ended.
   const dot = $derived(sub?.status === 'running' ? 'running' : sub?.status === 'failed' ? 'error' : 'done');
   const canWrite = $derived(!!sub && canWriteSub(agent, sub));
+  // One of its agent's requests is its own (the agent's card keeps the conversation loaded while it waits).
+  // Read only while it waits (lazy), and apart: a conversation made inside a derived would not be tracked by it.
+  const conv = $derived(conversationOf(agent.id));
+  const asks = $derived.by(() => {
+    if (!sub || !agent.pending.length) return false;
+    const items = conv.items;
+    return agent.pending.some((id) => (items.find((i) => i.id === id) as { sub?: string } | undefined)?.sub === sub.id);
+  });
+  let innerHeight = $state(window.innerHeight);
   // What is typed to it is the app's, as in its view: it outlives the card and a change of altitude.
   const draftKey = $derived(sub ? `${agent.id}:${sub.id}` : '');
   const message = $derived(app.subDrafts[draftKey] ?? '');
@@ -75,6 +88,8 @@
   }
 </script>
 
+<svelte:window bind:innerHeight />
+
 {#if item.kind === 'folded'}
   <button type="button" class="folded" data-side="east" onclick={ontoggle}>
     {[
@@ -102,10 +117,13 @@
   {@const word = t(`subagents.status.${sub.status ?? 'unknown'}`)}
   <article
     class="card sub {sub.status}"
+    class:asks
     data-side="east"
     aria-label={t('workspace.card.label', { name, state: word })}
+    style:min-height="{SUB.h}px"
     ondblclick={open}
     bind:this={wrap}
+    use:observeHeight={(h) => onsize?.(item.id, h)}
   >
     <header>
       <StatusDot status={dot} />
@@ -119,6 +137,7 @@
         .join(' · ')}
     </p>
     {#if sub.doing}<p class="doing mono">{sub.doing}</p>{/if}
+    {#if asks}<AskInset {agent} sub={sub.id} maxH={cardMaxH(innerHeight) - SUB.h} />{/if}
     {#if canWrite}
       <div class="bar">
         <input
@@ -154,6 +173,15 @@
   }
   .card.running {
     --tone: var(--run);
+  }
+  /* Its height is its own: it grows with a request, and its agent places the team below by it. */
+  .card.sub {
+    height: auto;
+  }
+  .card.asks {
+    --tone: var(--wait);
+    background: color-mix(in oklch, var(--wait-bg), var(--panel));
+    box-shadow: inset 0 0 0 1px var(--wait-line);
   }
   .card.failed {
     --tone: var(--del);

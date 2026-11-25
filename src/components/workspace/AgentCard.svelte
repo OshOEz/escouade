@@ -3,6 +3,7 @@
   // the sidebar's card (its dot, name and state, model · duration and heat, what it does and its spend), and a bar to
   // write to it. Enter sends by the conversation's path
   // (`submitDraft`), from the agent's own draft: what is typed here is in its conversation once the canvas is left.
+  // While it waits, the card grows with its requests (« La question ») ; a subagent's are on the subagent's card.
   import { untrack } from 'svelte';
   import { conversationOf } from '../../lib/conversations.svelte';
   import { effortChoicesOf, modeChoicesOf, modelChoicesOf, setAgentOption, type OptionChoice } from '../../lib/agent-options';
@@ -15,18 +16,21 @@
   import { interactiveOf } from '../../lib/interactive';
   import { menu, type MenuItem } from '../../lib/menu.svelte';
   import { modelLabel } from '../../lib/models';
+  import { observeHeight } from '../../lib/resize';
   import { pendingItemOf, sendPaused, submitDraft } from '../../lib/send.svelte';
   import { tip } from '../../lib/tip';
   import { cardActivity, cardSpend } from '../../lib/sidebar';
   import { app } from '../../lib/state.svelte';
   import type { Agent } from '../../lib/types';
+  import { CARD, cardMaxH, waits } from '../../lib/workspace-layout';
+  import AskInset from './AskInset.svelte';
   import EngineMark from '../EngineMark.svelte';
   import HeatFigure from '../HeatFigure.svelte';
   import Icon from '../Icon.svelte';
   import MicButton from '../MicButton.svelte';
   import StatusDot from '../StatusDot.svelte';
 
-  let { agent }: { agent: Agent } = $props();
+  let { agent, onsize }: { agent: Agent; onsize?: (h: number) => void } = $props();
 
   const agentId = untrack(() => agent.id);
   let text = $state(getDraft(agentId).text);
@@ -40,10 +44,23 @@
   const act = $derived(cardActivity(agent, 0));
 
   // Its conversation is loaded while it waits: what is typed answers the request there, as in the conversation.
-  const waits = $derived(agent.status === 'waiting' || agent.pending.length > 0);
+  const waiting = $derived(waits(agent));
   $effect(() => {
-    if (waits) return untrack(() => conversationOf(agentId).show());
+    if (waiting) return untrack(() => conversationOf(agentId).show());
   });
+  // Read only while it waits (lazy), and apart: a conversation made inside a derived would not be tracked by it.
+  const conv = $derived(conversationOf(agentId));
+  // The subagents asking, by name: their requests are on their own cards.
+  const asking = $derived.by(() => {
+    if (!agent.pending.length) return [];
+    const items = conv.items;
+    const subs = new Set(agent.pending.map((id) => (items.find((i) => i.id === id) as { sub?: string } | undefined)?.sub).filter(Boolean));
+    return (agent.plan?.agents ?? []).filter((s) => subs.has(s.id)).map((s) => s.kind ?? s.title);
+  });
+  let innerHeight = $state(window.innerHeight);
+  // shortcut: the card's own lines counted as its default height, a line of progress or « paused » more lets it pass 70 % by
+  // that line; measure them if it shows.
+  const askH = $derived(cardMaxH(innerHeight) - CARD.h);
 
   // A message given back to the draft (refused), or the draft changed by the conversation: read again.
   $effect(() => {
@@ -152,12 +169,17 @@
   }
 </script>
 
+<svelte:window bind:innerHeight />
+
 <article
   class="agent {agent.status}"
   data-side="centre"
   aria-label={t('workspace.card.label', { name: agent.name, state: stateWord })}
+  class:sub-asks={asking.length > 0}
+  style:min-height="{CARD.h}px"
   ondblclick={open}
   bind:this={wrap}
+  use:observeHeight={(h) => onsize?.(h)}
 >
   <div class="a-top">
     <StatusDot status={agent.status} />
@@ -183,6 +205,8 @@
     {/if}
     <span class="spend">{cardSpend(agent)}</span>
   </div>
+  {#if asking.length}<p class="from">{t('workspace.ask.fromSub', { name: asking.join(', ') })}</p>{/if}
+  <AskInset {agent} sub={undefined} maxH={askH} />
   <!-- S10 (ESC-537): the connection to the server cut, sending waits; said as the composer says it. -->
   {#if sendPaused()}<p class="paused" role="status">{t('servers.composer.paused')}</p>{/if}
   <div class="bar">
@@ -213,7 +237,6 @@
     gap: 3px;
     box-sizing: border-box;
     width: 100%;
-    min-height: 100%;
     padding: 8px 10px 9px;
     border-radius: 9px;
     background: color-mix(in oklch, var(--text) 6%, var(--panel));
@@ -225,6 +248,17 @@
     --tone: var(--wait);
     background: color-mix(in oklch, var(--wait-bg), var(--panel));
     box-shadow: inset 0 0 0 1px var(--wait-line);
+  }
+  /* A subagent asks: the card says it, in the tone of a question. */
+  .agent.sub-asks {
+    box-shadow: inset 0 0 0 1.5px var(--wait);
+  }
+  .from {
+    margin: 0;
+    padding-left: 16px;
+    color: var(--wait);
+    font-size: 12px;
+    font-weight: 550;
   }
   .agent.done,
   .agent.idle {
