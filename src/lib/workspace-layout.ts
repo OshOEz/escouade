@@ -101,6 +101,12 @@ export type FrameOpts = { teamOpen?: boolean; seenAt?: number; centreH?: number;
 /** The highest a card grows (an agent that waits, its questions in it), at a zoom of 1: past it, its inset scrolls. */
 export const cardMaxH = (windowH: number): number => Math.round(0.7 * windowH);
 
+/**
+ * The highest the inset of a card of `cardH` grows, in the world's pixels: the card held at 70 % of the window on screen
+ * at the camera's `zoom` (never less than a few lines). It reads the zoom alone, never the layout: no loop.
+ */
+export const askMaxH = (windowH: number, zoom: number, cardH: number): number => Math.max(80, Math.round(cardMaxH(windowH) / zoom) - cardH);
+
 /** It waits for the user: a question or a permission. Such an agent is unfolded at every altitude. */
 export const waits = (agent: Agent): boolean => agent.status === 'waiting' || agent.pending.length > 0;
 

@@ -4,6 +4,7 @@ import { planWith, planWithRunning, req, sub } from '../test/workspace';
 import { planView } from './plan';
 import type { Box } from './workspace-camera';
 import {
+  askMaxH,
   canvasOrder,
   cardMaxH,
   CARD,
@@ -155,6 +156,15 @@ describe('the cards that grow with a question', () => {
 
   it('caps a card at 70 % of the window', () => {
     expect(cardMaxH(1000)).toBe(700);
+  });
+
+  it('caps the inset on screen, whatever the zoom', () => {
+    expect(askMaxH(1000, 1, CARD.h)).toBe(700 - CARD.h);
+    // At 200 %, half the world's pixels fill as much of the screen.
+    expect(askMaxH(1000, 2, CARD.h)).toBe(350 - CARD.h);
+    expect(askMaxH(1000, 0.5, CARD.h)).toBe(1400 - CARD.h);
+    // Never less than a few lines, however near.
+    expect(askMaxH(400, 3, CARD.h)).toBe(80);
   });
 
   it('tells an agent that waits', () => {

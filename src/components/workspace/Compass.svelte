@@ -15,7 +15,14 @@
     agent,
     ontoggle,
     onsize,
-  }: { frame: Placed<Frame>; agent: Agent; ontoggle: (agentId: string) => void; onsize?: (id: string, h: number) => void } = $props();
+    zoom = 1,
+  }: {
+    frame: Placed<Frame>;
+    agent: Agent;
+    ontoggle: (agentId: string) => void;
+    onsize?: (id: string, h: number) => void;
+    zoom?: number;
+  } = $props();
 
   const at = (b: Box | (Size & { x: number; y: number })) => `left:${b.x}px;top:${b.y}px;width:${b.w}px;height:${b.h}px`;
 </script>
@@ -23,10 +30,10 @@
 <div class="compass" data-agent={frame.agentId} style={at(frame)}>
   {#if frame.north}<div class="slot" style={at(frame.north)}><PlanBand {agent} /></div>{/if}
   <div class="slot" style={at(frame.centre)}>
-    <AgentCard {agent} shown={frame.team.filter((i) => i.kind === 'sub').map((i) => i.id)} onsize={(h) => onsize?.('centre', h)} />
+    <AgentCard {agent} shown={frame.team.filter((i) => i.kind === 'sub').map((i) => i.id)} onsize={(h) => onsize?.('centre', h)} {zoom} />
   </div>
   {#each frame.team as item (item.id)}
-    <div class="slot" style={at(item)}><TeamCard {agent} {item} ontoggle={() => ontoggle(agent.id)} {onsize} /></div>
+    <div class="slot" style={at(item)}><TeamCard {agent} {item} ontoggle={() => ontoggle(agent.id)} {onsize} {zoom} /></div>
   {/each}
 </div>
 

@@ -308,5 +308,25 @@ describe('the workspace', () => {
       expect(await screen.findByText('Question q1 ?')).toBeTruthy();
       expect(screen.getByText('question de Explore')).toBeTruthy();
     });
+
+    it('caps its inset on screen: zooming in lowers it, and it holds still', async () => {
+      fakeBackend({ get_conversation: () => [questionItem('q1')] });
+      resetApp({ agents: [agent({ id: 'a1', name: 'un', status: 'waiting', pending: ['q1'], requests: [req('q1')] })] });
+      const { container } = show();
+      await screen.findByText('Question q1 ?');
+      const capAt = () => parseFloat((container.querySelector('.ask') as HTMLElement).style.maxHeight);
+      const scale = () => Number((container.querySelector('.world') as HTMLElement).style.transform.match(/scale\((.+)\)/)![1]);
+      const want = () => Math.max(80, Math.round(Math.round(0.7 * window.innerHeight) / scale()) - 128);
+      for (let i = 0; i < 3; i++) await fireEvent.click(screen.getByRole('button', { name: 'Zoomer' }));
+      const before = capAt();
+      expect(before).toBe(want());
+      await fireEvent.click(screen.getByRole('button', { name: 'Zoomer' }));
+      expect(capAt()).toBe(want());
+      expect(capAt()).toBeLessThan(before);
+      const zoom = zoomShown();
+      await new Promise((r) => setTimeout(r, 20));
+      expect(zoomShown()).toBe(zoom);
+      expect(capAt()).toBe(want());
+    });
   });
 });

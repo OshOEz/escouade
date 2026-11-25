@@ -14,13 +14,18 @@
   import { app } from '../../lib/state.svelte';
   import { canWriteSub, subDuration } from '../../lib/subagents';
   import type { Agent } from '../../lib/types';
-  import { cardMaxH, SUB, type TeamItem } from '../../lib/workspace-layout';
+  import { askMaxH, SUB, type TeamItem } from '../../lib/workspace-layout';
   import AskInset from './AskInset.svelte';
   import MicButton from '../MicButton.svelte';
   import StatusDot from '../StatusDot.svelte';
 
-  let { agent, item, ontoggle, onsize }: { agent: Agent; item: TeamItem; ontoggle: () => void; onsize?: (id: string, h: number) => void } =
-    $props();
+  let {
+    agent,
+    item,
+    ontoggle,
+    onsize,
+    zoom = 1,
+  }: { agent: Agent; item: TeamItem; ontoggle: () => void; onsize?: (id: string, h: number) => void; zoom?: number } = $props();
 
   let field = $state<HTMLInputElement>();
   let wrap = $state<HTMLElement>();
@@ -142,7 +147,7 @@
         {agent}
         mine={(s) => s === sub.id}
         onfocusback={() => (field ?? wrap)?.focus()}
-        maxH={cardMaxH(innerHeight) - SUB.h}
+        maxH={askMaxH(innerHeight, zoom, SUB.h)}
       />{/if}
     {#if canWrite}
       <div class="bar">

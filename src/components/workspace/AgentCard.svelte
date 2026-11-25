@@ -23,7 +23,7 @@
   import { cardActivity, cardSpend } from '../../lib/sidebar';
   import { app } from '../../lib/state.svelte';
   import type { Agent } from '../../lib/types';
-  import { CARD, cardMaxH, subName, waits } from '../../lib/workspace-layout';
+  import { askMaxH, CARD, subName, waits } from '../../lib/workspace-layout';
   import AskInset from './AskInset.svelte';
   import EngineMark from '../EngineMark.svelte';
   import HeatFigure from '../HeatFigure.svelte';
@@ -32,7 +32,8 @@
   import StatusDot from '../StatusDot.svelte';
 
   // `shown`: the subagents that have a card on the canvas; a request of another is shown here.
-  let { agent, onsize, shown = [] }: { agent: Agent; onsize?: (h: number) => void; shown?: string[] } = $props();
+  // `zoom`: the camera's, which the 70 % cap of the card is on screen at.
+  let { agent, onsize, shown = [], zoom = 1 }: { agent: Agent; onsize?: (h: number) => void; shown?: string[]; zoom?: number } = $props();
 
   const agentId = untrack(() => agent.id);
   let text = $state(getDraft(agentId).text);
@@ -77,7 +78,7 @@
   let innerHeight = $state(window.innerHeight);
   // shortcut: the card's own lines counted as its default height, a line of progress or « paused » more lets it pass 70 % by
   // that line; measure them if it shows.
-  const askH = $derived(cardMaxH(innerHeight) - CARD.h);
+  const askH = $derived(askMaxH(innerHeight, zoom, CARD.h));
 
   // A message given back to the draft (refused), or the draft changed by the conversation: read again.
   $effect(() => {

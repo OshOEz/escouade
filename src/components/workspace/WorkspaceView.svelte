@@ -208,7 +208,7 @@
       {#if shown.frames.length}<Links links={shown.links} w={shown.w} h={shown.h} />{/if}
       {#each shown.frames as f (f.agentId)}
         {@const a = byId.get(f.agentId)}
-        {#if a}<Compass frame={f} agent={a} ontoggle={toggleTeam} onsize={(id, h) => sized(f.agentId, id, h)} />{/if}
+        {#if a}<Compass frame={f} agent={a} ontoggle={toggleTeam} onsize={(id, h) => sized(f.agentId, id, h)} zoom={cam.zoom} />{/if}
       {/each}
     </div>
   {:else}
