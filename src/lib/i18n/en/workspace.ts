@@ -21,6 +21,17 @@ export default defineZone('workspace', {
     team: { one: 'team', other: 'team' },
     question: { one: 'question', other: 'questions' },
   },
+  plan: {
+    chip: 'Plan',
+    count: '{done}/{total} tasks · {percent} %',
+    folded: { one: '{count} done', other: '{count} done' },
+  },
+  team: {
+    task: 'task {n}',
+    write: 'Write to {name}',
+    folded: '+ {done} ended · {failed} failed',
+    foldedCapped: '+ 30+ ended · {failed} failed',
+  },
   card: {
     write: 'Write to {name}',
     settings: 'Settings',

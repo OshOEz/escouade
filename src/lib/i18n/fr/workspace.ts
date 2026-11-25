@@ -24,6 +24,19 @@ export default {
     team: { one: 'équipe', other: 'équipe' },
     question: { one: 'question', other: 'questions' },
   },
+  /** The plan's band, north of the card. */
+  plan: {
+    chip: 'Plan',
+    count: '{done}/{total} tâches · {percent} %',
+    folded: { one: '{count} faite', other: '{count} faites' },
+  },
+  /** The team, east of the card: its subagents and background tasks. */
+  team: {
+    task: 'tâche {n}',
+    write: 'Écrire à {name}',
+    folded: '+ {done} terminés · {failed} échecs',
+    foldedCapped: '+ 30+ terminés · {failed} échecs',
+  },
   /** The card of an agent near (its compass's centre) and its bar to write to it. */
   card: {
     write: 'Écrire à {name}',
