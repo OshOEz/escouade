@@ -82,7 +82,7 @@ l'utilisateur qui a choisi la boussole et les trois altitudes.
 ## Les trois altitudes
 
 Le zoom choisit ce qu'on montre. Les seuils (mon choix, à régler à l'usage) : de loin sous 45 %, à mi-hauteur de 45 à
-80 %, de près au-delà.
+60 %, de près au-delà (60 % demandé par l'utilisateur le 26 novembre, au lieu de 80 %).
 
 ### De loin : le disque et ses satellites
 
@@ -314,7 +314,7 @@ L'utilisateur n'a pas tranché ces points ; j'ai pris ma recommandation.
 - Les sous-agents terminés sont repliés.
 - On peut écrire à un sous-agent tant qu'il tourne.
 - La carte d'artefact n'a pas de miniature de la page.
-- La caméra n'est pas mémorisée ; les seuils d'altitude sont 45 % et 80 %.
+- La caméra n'est pas mémorisée ; les seuils d'altitude sont 45 % et 60 %.
 - Un déploiement se pose chez l'agent dont il déploie la PR ou la branche.
 - L'ordre des lots.
 

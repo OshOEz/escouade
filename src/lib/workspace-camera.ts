@@ -16,7 +16,7 @@ export const HUD_H = 56;
 /** Below this zoom the agents are discs seen from afar; above it, their compass, its sides in piles. */
 export const FAR_BELOW = 0.45;
 /** From this zoom up, every side of a compass is unfolded. */
-export const NEAR_FROM = 0.8;
+export const NEAR_FROM = 0.6;
 export type Altitude = 'far' | 'mid' | 'near';
 
 export const clampZoom = (z: number) => Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, z));
