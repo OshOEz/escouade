@@ -1,12 +1,13 @@
 import { defineZone } from '../types';
 
-// The « Workspace »: the canvas of a project's agents, its discs seen from afar and its controls. The names of the
+// The « Workspace »: the canvas of a project's agents, its compasses and its controls. The names of the
 // agents and what they do are their own words: shown as they come, never translated.
 export default defineZone('workspace', {
   open: 'Workspace',
   exit: 'Leave the workspace',
   label: 'Canvas of the agents',
   empty: 'No agent in this project',
+  emptyAll: 'No agent',
   count: { one: '{count} agent', other: '{count} agents' },
   questions: { one: '{count} question', other: '{count} questions' },
   zoomIn: 'Zoom in',
@@ -14,15 +15,6 @@ export default defineZone('workspace', {
   zoom: '{percent} %',
   fit: 'Fit',
   waiting: 'waits for your answer',
-  noPlan: 'no plan',
-  progress: '{done}/{total} · {percent} %',
-  sat: {
-    team: { one: 'team', other: 'team' },
-    tools: { one: 'tool', other: 'tools' },
-    question: { one: 'question', other: 'questions' },
-    deliverables: { one: 'deliverable', other: 'deliverables' },
-    ci: 'CI',
-  },
   land: {
     title: 'Landing zone · {landed}, {coming}',
     landed: { one: '{count} landed', other: '{count} landed' },
@@ -78,6 +70,4 @@ export default defineZone('workspace', {
     label: '{name}, {state}',
   },
   ask: { loading: 'Loading the question…', fromSub: 'question from {name}' },
-  discLabel: '{name}, {state}',
-  discProgress: { one: '{count} of {total} task done', other: '{count} of {total} tasks done' },
 });

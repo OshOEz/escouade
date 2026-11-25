@@ -1,17 +1,20 @@
 <script lang="ts">
-  // The « Workspace » of a project (spec 2026-11-25-vue-workspace-design.md, « La toile »): its agents on a dotted
-  // canvas one moves and zooms, each a disc seen from afar, its compass from 45 %, its sides in piles up to 80 %. The canvas is one world, transformed
-  // by the camera; the controls float above it.
-  import { tick, untrack } from 'svelte';
+  // The « Workspace » (spec 2026-11-25-vue-workspace-design.md, « La toile »): the agents of a project, or of every
+  // project from « Vue d'ensemble » (a column each), stacked on a dotted canvas one moves and zooms: each its compass,
+  // its sides in piles below 60 %. The canvas is one world, transformed by the camera; the controls float above it.
+  import { tick } from 'svelte';
   import { t } from '../../lib/i18n';
   import { menu } from '../../lib/menu.svelte';
+  import { shownAgents, sidebarItems } from '../../lib/sidebar';
   import { app } from '../../lib/state.svelte';
-  import type { Project } from '../../lib/types';
+  import type { Agent, Project } from '../../lib/types';
   import {
     altitude,
     DOT,
     fitBest,
+    HUD_H,
     keepAnchor,
+    MARGIN,
     nearest,
     pan,
     ZOOM_STEP,
@@ -19,21 +22,32 @@
     type Altitude,
     type Box,
     type Camera,
-    HUD_H,
   } from '../../lib/workspace-camera';
-  import { followEnvironments, prDetails, readPrDetail } from '../../lib/workspace-ci.svelte';
+  import { followEnvironments, prDetails } from '../../lib/workspace-ci.svelte';
   import { landingOf } from '../../lib/workspace-landing';
-  import { canvasOrder, discOf, frameOf, layoutFarOpen, layoutNear, waits, type Level, type Side } from '../../lib/workspace-layout';
-  import type { Agent } from '../../lib/types';
+  import { frameOf, launchedOf, layoutColumns, type Level, type Side } from '../../lib/workspace-layout';
   import Icon from '../Icon.svelte';
   import Compass from './Compass.svelte';
-  import Disc from './Disc.svelte';
   import Links from './Links.svelte';
 
-  let { project }: { project: Project } = $props();
+  /** None: every project's, over « Vue d'ensemble ». */
+  let { project }: { project?: Project } = $props();
 
-  const agents = $derived(app.projectAgents.filter((a) => a.projectId === project.id && !a.archived));
-  const ordered = $derived(canvasOrder(agents, app.agents, app.tickets));
+  // As « Vue d'ensemble »: the projects in the order of the rail, those without an agent left out; each one's agents in
+  // the order of its sidebar, archived ones aside.
+  const columns = $derived(
+    (project ? [project] : app.projects).flatMap((p) => {
+      const agents = shownAgents(
+        sidebarItems(
+          p,
+          Object.values(app.agents).filter((a) => a.projectId === p.id && !a.archived),
+        ),
+      );
+      return project || agents.length ? [{ project: p, agents, launched: launchedOf(agents, app.agents, app.tickets) }] : [];
+    }),
+  );
+  const agents = $derived(columns.flatMap((c) => c.agents));
+  const projectOf = $derived(new Map(columns.map((c) => [c.project.id, c.project])));
   /** Its pile of ended subagents unfolded, by agent; when it was unfolded last (a failure since stays out of the pile). */
   let teamOpen = $state<Record<string, boolean>>({});
   let seenAt = $state<Record<string, number>>({});
@@ -43,7 +57,7 @@
   let heights = $state<Record<string, Record<string, number>>>({});
   /** The sides unfolded at mid-height, by agent: they stay so while the canvas is open. */
   let unfolded = $state<Record<string, Side[]>>({});
-  const frameAt = (a: Agent, level: Level = 'near') =>
+  const frameAt = (a: Agent, level: Level) =>
     frameOf(a, {
       level,
       unfolded: unfolded[a.id],
@@ -55,7 +69,7 @@
       planOpen: app.planOpen[a.id] ?? window.innerHeight >= 760,
       centreH: heights[a.id]?.centre || undefined,
       teamH: heights[a.id],
-      testCommand: project.board.testCommand,
+      testCommand: projectOf.get(a.projectId)?.board.testCommand,
       southH: heights[a.id]?.south || undefined,
     });
   function sized(agentId: string, id: string, h: number) {
@@ -72,42 +86,31 @@
   }
   /** What lands in each agent's zone: its pages, its remote CI, its deployments. */
   const landing = $derived(
-    new Map(agents.map((a) => [a.id, landingOf(a, { pr: prDetails[a.id] ?? null, environments: app.environments[project.id] ?? null })])),
+    new Map(agents.map((a) => [a.id, landingOf(a, { pr: prDetails[a.id] ?? null, environments: app.environments[a.projectId] ?? null })])),
   );
-  // The canvas follows the project's deployments while it is open, as the view « Environnements ».
-  $effect(() => followEnvironments(project.id));
-  // From afar, an agent that waits is unfolded among the discs (« toujours déplié, quelle que soit l'altitude »).
-  const far = $derived(
-    layoutFarOpen(
-      ordered.order.map((a) => discOf(a, landing.get(a.id))),
-      new Map(ordered.order.filter(waits).map((a) => [a.id, frameAt(a)])),
-    ),
-  );
-  const mid = $derived(
-    layoutNear(
-      ordered.order.map((a) => frameAt(a, 'mid')),
-      ordered.launched,
-    ),
-  );
-  const near = $derived(
-    layoutNear(
-      ordered.order.map((a) => frameAt(a)),
-      ordered.launched,
-    ),
-  );
+  // The canvas follows the deployments of its projects while it is open, as the view « Environnements ».
+  const followed = $derived(columns.map((c) => c.project.id).join(' '));
+  $effect(() => {
+    const stops = followed.split(' ').filter(Boolean).map(followEnvironments);
+    return () => stops.forEach((stop) => stop());
+  });
+  const laid = (level: Level) =>
+    layoutColumns(
+      columns.map((c) => ({ projectId: c.project.id, frames: c.agents.map((a) => frameAt(a, level)), launched: c.launched })),
+      !project,
+    );
+  const mid = $derived(laid('mid'));
+  const near = $derived(laid('near'));
   const questions = $derived(agents.reduce((n, a) => n + (a.requests?.length ?? 0), 0));
 
   let view: HTMLDivElement | undefined = $state();
-  let cam = $state<Camera>({ x: 0, y: 0, zoom: 1 });
+  // At 100 % on opening, the first agent (or the first column) top left, under the floating bar.
+  let cam = $state<Camera>({ x: MARGIN, y: HUD_H + MARGIN, zoom: 1 });
   const alt = $derived(altitude(cam.zoom));
-  /** The compasses on screen: all of them near and at mid-height, those of the agents that wait from afar. */
-  const nearer = $derived(alt === 'mid' ? mid : near);
-  const shown = $derived(alt === 'far' ? far : { links: nearer.links, w: nearer.w, h: nearer.h, frames: nearer.items });
-  const discAt = $derived(new Map(far.discs.map((d) => [d.agentId, d])));
-  const compassAt = $derived(new Map(shown.frames.map((f) => [f.agentId, f])));
+  /** The compasses on screen: their sides in piles at mid-height (but an agent that waits), unfolded near. */
+  const shown = $derived(alt === 'mid' ? mid : near);
+  const compassAt = $derived(new Map(shown.items.map((f) => [f.agentId, f])));
   let drag: { x: number; y: number } | null = $state(null);
-  /** The user placed the camera: a resize of the window no longer fits it. */
-  let moved = false;
 
   const size = () => ({ w: view?.clientWidth ?? 0, h: view?.clientHeight ?? 0 });
   /** The part of the canvas under the floating bar: where the cards are fitted, and whose middle the zoom keeps. */
@@ -120,35 +123,23 @@
     return [b.w / 2, HUD_H + b.h / 2] as const;
   };
 
-  // Fitted on opening, and on « Ajuster »: the camera is not kept.
+  // « Ajuster » (and 0): below the floating bar, a fitted card is never under it.
   function fitAll() {
-    // Below the floating bar: a fitted card is never under it.
-    const c = fitBest({ far, mid, near }, below());
+    const c = fitBest({ mid, near }, below());
     cam = { ...c, y: c.y + HUD_H };
-    moved = false;
   }
-  const place = (next: Camera) => {
-    cam = next;
-    moved = true;
-  };
-  $effect(() => {
-    // Only on opening: the agents changing must not move the camera the user placed.
-    if (view) untrack(fitAll);
-  });
 
-  /** Where each agent is at an altitude: its disc from afar, its card near (the card does not move on screen). */
-  const anchors = (a: Altitude): (Box & { agentId: string })[] => {
-    const cards = (a === 'far' ? far.frames : a === 'mid' ? mid.items : near.items).map((f) => ({
+  /** Where each agent's card is at an altitude (the card does not move on screen). */
+  const anchors = (a: Altitude): (Box & { agentId: string })[] =>
+    (a === 'mid' ? mid : near).items.map((f) => ({
       agentId: f.agentId,
       x: f.x + f.centre.x,
       y: f.y + f.centre.y,
       w: f.centre.w,
       h: f.centre.h,
     }));
-    return a === 'far' ? [...far.discs, ...cards] : cards;
-  };
 
-  /** Zooms by `factor` around (px, py); past 45 %, the agent nearest the middle stays where it was on screen. */
+  /** Zooms by `factor` around (px, py); across 60 %, the agent nearest the middle stays where it was on screen. */
   function zoomAround(factor: number, px: number, py: number) {
     let c = cam;
     const to = altitude(zoomAt(c, factor, px, py).zoom);
@@ -157,7 +148,7 @@
       const there = from && anchors(to).find((b) => b.agentId === from.agentId);
       if (from && there) c = keepAnchor(c, from, there);
     }
-    place(zoomAt(c, factor, px, py));
+    cam = zoomAt(c, factor, px, py);
   }
 
   const zoomBy = (factor: number) => {
@@ -170,7 +161,7 @@
     if (e.ctrlKey || e.metaKey) {
       const r = view!.getBoundingClientRect();
       zoomAround(Math.exp(-e.deltaY * 0.01), e.clientX - r.left, e.clientY - r.top);
-    } else place(pan(cam, -e.deltaX, -e.deltaY));
+    } else cam = pan(cam, -e.deltaX, -e.deltaY);
   }
 
   function down(e: PointerEvent) {
@@ -182,28 +173,10 @@
   }
   function move(e: PointerEvent) {
     if (!drag) return;
-    place(pan(cam, e.clientX - drag.x, e.clientY - drag.y));
+    cam = pan(cam, e.clientX - drag.x, e.clientY - drag.y);
     drag = { x: e.clientX, y: e.clientY };
   }
   const up = () => (drag = null);
-
-  // A disc picked: its compass at a zoom of 1, centred on the side asked (its card for a side not built yet).
-  function pick(agentId: string, side: Side = 'centre') {
-    const f = near.items.find((i) => i.agentId === agentId);
-    if (!f) return;
-    let b: Box = f.centre;
-    if (side === 'north' && f.north) b = f.north;
-    const span = (bs: Box[]): Box => {
-      const x = Math.min(...bs.map((i) => i.x));
-      const y = Math.min(...bs.map((i) => i.y));
-      return { x, y, w: Math.max(...bs.map((i) => i.x + i.w)) - x, h: Math.max(...bs.map((i) => i.y + i.h)) - y };
-    };
-    if (side === 'east' && f.team.length) b = span(f.team);
-    if (side === 'west' && f.west.length) b = span(f.west);
-    if (side === 'south' && f.south) b = f.south;
-    const [px, py] = centre();
-    place({ zoom: 1, x: px - (f.x + b.x + b.w / 2), y: py - (f.y + b.y + b.h / 2) });
-  }
 
   /** A pile clicked at mid-height: its side unfolded, the zoom kept, the agent's card where it was on screen. */
   function unfold(agentId: string, side: Side) {
@@ -211,7 +184,7 @@
     const from = at();
     unfolded[agentId] = [...(unfolded[agentId] ?? []), side];
     const to = at();
-    if (from && to) place(keepAnchor(cam, from, to));
+    if (from && to) cam = keepAnchor(cam, from, to);
     // The pile is gone with the focus: it goes to the first of what came out of it.
     void tick().then(() => {
       const items = [...(view?.querySelectorAll<HTMLElement>(`[data-agent="${agentId}"] [data-side="${side}"]`) ?? [])];
@@ -227,6 +200,9 @@
     if (teamOpen[agentId]) seenAt[agentId] = Date.now();
   }
 
+  /** Back to the project's view, or to the list of « Vue d'ensemble ». */
+  const leave = () => (project ? app.closeWorkspace(project.id) : app.closeOverviewCanvas());
+
   const FOCUSABLE = 'button:not([disabled]), a[href], input, textarea, select, [tabindex]:not([tabindex="-1"])';
 
   // Escape leaves the canvas, unless the focus is in a field, or a menu, a dialog or a popover is open (it is theirs).
@@ -236,7 +212,7 @@
   function key(e: KeyboardEvent) {
     if (e.metaKey || e.ctrlKey || e.altKey || e.defaultPrevented) return;
     if (typing(document.activeElement) || menu.open || document.querySelector(OVER)) return;
-    if (e.key === 'Escape') app.closeWorkspace(project.id);
+    if (e.key === 'Escape') leave();
     else if (e.key === '+' || e.key === '=') zoomBy(ZOOM_STEP);
     else if (e.key === '-') zoomBy(1 / ZOOM_STEP);
     else if (e.key === '0') fitAll();
@@ -245,7 +221,7 @@
   }
 </script>
 
-<svelte:window onkeydown={key} onresize={() => !moved && fitAll()} />
+<svelte:window onkeydown={key} />
 
 <div
   class="ws"
@@ -263,14 +239,19 @@
 >
   {#if agents.length}
     <div class="world" style:transform="translate({cam.x}px, {cam.y}px) scale({cam.zoom})">
-      {#if shown.frames.length}<Links links={shown.links} w={shown.w} h={shown.h} />{/if}
+      {#if shown.items.length}<Links links={shown.links} w={shown.w} h={shown.h} />{/if}
+      {#each shown.heads as h (h.projectId)}
+        {@const p = projectOf.get(h.projectId)}
+        {#if p}
+          <h2 class="head" style="left:{h.x}px;top:{h.y}px;width:{h.w}px;height:{h.h}px">
+            <span class="swatch" style:background={p.color}></span><span class="name">{p.name}</span>
+          </h2>
+        {/if}
+      {/each}
       <!-- One piece per agent, in the canvas's order: the keyboard goes from one to the next as the eye does. -->
-      {#each ordered.order as a (a.id)}
-        {@const d = alt === 'far' ? discAt.get(a.id) : undefined}
+      {#each agents as a (a.id)}
         {@const f = compassAt.get(a.id)}
-        {#if d}
-          <svg class="one" width="1" height="1" overflow="visible"><Disc disc={d} agent={a} onpick={pick} /></svg>
-        {:else if f}
+        {#if f}
           <Compass
             frame={f}
             agent={a}
@@ -285,10 +266,10 @@
       {/each}
     </div>
   {:else}
-    <p class="empty">{t('workspace.empty')}</p>
+    <p class="empty">{t(project ? 'workspace.empty' : 'workspace.emptyAll')}</p>
   {/if}
 
-  <button class="hud exit btn" onclick={() => app.closeWorkspace(project.id)}>
+  <button class="hud exit btn" onclick={leave}>
     <Icon name="left" size={14} /><span>{t('workspace.exit')}</span>
   </button>
   <div class="hud bar">
@@ -328,12 +309,29 @@
     top: 0;
     transform-origin: 0 0;
   }
-  /* A disc's own: drawn at its place in the world, past its 1 px box. */
-  .world svg.one {
+  /* A project's column on the canvas of every project: its name over its agents, in its colour. */
+  .head {
     position: absolute;
-    left: 0;
-    top: 0;
-    display: block;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin: 0;
+    padding-bottom: 12px;
+    border-bottom: 2px solid var(--line-2);
+    color: var(--text);
+    font-size: 17px;
+    font-weight: 650;
+    white-space: nowrap;
+  }
+  .head .swatch {
+    flex: none;
+    width: 12px;
+    height: 12px;
+    border-radius: 4px;
+  }
+  .head .name {
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
   .empty {
     position: absolute;

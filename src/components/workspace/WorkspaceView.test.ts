@@ -13,13 +13,18 @@ import WorkspaceView from './WorkspaceView.svelte';
 import { HUD_H } from '../../lib/workspace-camera';
 
 const show = () => render(WorkspaceView, { project: app.projects[0] });
-/** The zoom the bar shows (jsdom has no size: the canvas opens fitted at its lowest zoom). */
+/** The zoom the bar shows (the canvas opens at 100 %). */
 const zoomShown = () => document.querySelector('.bar .pct')?.textContent;
+/** The world's translation and scale. */
+const camOf = () =>
+  (document.querySelector('.world') as HTMLElement).style.transform
+    .match(/translate\((.+)px, (.+)px\) scale\((.+)\)/)!
+    .slice(1)
+    .map(Number);
 
-/** Clicks « Zoomer » or « Dézoomer » until the bar says `z`; for 1, clicks the first disc, which brings it to 100 %. */
+/** Clicks « Zoomer » or « Dézoomer » until the bar says `z` (from 100 %: 80, 64, 51, 41, 33, 30). */
 async function zoomTo(z: number) {
   const want = `${Math.round(z * 100)} %`;
-  if (z === 1) return fireEvent.click(document.querySelector('.disc')!);
   for (let i = 0; i < 20 && zoomShown() !== want; i++) {
     const shown = parseInt(zoomShown() ?? '0');
     await fireEvent.click(screen.getByRole('button', { name: shown < z * 100 ? 'Zoomer' : 'Dézoomer' }));
@@ -27,30 +32,33 @@ async function zoomTo(z: number) {
   expect(zoomShown()).toBe(want);
 }
 
-/**
- * The centre on screen of an agent, from the world's transform: its disc's `<g>` from afar, its card in its compass
- * near (positions written in `left`/`top` of the world).
- */
+/** The centre on screen of an agent's card, from the world's transform (positions written in `left`/`top` of the world). */
 function centreOf(container: HTMLElement, agentId: string): [number, number] {
-  const m = (container.querySelector('.world') as HTMLElement).style.transform.match(/translate\((.+)px, (.+)px\) scale\((.+)\)/)!;
-  const [x, y, z] = m.slice(1).map(Number);
-  const g = container.querySelector(`g[data-agent="${agentId}"]`);
-  let wx: number;
-  let wy: number;
-  if (g)
-    [wx, wy] = g
-      .getAttribute('transform')!
-      .match(/translate\((.+) (.+)\)/)!
-      .slice(1)
-      .map(Number);
-  else {
-    const frame = container.querySelector(`div[data-agent="${agentId}"]`) as HTMLElement;
-    const slot = frame.querySelector('[data-side="centre"]')!.parentElement as HTMLElement;
-    const px = (el: HTMLElement, k: 'left' | 'top' | 'width' | 'height') => parseFloat(el.style[k]);
-    wx = px(frame, 'left') + px(slot, 'left') + px(slot, 'width') / 2;
-    wy = px(frame, 'top') + px(slot, 'top') + px(slot, 'height') / 2;
-  }
-  return [Math.round(wx * z + x), Math.round(wy * z + y)];
+  const [x, y, z] = camOf();
+  const frame = container.querySelector(`div[data-agent="${agentId}"]`) as HTMLElement;
+  const slot = frame.querySelector('[data-side="centre"]')!.parentElement as HTMLElement;
+  const px = (el: HTMLElement, k: 'left' | 'top' | 'width' | 'height') => parseFloat(el.style[k]);
+  const wx = px(frame, 'left') + px(slot, 'left') + px(slot, 'width') / 2;
+  const wy = px(frame, 'top') + px(slot, 'top') + px(slot, 'height') / 2;
+  return [wx * z + x, wy * z + y];
+}
+
+/** The agents' pieces in the order of the DOM, with their place in the world. */
+const pieces = (container: HTMLElement) =>
+  [...container.querySelectorAll<HTMLElement>('.world [data-agent]')].map((e) => ({
+    id: e.dataset.agent,
+    x: parseFloat(e.style.left),
+    y: parseFloat(e.style.top),
+  }));
+
+/** A view of 1200 × 800 for the test that needs one (jsdom lays out nothing). */
+function sized(w = 1200, h = 800) {
+  const spy = vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockImplementation(() => w);
+  const spyH = vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockImplementation(() => h);
+  return () => {
+    spy.mockRestore();
+    spyH.mockRestore();
+  };
 }
 
 describe('the workspace', () => {
@@ -61,7 +69,7 @@ describe('the workspace', () => {
   // An agent that waits has its conversation read: none is kept from a test to the next.
   afterEach(() => ['a1', 'a2', 'a3'].forEach(dropConversation));
 
-  it('draws a disc per agent of the project, archived ones aside', () => {
+  it('draws a compass per agent of the project, archived ones aside', () => {
     resetApp({
       projects: [project(), project({ id: 'p2', name: 'autre' })],
       agents: [
@@ -70,10 +78,8 @@ describe('the workspace', () => {
         agent({ id: 'a3', name: 'trois', projectId: 'p2' }),
       ],
     });
-    show();
-    expect(screen.getByRole('button', { name: /^un,/ })).toBeTruthy();
-    expect(screen.queryByRole('button', { name: /^deux,/ })).toBeNull();
-    expect(screen.queryByRole('button', { name: /^trois,/ })).toBeNull();
+    const { container } = show();
+    expect(pieces(container).map((p) => p.id)).toEqual(['a1']);
   });
 
   it('says when there is no agent', () => {
@@ -139,37 +145,39 @@ describe('the workspace', () => {
     expect(world()).not.toBe(before);
   });
 
-  it('fits below its floating bar, which never covers a card', async () => {
-    const spy = vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockImplementation(() => 1200);
-    const spyH = vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockImplementation(() => 300);
+  it('fits below its floating bar on « Ajuster », which never covers a card', async () => {
+    const restore = sized(1200, 300);
     resetApp({ agents: [agent({ id: 'a1' }), agent({ id: 'a2' })] });
     show();
-    const m = /translate\((-?[\d.]+)px, (-?[\d.]+)px\)/.exec((document.querySelector('.world') as HTMLElement).style.transform);
-    expect(Number(m![2])).toBeGreaterThanOrEqual(HUD_H);
-    spy.mockRestore();
-    spyH.mockRestore();
+    await fireEvent.click(screen.getByRole('button', { name: 'Ajuster' }));
+    expect(zoomShown()).not.toBe('100 %');
+    expect(camOf()[1]).toBeGreaterThanOrEqual(HUD_H);
+    restore();
   });
 
-  it('fits again when the window is resized, until the camera is moved', async () => {
-    let width = 400;
+  it('opens at 100 %, its first agent top left under its bar, and a resize moves nothing', async () => {
+    let width = 1200;
     const spy = vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockImplementation(() => width);
     const spyH = vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockImplementation(() => 800);
-    resetApp({ agents: [agent()] });
+    resetApp({ agents: [agent({ id: 'a1' }), agent({ id: 'a2' })] });
     show();
-    const small = zoomShown();
-    width = 1200;
-    await fireEvent(window, new Event('resize'));
-    const large = zoomShown();
-    expect(large).not.toBe(small);
-    await fireEvent.click(screen.getByRole('button', { name: 'Zoomer' }));
-    const placed = zoomShown();
+    expect(zoomShown()).toBe('100 %');
+    expect(camOf()).toEqual([32, HUD_H + 32, 1]);
     width = 400;
     await fireEvent(window, new Event('resize'));
-    expect(zoomShown()).toBe(placed);
+    expect(camOf()).toEqual([32, HUD_H + 32, 1]);
     spy.mockRestore();
     spyH.mockRestore();
   });
 
+  it("stacks the agents one under the other, in the sidebar's order", () => {
+    resetApp({ agents: [agent({ id: 'a1' }), agent({ id: 'a2' }), agent({ id: 'a3' })] });
+    const { container } = show();
+    const ps = pieces(container);
+    expect(ps.map((p) => p.id)).toEqual(app.projectAgents.map((a) => a.id));
+    expect(new Set(ps.map((p) => p.x))).toEqual(new Set([0]));
+    expect(ps.map((p) => p.y)).toEqual([...ps.map((p) => p.y)].sort((a, b) => a - b));
+  });
   it('does not close on Escape while a dialog or a popover is open', async () => {
     resetApp({ agents: [agent()] });
     app.openWorkspace('p1');
@@ -204,31 +212,39 @@ describe('the workspace', () => {
     expect(app.workspaceOn).toBe(false);
   });
 
-  it('shows the compasses from 45 %, the discs below', async () => {
-    resetApp({ agents: [agent({ id: 'a1', name: 'un' })] });
-    show(); // jsdom : la toile s'ouvre au zoom le plus bas, donc de loin
-    expect(screen.queryByRole('textbox', { name: 'Écrire à un' })).toBeNull();
-    for (let i = 0; i < 3; i++) await fireEvent.click(screen.getByRole('button', { name: 'Zoomer' })); // 0,3 → 0,59
-    expect(screen.getByRole('textbox', { name: 'Écrire à un' })).toBeTruthy();
-  });
-
-  it('keeps the agent in the middle when the altitude changes', async () => {
-    // Three in a row: the middle one is at the centre of the screen (jsdom's is its corner), where the zoom keeps it.
-    resetApp({ agents: [agent({ id: 'a1' }), agent({ id: 'a2' }), agent({ id: 'a3' })] });
+  it('shows the compasses in piles below 60 %, down to 30 %, never a disc', async () => {
+    resetApp({ agents: [agent({ id: 'a1', name: 'un', canvas: { tools: [kit('skill', 'a')], subs: [] } })] });
     const { container } = show();
-    const before = centreOf(container, 'a2');
-    await zoomTo(0.59);
-    expect(container.querySelector('g[data-agent]')).toBeNull();
-    expect(centreOf(container, 'a2')).toEqual(before);
+    expect(screen.getByRole('article', { name: /Skill a/ })).toBeTruthy();
+    await zoomTo(0.3);
+    expect(screen.getByRole('button', { name: 'Déplier les outils (1)' })).toBeTruthy();
+    expect(screen.getByRole('textbox', { name: 'Écrire à un' })).toBeTruthy();
+    expect(container.querySelector('.disc, svg.one')).toBeNull();
   });
-
+  it('keeps the agent in the middle where it was when the altitude changes', async () => {
+    const restore = sized();
+    resetApp({ agents: [agent({ id: 'a1', canvas: { tools: [kit('skill', 'a'), kit('skill', 'b')], subs: [] } }), agent({ id: 'a2' })] });
+    const { container } = show();
+    await zoomTo(0.64);
+    // The middle of the canvas under the bar: the zoom keeps it, and the agent nearest it.
+    const [mx, my] = [600, HUD_H + (800 - HUD_H) / 2];
+    const near = (id: string) => Math.hypot(...centreOf(container, id).map((v, i) => v - [mx, my][i]));
+    const id = near('a1') < near('a2') ? 'a1' : 'a2';
+    const [bx, by] = centreOf(container, id);
+    await zoomTo(0.51);
+    const k = 0.512 / 0.64;
+    const [ax, ay] = centreOf(container, id);
+    expect(ax).toBeCloseTo(mx + (bx - mx) * k, 0);
+    expect(ay).toBeCloseTo(my + (by - my) * k, 0);
+    restore();
+  });
   it('shows piles at mid-height and the cards up close', async () => {
     resetApp({ agents: [agent({ id: 'a1', canvas: { tools: [kit('skill', 'a'), kit('plugin', 'b')], subs: [] } })] });
     show();
-    await zoomTo(0.59);
+    await zoomTo(0.51);
     expect(screen.getByRole('button', { name: 'Déplier les outils (2)' })).toBeTruthy();
     expect(screen.queryByRole('article', { name: /Skill a/ })).toBeNull();
-    await zoomTo(0.92);
+    await zoomTo(0.8);
     expect(screen.queryByRole('button', { name: 'Déplier les outils (2)' })).toBeNull();
     expect(screen.getByRole('article', { name: /Skill a/ })).toBeTruthy();
   });
@@ -236,23 +252,15 @@ describe('the workspace', () => {
   it('unfolds a pile without moving the camera', async () => {
     resetApp({ agents: [agent({ id: 'a1', canvas: { tools: [kit('skill', 'a')], subs: [] } }), agent({ id: 'a2' })] });
     const { container } = show();
-    await zoomTo(0.59);
+    await zoomTo(0.51);
     const before = centreOf(container, 'a1');
     await fireEvent.click(screen.getByRole('button', { name: 'Déplier les outils (1)' }));
-    expect(zoomShown()).toBe('59 %');
+    expect(zoomShown()).toBe('51 %');
     // The focus on what came out of the pile, not lost on the body.
     await tick();
     expect(document.activeElement?.closest('[data-agent="a1"] [data-side="west"]')).toBeTruthy();
     expect(screen.getByRole('article', { name: /Skill a/ })).toBeTruthy();
     expect(centreOf(container, 'a1')).toEqual(before);
-  });
-
-  it('zooms on the team when its satellite is clicked', async () => {
-    resetApp({ agents: [agent({ id: 'a1', plan: planWithRunning(2, 0) })] });
-    const { container } = show();
-    await fireEvent.click(container.querySelector('.sat.team')!);
-    expect(zoomShown()).toBe('100 %');
-    expect(screen.getAllByRole('article', { name: /sous-agent/ }).length).toBe(2);
   });
 
   it("leaves the card's field alone", async () => {
@@ -332,18 +340,20 @@ describe('the workspace', () => {
   });
 
   describe('an agent that waits', () => {
-    it('is unfolded from afar, the others stay discs', async () => {
+    it('is unfolded at every zoom, the others in piles', async () => {
       fakeBackend({ get_conversation: () => [questionItem('q1')] });
+      const tools = { tools: [kit('skill', 'a')], subs: [] };
       resetApp({
         agents: [
-          agent({ id: 'a1', name: 'un' }),
-          agent({ id: 'a2', name: 'deux', status: 'waiting', pending: ['q1'], requests: [req('q1')] }),
+          agent({ id: 'a1', name: 'un', canvas: tools }),
+          agent({ id: 'a2', name: 'deux', status: 'waiting', pending: ['q1'], requests: [req('q1')], canvas: tools }),
         ],
       });
-      show(); // de loin
+      show();
+      await zoomTo(0.3);
       expect(await screen.findByText('Question q1 ?')).toBeTruthy();
-      expect(screen.getByRole('button', { name: /^un,/ })).toBeTruthy();
-      expect(screen.queryByRole('button', { name: /^deux,/ })).toBeNull();
+      expect(screen.getAllByRole('button', { name: 'Déplier les outils (1)' })).toHaveLength(1);
+      expect(screen.getAllByRole('article', { name: /Skill a/ })).toHaveLength(1);
       expect(screen.getByRole('textbox', { name: 'Écrire à deux' })).toBeTruthy();
     });
 
@@ -368,18 +378,17 @@ describe('the workspace', () => {
 
     it('is folded back once answered', async () => {
       fakeBackend({ get_conversation: () => [questionItem('q1')] });
+      const tools = { tools: [kit('skill', 'a')], subs: [] };
       resetApp({
-        agents: [
-          agent({ id: 'a1', name: 'un' }),
-          agent({ id: 'a2', name: 'deux', status: 'waiting', pending: ['q1'], requests: [req('q1')] }),
-        ],
+        agents: [agent({ id: 'a2', name: 'deux', status: 'waiting', pending: ['q1'], requests: [req('q1')], canvas: tools })],
       });
       show();
+      await zoomTo(0.3);
       await screen.findByText('Question q1 ?');
+      expect(screen.queryByRole('button', { name: 'Déplier les outils (1)' })).toBeNull();
       app.agents.a2 = { ...app.agents.a2, status: 'running', pending: [], requests: [] };
       await new Promise((r) => setTimeout(r, 0));
-      expect(screen.queryByRole('textbox', { name: 'Écrire à deux' })).toBeNull();
-      expect(screen.getByRole('button', { name: /^deux,/ })).toBeTruthy();
+      expect(screen.getByRole('button', { name: 'Déplier les outils (1)' })).toBeTruthy();
     });
 
     it('shows the request of a subagent folded in the pile on the agent card', async () => {
@@ -399,7 +408,7 @@ describe('the workspace', () => {
       const capAt = () => parseFloat((container.querySelector('.ask') as HTMLElement).style.maxHeight);
       const scale = () => Number((container.querySelector('.world') as HTMLElement).style.transform.match(/scale\((.+)\)/)![1]);
       const want = () => Math.max(80, Math.round(Math.round(0.7 * window.innerHeight) / scale()) - 128);
-      for (let i = 0; i < 3; i++) await fireEvent.click(screen.getByRole('button', { name: 'Zoomer' }));
+      await fireEvent.click(screen.getByRole('button', { name: 'Zoomer' }));
       const before = capAt();
       expect(before).toBe(want());
       await fireEvent.click(screen.getByRole('button', { name: 'Zoomer' }));
@@ -411,7 +420,7 @@ describe('the workspace', () => {
       expect(capAt()).toBe(want());
     });
 
-    it('is tabbed to in its place among the discs', async () => {
+    it('is tabbed to in its place in the column', async () => {
       fakeBackend({ get_conversation: () => [questionItem('q1')] });
       resetApp({
         agents: [
@@ -421,21 +430,12 @@ describe('the workspace', () => {
         ],
       });
       const { container } = show();
+      await zoomTo(0.3);
       await screen.findByText('Question q1 ?');
-      // The order of the DOM is the order on screen: row by row, left to right.
-      const pieces = [...container.querySelectorAll('.world [data-agent]')].map((e) => {
-        const [x, y] = e.matches('g')
-          ? e
-              .getAttribute('transform')!
-              .match(/translate\((.+) (.+)\)/)!
-              .slice(1)
-              .map(Number)
-          : [parseFloat((e as HTMLElement).style.left), parseFloat((e as HTMLElement).style.top)];
-        return { id: e.getAttribute('data-agent'), x, y };
-      });
-      expect(pieces).toHaveLength(3);
-      const onScreen = [...pieces].sort((p, q) => p.y - q.y || p.x - q.x);
-      expect(pieces.map((p) => p.id)).toEqual(onScreen.map((p) => p.id));
+      // The order of the DOM is the order on screen: top to bottom.
+      const ps = pieces(container);
+      expect(ps).toHaveLength(3);
+      expect(ps.map((p) => p.id)).toEqual([...ps].sort((p, q) => p.y - q.y).map((p) => p.id));
     });
   });
 
@@ -459,6 +459,58 @@ describe('the workspace', () => {
       expect(screen.getAllByText('Rien n’a encore atterri')).toHaveLength(2);
       const sides = [...container.querySelectorAll('[data-agent="a1"] [data-side]')].map((e) => e.getAttribute('data-side'));
       expect(sides.at(-1)).toBe('south');
+    });
+  });
+
+  describe('of every project', () => {
+    const showAll = () => render(WorkspaceView);
+
+    it('sets the projects side by side in the order of the rail, each under its name, archived agents aside', () => {
+      resetApp({
+        projects: [project(), project({ id: 'p2', name: 'studio-web' }), project({ id: 'p3', name: 'vide' })],
+        agents: [
+          agent({ id: 'a1', name: 'un' }),
+          agent({ id: 'a2', name: 'deux', projectId: 'p2' }),
+          agent({ id: 'a3', name: 'trois', projectId: 'p2' }),
+          agent({ id: 'a4', name: 'quatre', projectId: 'p2', archived: true }),
+        ],
+      });
+      const { container } = showAll();
+      expect(screen.getAllByRole('heading', { level: 2 }).map((h) => h.textContent?.trim())).toEqual(['demo-api', 'studio-web']);
+      const ps = pieces(container);
+      expect(ps.map((p) => p.id)).toEqual(['a1', 'a2', 'a3']);
+      expect(ps[1].x).toBeGreaterThan(ps[0].x);
+      expect(ps[2].x).toBe(ps[1].x);
+      expect(ps[2].y).toBeGreaterThan(ps[1].y);
+      expect(screen.getByText('3 agents')).toBeTruthy();
+      expect(zoomShown()).toBe('100 %');
+    });
+
+    it('goes back to « Vue d’ensemble » on « Quitter » and on Escape', async () => {
+      resetApp({ agents: [agent()] });
+      app.openOverviewCanvas();
+      showAll();
+      await fireEvent.click(screen.getByRole('button', { name: 'Quitter le workspace' }));
+      expect(app.overviewCanvasOn).toBe(false);
+      expect(app.ui.view).toBe('overview');
+      app.openOverviewCanvas();
+      await fireEvent.keyDown(window, { key: 'Escape' });
+      expect(app.overviewCanvasOn).toBe(false);
+    });
+
+    it("follows each project's deployments, and runs each agent's tests by its own project's command", async () => {
+      const backend = fakeBackend({ get_conversation: () => [] });
+      resetApp({
+        projects: [project(), project({ id: 'p2', name: 'studio-web', board: { ...project().board, testCommand: 'make verif' } })],
+        agents: [
+          agent({ id: 'a1' }),
+          agent({ id: 'a2', projectId: 'p2', canvas: { tools: [], subs: [], commands: [cmd('c0', 'make verif')] } }),
+        ],
+      });
+      const { container } = showAll();
+      await new Promise((r) => setTimeout(r, 0));
+      expect(new Set(backend.called('project_environments').map((c) => c.args.projectId))).toEqual(new Set(['p1', 'p2']));
+      expect(container.querySelector('[data-agent="a2"] [aria-label^="Tests"]')).toBeTruthy();
     });
   });
 });

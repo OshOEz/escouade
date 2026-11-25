@@ -1,22 +1,19 @@
 import { describe, expect, it } from 'vitest';
 import { agent } from '../test/ipc';
 import type { KitUse, SubAgent } from './types';
-import { art, bg, cmd, kit, planWith, planWithRunning, req, ribbon, sub } from '../test/workspace';
+import { art, bg, cmd, kit, planWith, req, sub } from '../test/workspace';
 import { planView } from './plan';
 import type { Box } from './workspace-camera';
 import {
   askMaxH,
-  canvasOrder,
   cardMaxH,
   CARD,
-  DISC,
-  discOf,
   frameOf,
   GAP,
-  layoutFar,
-  layoutFarOpen,
+  COLUMN,
+  launchedOf,
+  layoutColumns,
   layoutNear,
-  packRows,
   SOUTH,
   SUB,
   teamOf,
@@ -28,33 +25,7 @@ import {
   waits,
 } from './workspace-layout';
 
-describe('the discs of the workspace', () => {
-  it('says the state in one word', () => {
-    expect(discOf(agent({ status: 'waiting' })).state).toBe('wait');
-    expect(discOf(agent({ status: 'running' })).state).toBe('run');
-    expect(discOf(agent({ status: 'error' })).state).toBe('error');
-    expect(discOf(agent({ status: 'done' })).state).toBe('done');
-    expect(discOf(agent({ status: 'idle' })).state).toBe('idle');
-  });
-
-  it('counts the plan', () => {
-    const a = agent({ plan: planWith(['done', 'done', 'done', 'inProgress', 'pending', 'pending', 'pending']) });
-    expect(discOf(a)).toMatchObject({ done: 3, total: 7 });
-  });
-
-  it('has no gauge without a plan', () => {
-    expect(discOf(agent())).toMatchObject({ done: 0, total: 0 });
-  });
-
-  it('shows only the satellites that have something to say, in order', () => {
-    const a = agent({ status: 'waiting', requests: [req('q1'), req('q2')], plan: planWithRunning(2, 1) });
-    expect(discOf(a).satellites).toEqual([
-      { kind: 'team', count: 3 },
-      { kind: 'question', count: 2 },
-    ]);
-    expect(discOf(agent()).satellites).toEqual([]);
-  });
-
+describe('the tools of an agent', () => {
   it('gathers the tools of the agent and its subagents', () => {
     const a = agent({
       canvas: { tools: [kit('plugin', 'github', 2), kit('skill', 'tdd')], subs: [{ call: 's1', tools: [kit('plugin', 'github', 3, 1)] }] },
@@ -82,29 +53,6 @@ describe('the discs of the workspace', () => {
     expect(toolName({ kind: 'plugin', name: 'plugin_superpowers_chrome' })).toBe('superpowers · chrome');
     expect(toolName({ kind: 'plugin', name: 'my__server' })).toBe('my__server');
     expect(toolName({ kind: 'skill', name: 'plugin_x_y' })).toBe('plugin_x_y');
-  });
-
-  it('puts the tools satellite in its place', () => {
-    const a = agent({
-      status: 'waiting',
-      requests: [req('q')],
-      plan: planWithRunning(1, 0),
-      canvas: { tools: [kit('skill', 'x')], subs: [] },
-    });
-    expect(discOf(a).satellites.map((s) => s.kind)).toEqual(['team', 'tools', 'question']);
-  });
-
-  it('lays the discs out in rows', () => {
-    const discs = [1, 2, 3, 4, 5].map((i) => discOf(agent({ id: `a${i}` })));
-    const { items, w, h } = layoutFar(discs, 4);
-    expect(items[3]).toMatchObject({ x: 3 * (DISC.w + DISC.gap), y: 0 });
-    expect(items[4]).toMatchObject({ x: 0, y: DISC.h + DISC.gap, w: DISC.w, h: DISC.h });
-    expect(w).toBe(4 * DISC.w + 3 * DISC.gap);
-    expect(h).toBe(2 * DISC.h + DISC.gap);
-  });
-
-  it('lays out nothing', () => {
-    expect(layoutFar([])).toEqual({ items: [], w: 0, h: 0 });
   });
 });
 
@@ -172,7 +120,6 @@ describe('the compass of the workspace', () => {
     const open = frameOf(a, { toolsOpen: true });
     expect(open.west).toHaveLength(10);
     expect(open.westMore).toMatchObject({ hidden: 0, open: true });
-    expect(discOf(a).satellites[0]).toEqual({ kind: 'tools', count: 10 });
     expect(frameOf(agent({ canvas: { tools: tools.slice(0, 8), subs: [] } })).westMore).toBeNull();
     // A call that runs keeps its card out of the pile, with its flow.
     const long = { tools: [{ ...kit('plugin', 'slow', 1, 1), firstAt: 0, lastAt: 0 }, ...tools], subs: [] };
@@ -234,36 +181,71 @@ describe('the compass of the workspace', () => {
     expect(frameOf(agent()).centre.y).toBe(0);
     expect(frameOf(agent()).west).toEqual([]);
   });
-  it('packs frames in rows', () => {
-    const r = packRows(
-      [
-        { w: 1000, h: 10 },
-        { w: 1000, h: 30 },
-        { w: 1000, h: 20 },
-      ],
-      2100,
-      50,
-    );
-    expect(r.items[2]).toMatchObject({ x: 0, y: 80 });
-    expect(r).toMatchObject({ w: 2050, h: 100 });
-  });
-  it('puts an agent launched by another right after it', () => {
+
+  it("keeps the order given (the sidebar's): an agent launched by another stays in its place, linked to it", () => {
     const b = agent({ id: 'b', status: 'running' });
     const a = agent({ id: 'a', plan: planWith([], { driven: [{ agent: 'b', at: 1 }] }) });
     const c = agent({ id: 'c' });
-    const r = canvasOrder([a, c, b], { a, b, c }, {});
-    expect(r.order.map((x) => x.id)).toEqual(['a', 'b', 'c']);
-    expect(r.launched).toEqual([['a', 'b']]);
+    expect(launchedOf([a, c, b], { a, b, c }, {})).toEqual([['a', 'b']]);
+    expect(launchedOf([b, c, a], { a, b, c }, {})).toEqual([['a', 'b']]);
+    expect(launchedOf([a, c], { a, b, c }, {})).toEqual([]);
   });
-  it('puts the links in the world, and a dotted one to the agent launched', () => {
+  it('stacks the frames one under the other, in order', () => {
+    const a = frameOf(agent({ id: 'a', plan: planWith(['inProgress']) }));
+    const b = frameOf(agent({ id: 'b' }));
+    const r = layoutNear([a, b]);
+    expect(r.items.map((f) => [f.agentId, f.x, f.y])).toEqual([
+      ['a', 0, 0],
+      ['b', 0, a.h + GAP],
+    ]);
+    expect(r).toMatchObject({ w: Math.max(a.w, b.w), h: a.h + GAP + b.h });
+  });
+  it('puts the links in the world, and a dotted one down the left of the cards to the agent launched', () => {
     const a = frameOf(agent({ id: 'a', plan: planWith(['inProgress']) }));
     const b = frameOf(agent({ id: 'b' }));
     const r = layoutNear([a, b], [['a', 'b']]);
-    expect(r.items[1].x).toBe(a.w + GAP);
     const links = r.links.filter((l) => !l.id.endsWith(':south'));
     expect(links.map((l) => l.state)).toEqual(['plan', 'launched']);
-    expect(links[1].d.startsWith(`M ${a.w} `)).toBe(true);
-    expect(links[1].d.endsWith(`${a.w + GAP} ${b.centre.y + b.centre.h / 2}`)).toBe(true);
+    const ya = a.centre.y + a.centre.h / 2;
+    const yb = a.h + GAP + b.centre.y + b.centre.h / 2;
+    expect(links[1].d).toBe(`M 0 ${ya} L ${-GAP / 2} ${ya} L ${-GAP / 2} ${yb} L 0 ${yb}`);
+  });
+  it('sets the projects side by side, each under its head, a gap between them wider than between two agents', () => {
+    const a = frameOf(agent({ id: 'a' }));
+    const b = frameOf(agent({ id: 'b', plan: planWith(['inProgress']) }));
+    const c = frameOf(agent({ id: 'c', projectId: 'p2' }));
+    const r = layoutColumns(
+      [
+        { projectId: 'p1', frames: [a, b], launched: [['a', 'b']] },
+        { projectId: 'p2', frames: [c], launched: [] },
+      ],
+      true,
+    );
+    expect(COLUMN.gap).toBeGreaterThan(GAP);
+    const w1 = Math.max(a.w, b.w);
+    expect(r.heads).toEqual([
+      { projectId: 'p1', x: 0, y: 0, w: w1, h: COLUMN.head },
+      { projectId: 'p2', x: w1 + COLUMN.gap, y: 0, w: c.w, h: COLUMN.head },
+    ]);
+    expect(r.items.map((f) => [f.agentId, f.x, f.y])).toEqual([
+      ['a', 0, COLUMN.head],
+      ['b', 0, COLUMN.head + a.h + GAP],
+      ['c', w1 + COLUMN.gap, COLUMN.head],
+    ]);
+    expect(r.w).toBe(w1 + COLUMN.gap + c.w);
+    expect(r.h).toBe(COLUMN.head + a.h + GAP + b.h);
+    const x = 360 / 2;
+    expect(r.links.find((l) => l.id === 'b:plan')!.d).toBe(
+      `M ${x} ${COLUMN.head + a.h + GAP + b.centre.y} L ${x} ${COLUMN.head + a.h + GAP + b.north!.h}`,
+    );
+    expect(r.links.some((l) => l.id === 'launched:a:b')).toBe(true);
+  });
+  it('lays one project out with no head, as it stacks', () => {
+    const a = frameOf(agent({ id: 'a' }));
+    const r = layoutColumns([{ projectId: 'p1', frames: [a], launched: [] }], false);
+    expect(r.heads).toEqual([]);
+    expect(r).toMatchObject({ w: a.w, h: a.h });
+    expect(r.items[0]).toMatchObject({ x: 0, y: 0 });
   });
 
   it('computes the frame of an agent once, while it and its options stay the same', () => {
@@ -284,14 +266,12 @@ describe('the compass of the workspace', () => {
     const a = frameOf(agent({ id: 'a' }));
     const b = frameOf(agent({ id: 'b', plan: planWith(['inProgress']) }));
     const r = layoutNear([a, b]);
-    const x = r.items[1].x + 360 / 2;
-    expect(r.links.find((l) => l.id === 'b:plan')!.d).toBe(`M ${x} ${b.centre.y} L ${x} ${b.north!.h}`);
+    const [x, y] = [360 / 2, r.items[1].y];
+    expect(r.links.find((l) => l.id === 'b:plan')!.d).toBe(`M ${x} ${y + b.centre.y} L ${x} ${y + b.north!.h}`);
   });
 });
 
 describe('the cards that grow with a question', () => {
-  const overlaps = (a: Box, b: Box) => a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
-
   it('moves the team down when a card grows', () => {
     const a = agent({ plan: planWith([], { agents: [sub('s1'), sub('s2')] }) });
     const f = frameOf(a, { teamH: { s1: 300 } });
@@ -321,27 +301,6 @@ describe('the cards that grow with a question', () => {
     expect(waits(agent({ status: 'waiting' }))).toBe(true);
     expect(waits(agent({ pending: ['q1'], requests: [req('q1')] }))).toBe(true);
     expect(waits(agent())).toBe(false);
-  });
-
-  it('unfolds a waiting agent among the discs, without overlap', () => {
-    const discs = ['a1', 'a2', 'a3'].map((id) => discOf(agent({ id })));
-    const open = new Map([['a2', frameOf(agent({ id: 'a2', status: 'waiting', requests: [req('q')] }))]]);
-    const r = layoutFarOpen(discs, open);
-    expect(r.frames.map((f) => f.agentId)).toEqual(['a2']);
-    expect(r.discs.map((d) => d.agentId)).toEqual(['a1', 'a3']);
-    const boxes = [...r.discs, ...r.frames];
-    for (const p of boxes) for (const q of boxes) if (p !== q) expect(overlaps(p, q)).toBe(false);
-    expect(r.w).toBeGreaterThan(0);
-  });
-});
-
-describe('the deliverables and the CI', () => {
-  it('says the deliverables and the worst CI on the disc', () => {
-    const landing = [art(true), art(false), ribbon('deploy', 'success'), ribbon('ci', 'failure')];
-    expect(discOf(agent(), landing).satellites).toEqual([
-      { kind: 'deliverables', count: 2 },
-      { kind: 'ci', count: 2, state: 'failure' },
-    ]);
   });
 });
 

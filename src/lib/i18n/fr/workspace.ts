@@ -1,6 +1,6 @@
 import type { Tree } from '../types';
 
-// The « Workspace »: the canvas of a project's agents, its discs seen from afar and its controls. The names of the
+// The « Workspace »: the canvas of a project's agents, its compasses and its controls. The names of the
 // agents and what they do are their own words: shown as they come, never translated.
 export default {
   /** The entry of the menu of the « Éditeur » button, and that button when the editor is off. */
@@ -8,24 +8,16 @@ export default {
   exit: 'Quitter le workspace',
   label: 'Toile des agents',
   empty: 'Aucun agent dans ce projet',
+  /** The canvas of every project, when no project has an agent. */
+  emptyAll: 'Aucun agent',
   count: { one: '{count} agent', other: '{count} agents' },
   questions: { one: '{count} question', other: '{count} questions' },
   zoomIn: 'Zoomer',
   zoomOut: 'Dézoomer',
   zoom: '{percent} %',
   fit: 'Ajuster',
-  /** The line of a disc whose agent waits for an answer. */
+  /** The line of a card whose agent waits for an answer. */
   waiting: 'attend ta réponse',
-  noPlan: 'sans plan',
-  progress: '{done}/{total} · {percent} %',
-  /** The word under a satellite's number. */
-  sat: {
-    team: { one: 'équipe', other: 'équipe' },
-    tools: { one: 'outil', other: 'outils' },
-    question: { one: 'question', other: 'questions' },
-    deliverables: { one: 'livrable', other: 'livrables' },
-    ci: 'CI',
-  },
   /** The landing zone, south of a compass: what the agent delivered, its remote CI, its deployments. */
   land: {
     title: 'Zone d’atterrissage · {landed}, {coming}',
@@ -91,8 +83,4 @@ export default {
   },
   /** The requests of an agent that waits, in its card. `fromSub`: on the agent's card, a subagent's question is on its own. */
   ask: { loading: 'Chargement de la question…', fromSub: 'question de {name}' },
-  /** A disc, for a screen reader: « release-2-3, En cours ». */
-  discLabel: '{name}, {state}',
-  /** What a screen reader hears after it: the plan, then the questions. */
-  discProgress: { one: '{count} tâche faite sur {total}', other: '{count} tâches faites sur {total}' },
 } as const satisfies Tree;

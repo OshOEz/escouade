@@ -10,14 +10,14 @@ export const ZOOM_MAX = 2.5;
 export const ZOOM_STEP = 1.25;
 /** The step of the dotted background, at a zoom of 1 (px). */
 export const DOT = 18;
+/** Around the cards: of a fit, and of the first agent at the top left on opening (px). */
+export const MARGIN = 32;
 /** The height the floating bar and « Quitter » take at the top of the canvas: a fit keeps the cards below it (px). */
 export const HUD_H = 56;
 
-/** Below this zoom the agents are discs seen from afar; above it, their compass, its sides in piles. */
-export const FAR_BELOW = 0.45;
-/** From this zoom up, every side of a compass is unfolded. */
+/** From this zoom up, every side of a compass is unfolded; below it, down to `ZOOM_MIN`, its sides are in piles. */
 export const NEAR_FROM = 0.6;
-export type Altitude = 'far' | 'mid' | 'near';
+export type Altitude = 'mid' | 'near';
 
 export const clampZoom = (z: number) => Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, z));
 
@@ -34,26 +34,25 @@ export type Size = { w: number; h: number };
 export type Box = { x: number; y: number; w: number; h: number };
 
 /** The camera that shows the whole world in the view, centred, with `margin` around it, and no closer than `max`. */
-export function fit(world: Size, view: Size, margin = 32, max = ZOOM_MAX): Camera {
+export function fit(world: Size, view: Size, margin = MARGIN, max = ZOOM_MAX): Camera {
   if (!world.w || !world.h) return { x: view.w / 2, y: view.h / 2, zoom: 1 };
   const zoom = Math.min(max, clampZoom(Math.min((view.w - 2 * margin) / world.w, (view.h - 2 * margin) / world.h)));
   return { x: (view.w - world.w * zoom) / 2, y: (view.h - world.h * zoom) / 2, zoom };
 }
 
-export const altitude = (zoom: number): Altitude => (zoom < FAR_BELOW ? 'far' : zoom < NEAR_FROM ? 'mid' : 'near');
+export const altitude = (zoom: number): Altitude => (zoom < NEAR_FROM ? 'mid' : 'near');
 
 /** The altitudes and the zooms each is seen at, from the closest to the farthest. */
 export const ALTITUDES: { name: Altitude; min: number; max: number }[] = [
   { name: 'near', min: NEAR_FROM, max: ZOOM_MAX },
-  { name: 'mid', min: FAR_BELOW, max: NEAR_FROM - 0.001 },
-  { name: 'far', min: ZOOM_MIN, max: FAR_BELOW - 0.001 },
+  { name: 'mid', min: ZOOM_MIN, max: NEAR_FROM - 0.001 },
 ];
 
 /** Fits the closest altitude whose world holds in the view at its zoom; the farthest otherwise. */
 export function fitBest(worlds: Record<Altitude, Size>, view: Size): Camera {
   let cam: Camera = { x: 0, y: 0, zoom: 1 };
   for (const a of ALTITUDES) {
-    cam = fit(worlds[a.name], view, 32, a.max);
+    cam = fit(worlds[a.name], view, MARGIN, a.max);
     if (cam.zoom >= a.min) return cam;
   }
   return cam;

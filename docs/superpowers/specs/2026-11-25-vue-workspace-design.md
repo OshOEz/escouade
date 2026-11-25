@@ -328,7 +328,7 @@ L'utilisateur n'a pas tranché ces points ; j'ai pris ma recommandation.
 - Les sous-agents terminés sont repliés.
 - On peut écrire à un sous-agent tant qu'il tourne.
 - La carte d'artefact n'a pas de miniature de la page.
-- La caméra n'est pas mémorisée ; les seuils d'altitude sont 45 % et 60 %.
+- La caméra n'est pas mémorisée ; le seuil des piles est 60 % (il n'y a plus de vue de loin, 26 novembre).
 - Un déploiement se pose chez l'agent dont il déploie la PR ou la branche.
 - L'ordre des lots.
 

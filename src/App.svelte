@@ -383,7 +383,9 @@
       {:else if !app.ready}
         <div class="work"></div>
       {:else if app.ui.view === 'overview'}
-        <div class="work"><Overview /></div>
+        <div class="work">
+          {#if app.overviewCanvas}<WorkspaceView />{:else}<Overview />{/if}
+        </div>
       {:else if app.ui.view === 'inbox' && app.settings.mcpEnabled}
         <InboxQueue />
         <div class="work"><InboxScreen /></div>

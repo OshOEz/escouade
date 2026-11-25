@@ -7,50 +7,10 @@ import { planView } from './plan';
 import { sidebarSubs, subagentInfo } from './subagents';
 import type { Agent, ConvItem, KitUse, SubAgent, Ticket } from './types';
 import type { Box, Size } from './workspace-camera';
-import { landed, type Landing, type RibbonState } from './workspace-landing';
+import { landed, type Landing } from './workspace-landing';
 import { testsOf, type TestRun } from './workspace-tests';
 
-export type DiscState = 'run' | 'wait' | 'error' | 'done' | 'idle';
-/** The satellites, in their order from top to bottom; each lot of the spec brings its own. */
-export type SatKind = 'team' | 'tools' | 'deliverables' | 'ci' | 'question';
-export type Satellite = { kind: SatKind; count: number; state?: RibbonState };
-
-/** An agent seen from afar. `total` is 0 without a plan. */
-export type Disc = { agentId: string; name: string; state: DiscState; done: number; total: number; satellites: Satellite[] };
-
 export type Placed<T> = T & { x: number; y: number; w: number; h: number };
-
-/** A disc's radius, its orbit's, the box it is drawn in and the gap between two boxes (px, at a zoom of 1). */
-export const DISC = { r: 92, orbit: 122, w: 300, h: 300, gap: 70 } as const;
-
-const STATE: Record<Agent['status'], DiscState> = { waiting: 'wait', error: 'error', running: 'run', done: 'done', idle: 'idle' };
-
-export function discOf(agent: Agent, landing: Landing[] = []): Disc {
-  const mini = planView(agent)?.mini;
-  const team = (agent.plan?.agents.filter(isRunning).length ?? 0) + (agent.plan?.bgTasks.filter(isRunning).length ?? 0);
-  const questions = agent.requests?.length ?? 0;
-  const satellites: Satellite[] = [];
-  if (team) satellites.push({ kind: 'team', count: team });
-  const tools = toolCards(agent).length;
-  if (tools) satellites.push({ kind: 'tools', count: tools });
-  const deliverables = landing.filter((l) => l.kind === 'artifact').length;
-  if (deliverables) satellites.push({ kind: 'deliverables', count: deliverables });
-  // The remote CI and the deployments, the worst state first: the local tests are on their card.
-  const ci = landing.flatMap((l) => (l.kind === 'ci' || l.kind === 'deploy' ? [l.state] : []));
-  if (ci.length) {
-    const state = (['failure', 'running', 'success'] as const).find((s) => ci.includes(s));
-    satellites.push({ kind: 'ci', count: ci.length, state });
-  }
-  if (questions) satellites.push({ kind: 'question', count: questions });
-  return {
-    agentId: agent.id,
-    name: agent.name,
-    state: STATE[agent.status] ?? 'idle',
-    done: mini?.done ?? 0,
-    total: mini?.total ?? 0,
-    satellites,
-  };
-}
 
 /**
  * A skill or a plugin of an agent, its subagents' calls added; `runningIn`: the subagent's call a call of it runs in;
@@ -103,27 +63,10 @@ export function toolCards(agent: Agent): ToolCard[] {
   return [...cards.values()].sort((a, b) => a.firstAt - b.firstAt);
 }
 
-/** The discs in rows of `perRow`, in the order given. */
-export function layoutFar(discs: Disc[], perRow = 4): { items: Placed<Disc>[]; w: number; h: number } {
-  if (!discs.length) return { items: [], w: 0, h: 0 };
-  const items = discs.map((d, i) => ({
-    ...d,
-    x: (i % perRow) * (DISC.w + DISC.gap),
-    y: Math.floor(i / perRow) * (DISC.h + DISC.gap),
-    w: DISC.w,
-    h: DISC.h,
-  }));
-  const cols = Math.min(perRow, discs.length);
-  const rows = Math.ceil(discs.length / perRow);
-  return { items, w: cols * DISC.w + (cols - 1) * DISC.gap, h: rows * DISC.h + (rows - 1) * DISC.gap };
-}
-
 // Near: the compass. Each agent is a frame, the agent's card in it and what belongs to it around (spec, « La boussole,
 // côté par côté »). The sizes are left to who builds (taken from the mock-ups, to tune with use).
 
 export type Side = 'north' | 'west' | 'centre' | 'east' | 'south';
-/** The side of the compass a satellite stands for. */
-export const SIDE_OF: Record<SatKind, Side> = { team: 'east', tools: 'west', deliverables: 'south', ci: 'south', question: 'centre' };
 
 export const CARD = { w: 360, h: 128 } as const;
 export const SUB = { w: 240, h: 100 } as const;
@@ -149,7 +92,7 @@ export const TOOLS_SHOWN = 8;
 /** The pile of the tools: `hidden` of them folded in it, or `open` (it folds them back). */
 export type ToolPile = { hidden: number; open: boolean };
 /**
- * Mid-height (45 to 80 %): a side folded in one pile (« Outils ×4 », « Équipe ×4 », « Livrables ×3 ») that a click
+ * Mid-height (below 60 %, down to 30 %): a side folded in one pile (« Outils ×4 », « Équipe ×4 », « Livrables ×3 ») that a click
  * unfolds; `running` when one of its items runs. The plan is folded to its head and its gauge (`PLAN.folded`).
  */
 export type Level = 'mid' | 'near';
@@ -519,88 +462,73 @@ function computeFrame(agent: Agent, opts: FrameOpts): Frame {
   return { agentId: agent.id, w, h, centre, north, west, westMore, team, tests, south, piles, northMini, links };
 }
 
-/** In rows, in order: an item that would pass `maxW` starts the next row; a row is as high as its highest. */
-export function packRows<T extends Size>(items: T[], maxW: number, gap: number): { items: Placed<T>[]; w: number; h: number } {
-  const out: Placed<T>[] = [];
-  let x = 0;
-  let y = 0;
-  let rowH = 0;
-  let w = 0;
-  for (const it of items) {
-    if (x > 0 && x + it.w > maxW) {
-      x = 0;
-      y += rowH + gap;
-      rowH = 0;
-    }
-    out.push({ ...it, x, y, w: it.w, h: it.h });
-    w = Math.max(w, x + it.w);
-    rowH = Math.max(rowH, it.h);
-    x += it.w + gap;
-  }
-  return { items: out, w, h: out.length ? y + rowH : 0 };
-}
-
-/** The agents in the canvas's order: one that another of them launched (`drivenAgents`) comes right after it. */
-export function canvasOrder(
-  agents: Agent[],
-  all: Record<string, Agent>,
-  tickets: Record<string, Ticket>,
-): { order: Agent[]; launched: [from: string, to: string][] } {
-  const order: Agent[] = [];
-  const launched: [string, string][] = [];
-  const shown = new Map(agents.map((a) => [a.id, a]));
-  const placed = new Set<string>();
-  const visit = (a: Agent) => {
-    if (placed.has(a.id)) return;
-    placed.add(a.id);
-    order.push(a);
+/** The agents another of them launched (`drivenAgents`), each linked from the first that did, in the order given. */
+export function launchedOf(agents: Agent[], all: Record<string, Agent>, tickets: Record<string, Ticket>): [from: string, to: string][] {
+  const shown = new Set(agents.map((a) => a.id));
+  const linked = new Set<string>();
+  const out: [string, string][] = [];
+  for (const a of agents)
     for (const d of drivenAgents(a.plan, all, tickets, a.id)) {
-      const next = shown.get(d.id);
-      if (!next || placed.has(d.id)) continue;
-      launched.push([a.id, d.id]);
-      visit(next);
+      if (d.id === a.id || !shown.has(d.id) || linked.has(d.id)) continue;
+      linked.add(d.id);
+      out.push([a.id, d.id]);
     }
-  };
-  for (const a of agents) visit(a);
-  return { order, launched };
+  return out;
 }
 
-/** The frames in rows, their links in the world's coordinates, and a dotted link from an agent to each it launched. */
+/** A column of the canvas of every project: a head with the project's name, then its agents. */
+export const COLUMN = { gap: 160, head: 56 } as const;
+
+/**
+ * The frames one under the other from (x0, y0), in order; their links in the world's coordinates, and a dotted link
+ * from an agent to each it launched, down the left of the cards.
+ */
 export function layoutNear(
   frames: Frame[],
   launched: [string, string][] = [],
-  maxW = 2400,
+  x0 = 0,
+  y0 = 0,
 ): { items: Placed<Frame>[]; links: Link[]; w: number; h: number } {
-  const packed = packRows(frames, maxW, GAP);
-  const links: Link[] = packed.items.flatMap((f) => f.links.map((e) => linkOf(e, f.x, f.y)));
-  const byId = new Map(packed.items.map((f) => [f.agentId, f]));
+  let y = y0;
+  const items = frames.map((f) => {
+    const placed = { ...f, x: x0, y };
+    y += f.h + GAP;
+    return placed;
+  });
+  const links: Link[] = items.flatMap((f) => f.links.map((e) => linkOf(e, f.x, f.y)));
+  const byId = new Map(items.map((f) => [f.agentId, f]));
   for (const [from, to] of launched) {
     const a = byId.get(from);
     const b = byId.get(to);
     if (!a || !b) continue;
-    const y = (f: Placed<Frame>) => f.y + f.centre.y + f.centre.h / 2;
-    links.push(linkOf({ id: `launched:${from}:${to}`, state: 'launched', x1: a.x + a.w, y1: y(a), x2: b.x, y2: y(b) }, 0, 0));
+    const mid = (f: Placed<Frame>) => f.y + f.centre.y + f.centre.h / 2;
+    const [ya, yb, lane] = [mid(a), mid(b), x0 - GAP / 2];
+    const via: [number, number][] = [
+      [lane, ya],
+      [lane, yb],
+    ];
+    links.push(linkOf({ id: `launched:${from}:${to}`, state: 'launched', x1: x0, y1: ya, x2: x0, y2: yb, via }, 0, 0));
   }
-  return { ...packed, links };
+  const w = Math.max(0, ...frames.map((f) => f.w));
+  return { items, links, w, h: items.length ? y - GAP - y0 : 0 };
 }
 
-/**
- * Afar, with the agents that wait unfolded (spec, « Un agent qui attend l'utilisateur est toujours déplié ») : in the
- * order of `discs`, an agent in `open` is its frame, the others their disc; all in rows, with no overlap.
- */
-export function layoutFarOpen(
-  discs: Disc[],
-  open: Map<string, Frame>,
-  maxW = 2400,
-): { discs: Placed<Disc>[]; frames: Placed<Frame>[]; links: Link[]; w: number; h: number } {
-  type Item = { disc: Disc; frame?: Frame; w: number; h: number };
-  const items: Item[] = discs.map((disc) => {
-    const frame = open.get(disc.agentId);
-    return frame ? { disc, frame, w: frame.w, h: frame.h } : { disc, w: DISC.w, h: DISC.h };
-  });
-  const packed = packRows(items, maxW, GAP);
-  const placedDiscs = packed.items.filter((i) => !i.frame).map((i) => ({ ...i.disc, x: i.x, y: i.y, w: i.w, h: i.h }));
-  const frames = packed.items.filter((i) => i.frame).map((i) => ({ ...i.frame!, x: i.x, y: i.y }));
-  const links = frames.flatMap((f) => f.links.map((e) => linkOf(e, f.x, f.y)));
-  return { discs: placedDiscs, frames, links, w: packed.w, h: packed.h };
+/** The projects side by side, in order, each a column of its agents (under a head with `heads`). */
+export function layoutColumns(
+  columns: { projectId: string; frames: Frame[]; launched: [string, string][] }[],
+  heads: boolean,
+): { items: Placed<Frame>[]; links: Link[]; heads: Placed<{ projectId: string }>[]; w: number; h: number } {
+  const out = { items: [] as Placed<Frame>[], links: [] as Link[], heads: [] as Placed<{ projectId: string }>[], w: 0, h: 0 };
+  const top = heads ? COLUMN.head : 0;
+  let x = 0;
+  for (const c of columns) {
+    const col = layoutNear(c.frames, c.launched, x, top);
+    if (heads) out.heads.push({ projectId: c.projectId, x, y: 0, w: col.w, h: COLUMN.head });
+    out.items.push(...col.items);
+    out.links.push(...col.links);
+    out.w = x + col.w;
+    out.h = Math.max(out.h, top + col.h);
+    x += col.w + COLUMN.gap;
+  }
+  return out;
 }
