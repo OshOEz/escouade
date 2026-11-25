@@ -658,7 +658,7 @@ class AppState {
   );
   /** The « Pull requests » view of the project on screen is shown (ESC-65). */
   prsOn = $derived(
-    this.ui.view === 'project' && !!this.project && !!this.prs[this.project.id] && !this.boardOn && !this.docsOn && !this.workspaceOn,
+    this.ui.view === 'project' && !!this.project && !!this.prs[this.project.id] && !this.boardOn && !this.docsOn && !this.workspace[this.project.id],
   );
   /** The « Workspace » of the project on screen is shown: the canvas of its agents. */
   workspaceOn = $derived(this.ui.view === 'project' && !!this.project && !!this.workspace[this.project.id]);
