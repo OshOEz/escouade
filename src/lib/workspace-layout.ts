@@ -135,8 +135,8 @@ export const BG = { w: 240, h: 60 } as const;
  */
 export const PLAN = { w: 560, head: 72, folded: 62, row: 30, pad: 6, list: 232 } as const;
 export const GAP = 48;
-/** A test card, stuck under the card that runs it: one line of command, its height fixed. */
-export const TEST = { h: 76, gap: 8 } as const;
+/** A test card, stuck under the card that runs it: its head, one line of command and its button « Sortie », its height fixed. */
+export const TEST = { h: 92, gap: 8 } as const;
 /** The landing zone, empty: its height until it is measured. */
 export const SOUTH = { h: 132 } as const;
 /**
