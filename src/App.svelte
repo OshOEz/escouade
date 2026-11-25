@@ -23,6 +23,7 @@
   import { WATCH_TICK_MS } from './lib/prnew';
   import Board from './components/board/Board.svelte';
   import PrsView from './components/prs/PrsView.svelte';
+  import WorkspaceView from './components/workspace/WorkspaceView.svelte';
   import DocsView from './components/docs/DocsView.svelte';
   import TicketForm from './components/board/TicketForm.svelte';
   import MergedBranchesModal from './components/branches/MergedBranchesModal.svelte';
@@ -402,7 +403,11 @@
         {:else}
           <!-- What is shown alone carries its key: a content dragged from the sidebar is dropped beside it (ESC-392). -->
           <div class="work" data-pane-key={app.singleItem ? itemKey(app.singleItem) : undefined}>
-            {#if app.boardOn}
+            {#if app.workspaceOn}
+              {#key project.id}
+                <WorkspaceView {project} />
+              {/key}
+            {:else if app.boardOn}
               {#key project.id}
                 <Board {project} />
               {/key}

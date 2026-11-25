@@ -5,6 +5,8 @@ import type { Tree } from '../types';
 export default {
   /** The entry of the menu of the « Éditeur » button, and that button when the editor is off. */
   open: 'Workspace',
+  /** The arrow beside « Éditeur », which opens the menu of the project's views. */
+  more: 'Autres vues du projet',
   exit: 'Quitter le workspace',
   label: 'Toile des agents',
   empty: 'Aucun agent dans ce projet',

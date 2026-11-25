@@ -33,6 +33,11 @@ describe('the disc of an agent', () => {
     expect(screen.getByText('3')).toBeTruthy();
   });
 
+  it('cuts a long activity to fit in the disc', () => {
+    renderDisc(agent({ status: 'running', activity: 'Lance cargo test -p escouade-plan --all-features' }));
+    expect(screen.getByText('Lance cargo test -p escou…')).toBeTruthy();
+  });
+
   it('is picked by a click and by Enter', async () => {
     const onpick = vi.fn();
     renderDisc(agent({ id: 'a9' }), onpick);

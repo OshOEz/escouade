@@ -94,6 +94,26 @@ describe('TitleBar', () => {
     expect(app.editor.p2).toMatchObject({ on: true, source: 'project' });
   });
 
+  it('offers the editor or the workspace from the arrow beside « Éditeur »', async () => {
+    fakeBackend();
+    app.ui.activeProject = 'p2';
+    render(TitleBar);
+    await userEvent.click(screen.getByRole('button', { name: 'Autres vues du projet' }));
+    const items = menu.open!.items.filter((i) => !i.separator);
+    expect(items.map((i) => i.label)).toEqual(['Éditeur', 'Workspace']);
+    items[1].onClick!();
+    expect(app.workspaceOn).toBe(true);
+  });
+
+  it('opens the workspace straight away when the editor is off', async () => {
+    fakeBackend();
+    app.settings.features = { ...(app.settings.features ?? {}), editor: false } as typeof app.settings.features;
+    render(TitleBar);
+    expect(screen.queryByRole('button', { name: 'Ouvrir l’éditeur du projet' })).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Workspace' }));
+    expect(app.workspaceOn).toBe(true);
+  });
+
   it('draws the window’s buttons as icons, no character', () => {
     fakeBackend();
     render(TitleBar);

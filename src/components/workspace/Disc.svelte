@@ -12,10 +12,13 @@
   const state = $derived(t(`workspace.state.${disc.state}`));
   const percent = $derived(disc.total ? Math.round((disc.done / disc.total) * 100) : 0);
 
+  // The line in mono at 10.5 px: 25 characters fit in the disc, the rest is cut.
+  const ACT_MAX = 25;
+  const cut = (text: string) => (text.length > ACT_MAX ? `${text.slice(0, ACT_MAX)}…` : text);
   const activity = $derived.by(() => {
     if (disc.state === 'wait') return t('workspace.waiting');
     const act = cardActivity(agent, 0);
-    if (act?.kind === 'doing') return act.what ? `${act.verb} ${act.what}` : act.verb;
+    if (act?.kind === 'doing') return cut(act.what ? `${act.verb} ${act.what}` : act.verb);
     if (act?.kind === 'thinking') return t('stats.overview.thinking');
     return '';
   });

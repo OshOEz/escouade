@@ -4,6 +4,7 @@ import { defineZone } from '../types';
 // agents and what they do are their own words: shown as they come, never translated.
 export default defineZone('workspace', {
   open: 'Workspace',
+  more: 'Other views of the project',
   exit: 'Leave the workspace',
   label: 'Canvas of the agents',
   empty: 'No agent in this project',
