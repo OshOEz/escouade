@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { agent, fakeBackend, pullRequest } from '../test/ipc';
 import { check, prDetail, projectEnvs } from '../test/workspace';
+import { app } from './state.svelte';
 import { followEnvironments, prDetails, readPrDetail } from './workspace-ci.svelte';
 import { landingOf } from './workspace-landing';
 
@@ -30,5 +31,63 @@ describe('what the canvas reads of the CI', () => {
     await vi.advanceTimersByTimeAsync(5 * 60 * 1000);
     expect(backend.called('project_environments')).toHaveLength(2);
     vi.useRealTimers();
+  });
+
+  it('reads the same pull request once a minute, whoever asks', async () => {
+    const backend = fakeBackend({ agent_pr_detail: () => ({ data: prDetail() }) });
+    const a = agent({ id: 'a3', prs: [pullRequest({ number: 7, state: 'open', checks: 'pending' })] });
+    await readPrDetail(a);
+    await readPrDetail(a);
+    expect(backend.called('agent_pr_detail')).toHaveLength(1);
+    // Its checks changed: read again.
+    await readPrDetail(agent({ id: 'a3', prs: [pullRequest({ number: 7, state: 'open', checks: 'success' })] }));
+    expect(backend.called('agent_pr_detail')).toHaveLength(2);
+  });
+
+  it('drops an answer that comes after its pull request was closed or changed', async () => {
+    const answers: ((v: unknown) => void)[] = [];
+    fakeBackend({ agent_pr_detail: () => new Promise((r) => answers.push(r)) });
+    const open = agent({ id: 'a4', prs: [pullRequest({ number: 7, state: 'open' })] });
+    const reading = readPrDetail(open);
+    await readPrDetail(agent({ id: 'a4', prs: [pullRequest({ number: 7, state: 'merged' })] }));
+    answers[0]({ data: prDetail() });
+    await reading;
+    expect(prDetails.a4).toBeUndefined();
+
+    // An old answer after a newer one: the newer stays.
+    const old = readPrDetail(agent({ id: 'a4', prs: [pullRequest({ number: 8, state: 'open', checks: 'pending' })] }));
+    const fresh = readPrDetail(agent({ id: 'a4', prs: [pullRequest({ number: 8, state: 'open', checks: 'failure' })] }));
+    answers[2]({ data: { ...prDetail(), checks: [check('new', 'failure')] } });
+    await fresh;
+    answers[1]({ data: { ...prDetail(), checks: [check('old', 'pending')] } });
+    await old;
+    expect(prDetails.a4.checks[0].name).toBe('new');
+  });
+
+  it('lands no deployment of a pull request that is no longer open', () => {
+    const a = agent({ id: 'a5', prs: [pullRequest({ state: 'merged' })] });
+    const pr = { ...prDetail(), deployments: [{ environment: 'prod', state: 'success', url: null } as never] };
+    expect(landingOf(a, { pr, environments: null }).filter((l) => l.kind === 'deploy')).toEqual([]);
+  });
+
+  it('reads the environments in silence, and never those of a host without deployments', async () => {
+    app.toasts = [];
+    const backend = fakeBackend({
+      project_environments: () => ({ ...projectEnvs(), projectId: 'p2', readAt: null }),
+      project_environments_read: () => {
+        throw { kind: 'unreachable', message: 'offline' };
+      },
+    });
+    const stop = followEnvironments('p2');
+    await vi.waitFor(() => expect(backend.called('project_environments_read')).toHaveLength(1));
+    await new Promise((r) => setTimeout(r, 0));
+    expect(app.toasts).toEqual([]);
+    stop();
+
+    const b2 = fakeBackend({ project_environments: () => ({ ...projectEnvs(), projectId: 'p3', unsupported: true, readAt: null }) });
+    followEnvironments('p3')();
+    await new Promise((r) => setTimeout(r, 0));
+    expect(b2.called('project_environments')).toHaveLength(1);
+    expect(b2.called('project_environments_read')).toHaveLength(0);
   });
 });

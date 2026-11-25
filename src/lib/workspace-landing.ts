@@ -114,7 +114,8 @@ export function landingOf(agent: Agent, ctx: LandingCtx): Landing[] {
 
   const branch = agent.worktree?.branch ?? agent.foundWorktree?.branch ?? '';
   const envs = new Set<string>();
-  for (const d of ctx.pr?.deployments ?? []) {
+  // Those of the open pull request only: a detail read before it closed lands nothing.
+  for (const d of pr ? (ctx.pr?.deployments ?? []) : []) {
     envs.add(d.environment);
     out.push(
       ribbon({
