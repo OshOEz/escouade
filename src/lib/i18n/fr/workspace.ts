@@ -56,6 +56,8 @@ export default {
     more: { one: '+ {count} outil', other: '+ {count} outils' },
     fold: 'Replier les outils',
   },
+  /** A side of a compass folded at mid-height, a button that unfolds it. */
+  pile: { west: 'Outils ×{count}', east: 'Équipe ×{count}', south: 'Livrables ×{count}' },
   /** The team, east of the card: its subagents and background tasks. */
   team: {
     task: 'tâche {n}',

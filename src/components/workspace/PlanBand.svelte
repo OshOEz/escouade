@@ -4,11 +4,12 @@
   import type { Agent } from '../../lib/types';
   import PlanBanner from '../PlanBanner.svelte';
 
-  let { agent }: { agent: Agent } = $props();
+  // `mini`: at mid-height, its head and its gauge alone; a click on it unfolds it (`onunfold`).
+  let { agent, mini = false, onunfold }: { agent: Agent; mini?: boolean; onunfold?: () => void } = $props();
 </script>
 
 <section class="north" data-side="north">
-  <PlanBanner {agent} />
+  <PlanBanner {agent} folded={mini} {onunfold} />
 </section>
 
 <style>

@@ -1,6 +1,6 @@
 <script lang="ts">
   // The « Workspace » of a project (spec 2026-11-25-vue-workspace-design.md, « La toile »): its agents on a dotted
-  // canvas one moves and zooms, each a disc seen from afar, its compass from 45 %. The canvas is one world, transformed
+  // canvas one moves and zooms, each a disc seen from afar, its compass from 45 %, its sides in piles up to 80 %. The canvas is one world, transformed
   // by the camera; the controls float above it.
   import { untrack } from 'svelte';
   import { t } from '../../lib/i18n';
@@ -23,7 +23,7 @@
   } from '../../lib/workspace-camera';
   import { followEnvironments, prDetails, readPrDetail } from '../../lib/workspace-ci.svelte';
   import { landingOf } from '../../lib/workspace-landing';
-  import { canvasOrder, discOf, frameOf, layoutFarOpen, layoutNear, waits, type Side } from '../../lib/workspace-layout';
+  import { canvasOrder, discOf, frameOf, layoutFarOpen, layoutNear, waits, type Level, type Side } from '../../lib/workspace-layout';
   import type { Agent } from '../../lib/types';
   import Icon from '../Icon.svelte';
   import Compass from './Compass.svelte';
@@ -41,8 +41,13 @@
   let toolsOpen = $state<Record<string, boolean>>({});
   /** The height measured of each card, by agent then by card (`centre`: the agent's): a card that grows moves the others. */
   let heights = $state<Record<string, Record<string, number>>>({});
-  const frameAt = (a: Agent) =>
+  /** The sides unfolded at mid-height, by agent: they stay so while the canvas is open. */
+  let unfolded = $state<Record<string, Side[]>>({});
+  const frameAt = (a: Agent, level: Level = 'near') =>
     frameOf(a, {
+      level,
+      unfolded: unfolded[a.id],
+      landing: landing.get(a.id),
       teamOpen: teamOpen[a.id],
       toolsOpen: toolsOpen[a.id],
       seenAt: seenAt[a.id],
@@ -78,14 +83,26 @@
       new Map(ordered.order.filter(waits).map((a) => [a.id, frameAt(a)])),
     ),
   );
-  const near = $derived(layoutNear(ordered.order.map(frameAt), ordered.launched));
+  const mid = $derived(
+    layoutNear(
+      ordered.order.map((a) => frameAt(a, 'mid')),
+      ordered.launched,
+    ),
+  );
+  const near = $derived(
+    layoutNear(
+      ordered.order.map((a) => frameAt(a)),
+      ordered.launched,
+    ),
+  );
   const questions = $derived(agents.reduce((n, a) => n + (a.requests?.length ?? 0), 0));
 
   let view: HTMLDivElement | undefined = $state();
   let cam = $state<Camera>({ x: 0, y: 0, zoom: 1 });
   const alt = $derived(altitude(cam.zoom));
-  /** The compasses on screen: all of them near, those of the agents that wait from afar. */
-  const shown = $derived(alt === 'far' ? far : { links: near.links, w: near.w, h: near.h, frames: near.items });
+  /** The compasses on screen: all of them near and at mid-height, those of the agents that wait from afar. */
+  const nearer = $derived(alt === 'mid' ? mid : near);
+  const shown = $derived(alt === 'far' ? far : { links: nearer.links, w: nearer.w, h: nearer.h, frames: nearer.items });
   const discAt = $derived(new Map(far.discs.map((d) => [d.agentId, d])));
   const compassAt = $derived(new Map(shown.frames.map((f) => [f.agentId, f])));
   let drag: { x: number; y: number } | null = $state(null);
@@ -106,7 +123,7 @@
   // Fitted on opening, and on « Ajuster »: the camera is not kept.
   function fitAll() {
     // Below the floating bar: a fitted card is never under it.
-    const c = fitBest({ far, near }, below());
+    const c = fitBest({ far, mid, near }, below());
     cam = { ...c, y: c.y + HUD_H };
     moved = false;
   }
@@ -121,7 +138,7 @@
 
   /** Where each agent is at an altitude: its disc from afar, its card near (the card does not move on screen). */
   const anchors = (a: Altitude): (Box & { agentId: string })[] => {
-    const cards = (a === 'far' ? far.frames : near.items).map((f) => ({
+    const cards = (a === 'far' ? far.frames : a === 'mid' ? mid.items : near.items).map((f) => ({
       agentId: f.agentId,
       x: f.x + f.centre.x,
       y: f.y + f.centre.y,
@@ -183,9 +200,18 @@
     };
     if (side === 'east' && f.team.length) b = span(f.team);
     if (side === 'west' && f.west.length) b = span(f.west);
-    if (side === 'south') b = f.south;
+    if (side === 'south' && f.south) b = f.south;
     const [px, py] = centre();
     place({ zoom: 1, x: px - (f.x + b.x + b.w / 2), y: py - (f.y + b.y + b.h / 2) });
+  }
+
+  /** A pile clicked at mid-height: its side unfolded, the zoom kept, the agent's card where it was on screen. */
+  function unfold(agentId: string, side: Side) {
+    const at = () => anchors(alt).find((b) => b.agentId === agentId);
+    const from = at();
+    unfolded[agentId] = [...(unfolded[agentId] ?? []), side];
+    const to = at();
+    if (from && to) place(keepAnchor(cam, from, to));
   }
 
   function toggleTeam(agentId: string) {
@@ -242,6 +268,7 @@
             ontoggle={toggleTeam}
             ontoggletools={(id) => (toolsOpen[id] = !toolsOpen[id])}
             onsize={(id, h) => sized(a.id, id, h)}
+            onunfold={unfold}
             zoom={cam.zoom}
           />
         {/if}

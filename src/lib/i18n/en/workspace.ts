@@ -48,6 +48,7 @@ export default defineZone('workspace', {
     more: { one: '+ {count} tool', other: '+ {count} tools' },
     fold: 'Fold the tools',
   },
+  pile: { west: 'Tools ×{count}', east: 'Team ×{count}', south: 'Deliverables ×{count}' },
   team: {
     task: 'task {n}',
     write: 'Write to {name}',

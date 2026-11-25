@@ -9,9 +9,10 @@
   import type { Agent } from '../../lib/types';
   import type { Box, Size } from '../../lib/workspace-camera';
   import type { Landing } from '../../lib/workspace-landing';
-  import type { Frame, Placed } from '../../lib/workspace-layout';
+  import type { Frame, PileSide, Placed, Side } from '../../lib/workspace-layout';
   import AgentCard from './AgentCard.svelte';
   import LandingZone from './LandingZone.svelte';
+  import PileCard from './PileCard.svelte';
   import PlanBand from './PlanBand.svelte';
   import RibbonCard from './RibbonCard.svelte';
   import TeamCard from './TeamCard.svelte';
@@ -24,6 +25,7 @@
     ontoggle,
     ontoggletools,
     onsize,
+    onunfold,
     zoom = 1,
   }: {
     frame: Placed<Frame>;
@@ -33,6 +35,8 @@
     ontoggle: (agentId: string) => void;
     ontoggletools?: (agentId: string) => void;
     onsize?: (id: string, h: number) => void;
+    /** At mid-height, a folded side clicked. */
+    onunfold?: (agentId: string, side: Side) => void;
     zoom?: number;
   } = $props();
 
@@ -45,11 +49,19 @@
     void prKey;
     untrack(() => void readPrDetail(agent));
   });
+  const pileOf = (side: PileSide) => frame.piles.find((p) => p.side === side);
   const testOf = (under: string) => frame.tests.find((r) => r.under === under);
   const at = (b: Box | (Size & { x: number; y: number })) => `left:${b.x}px;top:${b.y}px;width:${b.w}px;height:${b.h}px`;
 </script>
 
 <!-- A test card right after the card it is stuck under: the keyboard reads it next. -->
+{#snippet pile(side: PileSide)}
+  {@const p = pileOf(side)}
+  {#if p}
+    <div class="slot" style={at(p)}><PileCard pile={p} onunfold={(s) => onunfold?.(agent.id, s)} /></div>
+  {/if}
+{/snippet}
+
 {#snippet tests(under: string)}
   {@const run = testOf(under)}
   {#if run}
@@ -58,7 +70,10 @@
 {/snippet}
 
 <div class="compass" data-agent={frame.agentId} style={at(frame)}>
-  {#if frame.north}<div class="slot" style={at(frame.north)}><PlanBand {agent} /></div>{/if}
+  {#if frame.north}<div class="slot" style={at(frame.north)}>
+      <PlanBand {agent} mini={frame.northMini} onunfold={() => onunfold?.(agent.id, 'north')} />
+    </div>{/if}
+  {@render pile('west')}
   {#each frame.west as tool (`${tool.kind}:${tool.name}`)}
     <div class="slot" style={at(tool)}><ToolCard {tool} /></div>
   {/each}
@@ -73,11 +88,15 @@
     <AgentCard {agent} shown={frame.team.filter((i) => i.kind === 'sub').map((i) => i.id)} onsize={(h) => onsize?.('centre', h)} {zoom} />
   </div>
   {@render tests('centre')}
+  {@render pile('east')}
   {#each frame.team as item (item.id)}
     <div class="slot" style={at(item)}><TeamCard {agent} {item} ontoggle={() => ontoggle(agent.id)} {onsize} {zoom} /></div>
     {@render tests(item.id)}
   {/each}
-  <div class="slot" style={at(frame.south)}><LandingZone agentId={agent.id} items={landing} onsize={(h) => onsize?.('south', h)} /></div>
+  {@render pile('south')}
+  {#if frame.south}
+    <div class="slot" style={at(frame.south)}><LandingZone agentId={agent.id} items={landing} onsize={(h) => onsize?.('south', h)} /></div>
+  {/if}
 </div>
 
 <style>

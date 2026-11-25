@@ -221,6 +221,28 @@ describe('the workspace', () => {
     expect(centreOf(container, 'a2')).toEqual(before);
   });
 
+  it('shows piles at mid-height and the cards up close', async () => {
+    resetApp({ agents: [agent({ id: 'a1', canvas: { tools: [kit('skill', 'a'), kit('plugin', 'b')], subs: [] } })] });
+    show();
+    await zoomTo(0.59);
+    expect(screen.getByRole('button', { name: 'Outils ×2' })).toBeTruthy();
+    expect(screen.queryByRole('article', { name: /Skill a/ })).toBeNull();
+    await zoomTo(0.92);
+    expect(screen.queryByRole('button', { name: 'Outils ×2' })).toBeNull();
+    expect(screen.getByRole('article', { name: /Skill a/ })).toBeTruthy();
+  });
+
+  it('unfolds a pile without moving the camera', async () => {
+    resetApp({ agents: [agent({ id: 'a1', canvas: { tools: [kit('skill', 'a')], subs: [] } }), agent({ id: 'a2' })] });
+    const { container } = show();
+    await zoomTo(0.59);
+    const before = centreOf(container, 'a1');
+    await fireEvent.click(screen.getByRole('button', { name: 'Outils ×1' }));
+    expect(zoomShown()).toBe('59 %');
+    expect(screen.getByRole('article', { name: /Skill a/ })).toBeTruthy();
+    expect(centreOf(container, 'a1')).toEqual(before);
+  });
+
   it('zooms on the team when its satellite is clicked', async () => {
     resetApp({ agents: [agent({ id: 'a1', plan: planWithRunning(2, 0) })] });
     const { container } = show();
