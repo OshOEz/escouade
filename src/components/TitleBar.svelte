@@ -138,38 +138,29 @@
       </button>
     {/if}
     {#if activeProject && !first && app.feature('editor')}
-      <!-- « Éditeur » opens the editor; the arrow beside it, the menu of the project's views (the « Workspace »). -->
-      <div class="split">
-        <button
-          class="btn-bar"
-          data-discover="editor"
-          aria-label={t('nav.titleBar.openEditor')}
-          use:tip={t('nav.titleBar.openEditorTitle')}
-          onclick={() => app.openEditor({ projectId: activeProject.id, source: 'project' })}
-          onpointerdown={(e) => paneDrag.press(e, { kind: 'editor' }, t('common.editor'))}
-        >
-          <Icon name="code" />
-          <span class="lbl">{t('common.editor')}</span>
-        </button>
-        <button
-          class="btn-bar more"
-          aria-haspopup="menu"
-          aria-label={t('workspace.more')}
-          use:tip={t('workspace.more')}
-          onclick={(e) =>
-            menu.showAt(e.currentTarget, [
-              {
-                label: t('common.editor'),
-                icon: 'code',
-                checked: app.editorOn,
-                onClick: () => app.openEditor({ projectId: activeProject.id, source: 'project' }),
-              },
-              { label: t('workspace.open'), icon: 'diagram', checked: app.workspaceOn, onClick: () => app.openWorkspace(activeProject.id) },
-            ])}
-        >
-          <Icon name="down" size={14} />
-        </button>
-      </div>
+      <!-- « Éditeur » opens the menu of the project's views: the editor, the « Workspace ». -->
+      <button
+        class="btn-bar"
+        data-discover="editor"
+        aria-haspopup="menu"
+        aria-label={t('nav.titleBar.openEditor')}
+        use:tip={t('nav.titleBar.openEditorTitle')}
+        onclick={(e) =>
+          menu.showAt(e.currentTarget, [
+            {
+              label: t('common.editor'),
+              icon: 'code',
+              checked: app.editorOn,
+              onClick: () => app.openEditor({ projectId: activeProject.id, source: 'project' }),
+            },
+            { label: t('workspace.open'), icon: 'diagram', checked: app.workspaceOn, onClick: () => app.openWorkspace(activeProject.id) },
+          ])}
+        onpointerdown={(e) => paneDrag.press(e, { kind: 'editor' }, t('common.editor'))}
+      >
+        <Icon name="code" />
+        <span class="lbl">{t('common.editor')}</span>
+        <Icon name="down" size={14} />
+      </button>
     {:else if activeProject && !first}
       <!-- The editor off: the button opens the « Workspace » itself. -->
       <button class="btn-bar" onclick={() => app.openWorkspace(activeProject.id)}>
@@ -397,18 +388,6 @@
   .btn-bar:hover {
     background: var(--hover);
     color: var(--text);
-  }
-  .split {
-    display: inline-flex;
-    align-items: center;
-  }
-  .split .btn-bar:first-child {
-    border-radius: 7px 0 0 7px;
-    padding-right: 6px;
-  }
-  .btn-bar.more {
-    border-radius: 0 7px 7px 0;
-    padding: 0 5px;
   }
   .controls {
     display: flex;

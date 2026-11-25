@@ -75,7 +75,7 @@ describe('Éditeur off', () => {
   it('takes the editor’s button away from the title bar, and the editor cannot open', async () => {
     only('editor');
     render(TitleBar);
-    expect(screen.queryByRole('button', { name: 'Ouvrir l’éditeur du projet' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Éditeur ou workspace du projet' })).toBeNull();
     await app.openEditor({ projectId: 'p1', source: 'project' });
     expect(app.editorOn).toBe(false);
   });
