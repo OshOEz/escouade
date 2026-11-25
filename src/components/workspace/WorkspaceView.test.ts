@@ -4,7 +4,7 @@ import { dropConversation } from '../../lib/conversations.svelte';
 import { setLang } from '../../lib/i18n';
 import { app } from '../../lib/state.svelte';
 import { agent, fakeBackend, project, resetApp } from '../../test/ipc';
-import { planWith, planWithRunning, questionItem, req, sub } from '../../test/workspace';
+import { kit, planWith, planWithRunning, questionItem, req, sub } from '../../test/workspace';
 import WorkspaceView from './WorkspaceView.svelte';
 import { HUD_H } from '../../lib/workspace-camera';
 
@@ -247,6 +247,31 @@ describe('the workspace', () => {
     await fireEvent.click(screen.getByRole('button', { name: /terminé/ }));
     expect(container.querySelectorAll('path.link.run')).toHaveLength(1);
     expect(container.querySelectorAll('path.link.done')).toHaveLength(1);
+  });
+
+  it("reaches the tools before the agent's card with the keyboard, and draws a flow only while one runs", async () => {
+    resetApp({ agents: [agent({ id: 'a1', name: 'un', canvas: { tools: [kit('skill', 'tdd'), kit('plugin', 'gh', 1, 1)], subs: [] } })] });
+    const { container } = show();
+    await zoomTo(1);
+    const sides = [...container.querySelectorAll('[data-side]')].map((e) => e.getAttribute('data-side'));
+    expect(sides.indexOf('west')).toBeGreaterThanOrEqual(0);
+    expect(sides.indexOf('west')).toBeLessThan(sides.indexOf('centre'));
+    expect(container.querySelectorAll('path.link.run')).toHaveLength(1);
+  });
+
+  it('shows the tools of a subagent as tags in its own card', async () => {
+    resetApp({
+      agents: [
+        agent({
+          id: 'a1',
+          plan: planWith([], { agents: [sub('s1')] }),
+          canvas: { tools: [], subs: [{ call: 's1', tools: [kit('skill', 'tdd')] }] },
+        }),
+      ],
+    });
+    show();
+    await zoomTo(1);
+    expect(screen.getByRole('article', { name: /sous-agent s1/ }).querySelector('.kit')?.textContent).toContain('tdd');
   });
 
   describe('an agent that waits', () => {

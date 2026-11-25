@@ -18,6 +18,7 @@ import {
   packRows,
   SUB,
   teamOf,
+  TOOL,
   toolCards,
   waits,
 } from './workspace-layout';
@@ -113,6 +114,38 @@ describe('the compass of the workspace', () => {
     expect(f.links.map((l) => l.state).sort()).toEqual(['failed', 'plan', 'run']);
     expect(f.north).not.toBeNull();
     expect(frameOf(agent()).north).toBeNull();
+  });
+  it('puts the tools above the card, out of the way of the plan, with a link only while a call runs', () => {
+    const a = agent({
+      plan: planWith(['pending']),
+      canvas: { tools: [kit('skill', 'tdd'), kit('plugin', 'github', 1, 1), kit('plugin', 'z')], subs: [] },
+    });
+    const f = frameOf(a);
+    expect(f.west.map((t) => t.name)).toEqual(['tdd', 'github', 'z']);
+    for (const t of f.west) {
+      expect(t.y).toBeGreaterThanOrEqual(f.north!.h + GAP);
+      expect(t.y + TOOL.h).toBeLessThan(f.centre.y);
+      // The plan's link runs down the middle of the card: no tool card on it.
+      expect(t.x + t.w < CARD.w / 2 || t.x > CARD.w / 2).toBe(true);
+    }
+    expect(f.links.filter((l) => l.id.startsWith('tool:'))).toEqual([expect.objectContaining({ id: 'tool:plugin:github', state: 'run' })]);
+    const link = f.links.find((l) => l.id === 'tool:plugin:github')!;
+    expect(link.y2).toBe(f.centre.y);
+    expect(f.h).toBe(f.centre.y + f.centre.h);
+  });
+  it("sends the flow of a subagent's call to the subagent", () => {
+    const a = agent({
+      plan: planWith([], { agents: [sub('s1')] }),
+      canvas: { tools: [], subs: [{ call: 's1', tools: [kit('plugin', 'github', 1, 1)] }] },
+    });
+    const f = frameOf(a);
+    const s1 = f.team.find((t) => t.id === 's1')!;
+    const link = f.links.find((l) => l.id === 'tool:plugin:github')!;
+    expect([link.x2, link.y2]).toEqual([s1.x, s1.y + s1.h / 2]);
+  });
+  it('keeps the card where it was without tools', () => {
+    expect(frameOf(agent()).centre.y).toBe(0);
+    expect(frameOf(agent()).west).toEqual([]);
   });
   it('packs frames in rows', () => {
     const r = packRows(

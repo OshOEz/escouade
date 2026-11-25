@@ -26,6 +26,16 @@ export default {
   },
   /** The word on the dotted link from an agent to one it launched. */
   launched: 'a lancé',
+  /** A skill or a plugin, on its card above the agent's, and as a tag on a subagent's card. */
+  tool: {
+    label: '{kind} {name}, {calls}',
+    skill: 'Skill',
+    plugin: 'Plugin',
+    calls: { one: '{count} appel', other: '{count} appels' },
+    running: 'en cours',
+    /** The tags of a subagent's card: its tools. */
+    tags: 'Outils : {names}',
+  },
   /** The team, east of the card: its subagents and background tasks. */
   team: {
     task: 'tâche {n}',

@@ -22,6 +22,14 @@ export default defineZone('workspace', {
     question: { one: 'question', other: 'questions' },
   },
   launched: 'launched',
+  tool: {
+    label: '{kind} {name}, {calls}',
+    skill: 'Skill',
+    plugin: 'Plugin',
+    calls: { one: '{count} call', other: '{count} calls' },
+    running: 'running',
+    tags: 'Tools: {names}',
+  },
   team: {
     task: 'task {n}',
     write: 'Write to {name}',

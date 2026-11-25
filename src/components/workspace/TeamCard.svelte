@@ -17,6 +17,7 @@
   import { askMaxH, SUB, type TeamItem } from '../../lib/workspace-layout';
   import AskInset from './AskInset.svelte';
   import MicButton from '../MicButton.svelte';
+  import Icon from '../Icon.svelte';
   import StatusDot from '../StatusDot.svelte';
 
   let {
@@ -40,6 +41,8 @@
   // Its dot is an agent's: green while it runs, red failed, grey ended.
   const dot = $derived(sub?.status === 'running' ? 'running' : sub?.status === 'failed' ? 'error' : 'done');
   const canWrite = $derived(!!sub && canWriteSub(agent, sub));
+  // Its skills and plugins: their cards are above the agent's, a tag of each stays on its own.
+  const kits = $derived(sub ? (agent.canvas?.subs.find((s) => s.call === sub.id)?.tools ?? []) : []);
   // One of its agent's requests is its own (the agent's card keeps the conversation loaded while it waits).
   // Read only while it waits (lazy), and apart: a conversation made inside a derived would not be tracked by it.
   const conv = $derived(conversationOf(agent.id));
@@ -149,6 +152,13 @@
         .join(' · ')}
     </p>
     {#if sub.doing}<p class="doing mono">{sub.doing}</p>{/if}
+    {#if kits.length}
+      <p class="kits" aria-label={t('workspace.tool.tags', { names: kits.map((k) => k.name).join(', ') })}>
+        {#each kits as k (`${k.kind}:${k.name}`)}<span class="kit {k.kind}" class:running={k.running > 0}
+            ><Icon name={k.kind === 'skill' ? 'scroll' : 'box'} size={11} />{k.name}</span
+          >{/each}
+      </p>
+    {/if}
     {#if asks}<AskInset {agent} mine={(s) => s === sub.id} onfocusback={focusBack} maxH={askMaxH(innerHeight, zoom, SUB.h)} />{/if}
     {#if canWrite}
       <div class="bar">
@@ -247,6 +257,31 @@
   .cmd {
     color: var(--soft);
     font-size: 11px;
+  }
+  /* Its tools: small tags, squared as their cards, coloured by kind. */
+  .kits {
+    display: flex;
+    gap: 4px;
+  }
+  .kit {
+    display: inline-flex;
+    flex: none;
+    align-items: center;
+    gap: 3px;
+    padding: 0 5px;
+    border-radius: 3px;
+    box-shadow: inset 0 0 0 1px var(--line-2);
+    color: var(--soft);
+    font-size: 10.5px;
+  }
+  .kit.skill :global(.icon) {
+    color: var(--skill);
+  }
+  .kit.plugin :global(.icon) {
+    color: var(--info);
+  }
+  .kit.running {
+    box-shadow: inset 0 0 0 1px var(--run);
   }
   .bar {
     display: flex;

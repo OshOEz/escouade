@@ -94,6 +94,11 @@ export const BG = { w: 240, h: 60 } as const;
  */
 export const PLAN = { w: 560, head: 72, folded: 62, row: 30, pad: 6, list: 232 } as const;
 export const GAP = 48;
+/**
+ * A tool's card (« de la doc, pas un agent »): above the agent's card, two to a row around an aisle in the middle of the
+ * card, where the plan's link runs; `row`: between two rows; `drop`: from the last row to the card, for a flow to show.
+ */
+export const TOOL = { w: 168, h: 60, aisle: 24, row: 12, drop: 32 } as const;
 /** The pile of the ended subagents, and the gap between two cards of the team. */
 const FOLDED_H = 40;
 const STACK_GAP = 16;
@@ -112,7 +117,17 @@ export type Link = { id: string; state: LinkState; d: string };
 /** A link of a frame, from (x1, y1) to (x2, y2) in the frame's coordinates: a curve, or a straight line. */
 export type Edge = { id: string; state: LinkState; x1: number; y1: number; x2: number; y2: number; straight?: boolean };
 
-export type Frame = { agentId: string; w: number; h: number; centre: Box; north: Box | null; team: Placed<TeamItem>[]; links: Edge[] };
+/** `west`: the tools, drawn above the card (the user's choice); the name is the side's, for the keyboard's order. */
+export type Frame = {
+  agentId: string;
+  w: number;
+  h: number;
+  centre: Box;
+  north: Box | null;
+  west: Placed<ToolCard>[];
+  team: Placed<TeamItem>[];
+  links: Edge[];
+};
 /**
  * `teamOpen`: its pile of ended subagents unfolded; `seenAt`: when it was unfolded last; `centreH`: its card's height;
  * `planOpen`: its plan's banner unfolded, as in its conversation (default); `teamH`: the height measured of a card of
@@ -198,13 +213,23 @@ export function frameOf(agent: Agent, opts: FrameOpts = {}): Frame {
 }
 
 function computeFrame(agent: Agent, opts: FrameOpts): Frame {
-  const rows = planView(agent)?.rows ?? [];
+  const tasks = planView(agent)?.rows ?? [];
   let north: Box | null = null;
-  if (rows.length) {
-    const h = opts.planOpen === false ? PLAN.folded : PLAN.head + Math.min(rows.length * PLAN.row + PLAN.pad, PLAN.list);
+  if (tasks.length) {
+    const h = opts.planOpen === false ? PLAN.folded : PLAN.head + Math.min(tasks.length * PLAN.row + PLAN.pad, PLAN.list);
     north = { x: 0, y: 0, w: PLAN.w, h };
   }
-  const centre: Box = { x: 0, y: north ? north.h + GAP : 0, w: CARD.w, h: opts.centreH ?? CARD.h };
+  const top = north ? north.h + GAP : 0;
+  const west: Placed<ToolCard>[] = toolCards(agent).map((t, i) => ({
+    ...t,
+    x: (i % 2) * (TOOL.w + TOOL.aisle),
+    y: top + Math.floor(i / 2) * (TOOL.h + TOOL.row),
+    w: TOOL.w,
+    h: TOOL.h,
+  }));
+  const rows = Math.ceil(west.length / 2);
+  const centreY = rows ? top + rows * (TOOL.h + TOOL.row) - TOOL.row + TOOL.drop : top;
+  const centre: Box = { x: 0, y: centreY, w: CARD.w, h: opts.centreH ?? CARD.h };
   const links: Edge[] = [];
   if (north) {
     const x = CARD.w / 2;
@@ -265,13 +290,24 @@ function computeFrame(agent: Agent, opts: FrameOpts): Frame {
     links.push({ id: `${agent.id}:${i.id}`, state, x1: from.x + from.w, y1: from.y + from.h / 2, x2: i.x, y2: i.y + i.h / 2 });
   }
 
-  const boxes: Box[] = [centre, ...(north ? [north] : []), ...team];
+  // A flow from a tool only while one of its calls runs: to the subagent it runs in when it has a card, else to the agent.
+  // shortcut: a flow from an upper row passes under the cards below it; route it down the aisle if that reads badly.
+  for (const t of west) {
+    if (!t.running) continue;
+    const id = `tool:${t.kind}:${t.name}`;
+    const to = t.runningIn ? placed.get(t.runningIn) : undefined;
+    if (to) links.push({ id, state: 'run', x1: t.x + t.w, y1: t.y + t.h / 2, x2: to.x, y2: to.y + to.h / 2 });
+    else links.push({ id, state: 'run', x1: t.x + t.w / 2, y1: t.y + t.h, x2: t.x + t.w / 2, y2: centre.y, straight: true });
+  }
+
+  const boxes: Box[] = [centre, ...(north ? [north] : []), ...west, ...team];
   return {
     agentId: agent.id,
     w: Math.max(...boxes.map((b) => b.x + b.w)),
     h: Math.max(...boxes.map((b) => b.y + b.h)),
     centre,
     north,
+    west,
     team,
     links,
   };

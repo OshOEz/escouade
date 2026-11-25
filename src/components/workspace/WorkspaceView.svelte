@@ -158,11 +158,13 @@
     if (!f) return;
     let b: Box = f.centre;
     if (side === 'north' && f.north) b = f.north;
-    if (side === 'east' && f.team.length) {
-      const x = Math.min(...f.team.map((i) => i.x));
-      const y = Math.min(...f.team.map((i) => i.y));
-      b = { x, y, w: Math.max(...f.team.map((i) => i.x + i.w)) - x, h: Math.max(...f.team.map((i) => i.y + i.h)) - y };
-    }
+    const span = (bs: Box[]): Box => {
+      const x = Math.min(...bs.map((i) => i.x));
+      const y = Math.min(...bs.map((i) => i.y));
+      return { x, y, w: Math.max(...bs.map((i) => i.x + i.w)) - x, h: Math.max(...bs.map((i) => i.y + i.h)) - y };
+    };
+    if (side === 'east' && f.team.length) b = span(f.team);
+    if (side === 'west' && f.west.length) b = span(f.west);
     const [px, py] = centre();
     place({ zoom: 1, x: px - (f.x + b.x + b.w / 2), y: py - (f.y + b.y + b.h / 2) });
   }

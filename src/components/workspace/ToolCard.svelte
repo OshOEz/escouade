@@ -1,0 +1,88 @@
+<script lang="ts">
+  // A skill or a plugin of an agent near on the « Workspace », above its card (spec 2026-11-25-vue-workspace-design.md,
+  // « L'outillage », and the user's choice: above the card, not west of it). Squarer than an agent's card, a coloured
+  // edge on top: « de la doc, pas un agent ». While one of its calls runs, a green ring and the word.
+  import { t } from '../../lib/i18n';
+  import { tip } from '../../lib/tip';
+  import type { ToolCard } from '../../lib/workspace-layout';
+  import Icon from '../Icon.svelte';
+
+  let { tool }: { tool: ToolCard } = $props();
+
+  const calls = $derived(t('workspace.tool.calls', { count: tool.calls }));
+</script>
+
+<article
+  class="tool {tool.kind}"
+  class:running={tool.running}
+  data-side="west"
+  aria-label={t('workspace.tool.label', { kind: t(`workspace.tool.${tool.kind}`), name: tool.name, calls })}
+>
+  <header>
+    <span class="ico"><Icon name={tool.kind === 'skill' ? 'scroll' : 'box'} size={14} /></span>
+    <b class="name" use:tip={tool.name}>{tool.name}</b>
+  </header>
+  <p>
+    <span class="kind">{t(`workspace.tool.${tool.kind}`)}</span> · <span class="num">{calls}</span>
+    {#if tool.running}<span class="st">{t('workspace.tool.running')}</span>{/if}
+  </p>
+</article>
+
+<style>
+  .tool {
+    --edge: var(--skill);
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    gap: 3px;
+    box-sizing: border-box;
+    width: 100%;
+    height: 100%;
+    padding: 6px 10px;
+    border-top: 2px solid var(--edge);
+    border-radius: 3px;
+    background: color-mix(in oklch, var(--text) 6%, var(--panel));
+    box-shadow: inset 0 0 0 1px var(--line-2);
+    color: var(--text);
+    font-size: 12.5px;
+  }
+  .tool.plugin {
+    --edge: var(--info);
+  }
+  .tool.running {
+    box-shadow:
+      inset 0 0 0 1px var(--run),
+      0 0 0 3px color-mix(in oklch, var(--run) 18%, transparent);
+  }
+  header {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+  }
+  .ico {
+    color: var(--edge);
+  }
+  .name {
+    min-width: 0;
+    overflow: hidden;
+    font-weight: 590;
+    letter-spacing: -0.01em;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  p {
+    display: flex;
+    gap: 4px;
+    margin: 0;
+    overflow: hidden;
+    color: var(--muted);
+    font-size: 11.5px;
+    white-space: nowrap;
+  }
+  .st {
+    margin-left: auto;
+    color: var(--run);
+    font-weight: 550;
+  }
+</style>
