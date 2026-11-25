@@ -2,7 +2,23 @@ import { describe, expect, it } from 'vitest';
 import { agent } from '../test/ipc';
 import { planWith, planWithRunning, req, sub } from '../test/workspace';
 import { planView } from './plan';
-import { canvasOrder, DISC, discOf, frameOf, GAP, layoutFar, layoutNear, packRows, SUB, teamOf } from './workspace-layout';
+import type { Box } from './workspace-camera';
+import {
+  canvasOrder,
+  cardMaxH,
+  CARD,
+  DISC,
+  discOf,
+  frameOf,
+  GAP,
+  layoutFar,
+  layoutFarOpen,
+  layoutNear,
+  packRows,
+  SUB,
+  teamOf,
+  waits,
+} from './workspace-layout';
 
 describe('the discs of the workspace', () => {
   it('says the state in one word', () => {
@@ -119,5 +135,42 @@ describe('the compass of the workspace', () => {
     const r = layoutNear([a, b]);
     const x = r.items[1].x + 360 / 2;
     expect(r.links[0].d).toBe(`M ${x} ${b.centre.y} L ${x} ${b.north!.h}`);
+  });
+});
+
+describe('the cards that grow with a question', () => {
+  const overlaps = (a: Box, b: Box) => a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
+
+  it('moves the team down when a card grows', () => {
+    const a = agent({ plan: planWith([], { agents: [sub('s1'), sub('s2')] }) });
+    const f = frameOf(a, { teamH: { s1: 300 } });
+    expect(f.team[1].y).toBe(f.team[0].y + 300 + 16);
+    expect(f.team[0].h).toBe(300);
+  });
+
+  it('grows the frame with its card', () => {
+    const a = agent();
+    expect(frameOf(a, { centreH: 500 }).h).toBe(frameOf(a).h + 500 - CARD.h);
+  });
+
+  it('caps a card at 70 % of the window', () => {
+    expect(cardMaxH(1000)).toBe(700);
+  });
+
+  it('tells an agent that waits', () => {
+    expect(waits(agent({ status: 'waiting' }))).toBe(true);
+    expect(waits(agent({ pending: ['q1'], requests: [req('q1')] }))).toBe(true);
+    expect(waits(agent())).toBe(false);
+  });
+
+  it('unfolds a waiting agent among the discs, without overlap', () => {
+    const discs = ['a1', 'a2', 'a3'].map((id) => discOf(agent({ id })));
+    const open = new Map([['a2', frameOf(agent({ id: 'a2', status: 'waiting', requests: [req('q')] }))]]);
+    const r = layoutFarOpen(discs, open);
+    expect(r.frames.map((f) => f.agentId)).toEqual(['a2']);
+    expect(r.discs.map((d) => d.agentId)).toEqual(['a1', 'a3']);
+    const boxes = [...r.discs, ...r.frames];
+    for (const p of boxes) for (const q of boxes) if (p !== q) expect(overlaps(p, q)).toBe(false);
+    expect(r.w).toBeGreaterThan(0);
   });
 });

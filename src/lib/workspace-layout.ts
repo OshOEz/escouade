@@ -93,9 +93,16 @@ export type Edge = { id: string; state: LinkState; x1: number; y1: number; x2: n
 export type Frame = { agentId: string; w: number; h: number; centre: Box; north: Box | null; team: Placed<TeamItem>[]; links: Edge[] };
 /**
  * `teamOpen`: its pile of ended subagents unfolded; `seenAt`: when it was unfolded last; `centreH`: its card's height;
- * `planOpen`: its plan's banner unfolded, as in its conversation (default).
+ * `planOpen`: its plan's banner unfolded, as in its conversation (default); `teamH`: the height measured of a card of
+ * its team, by its id (none or 0: its size by default).
  */
-export type FrameOpts = { teamOpen?: boolean; seenAt?: number; centreH?: number; planOpen?: boolean };
+export type FrameOpts = { teamOpen?: boolean; seenAt?: number; centreH?: number; planOpen?: boolean; teamH?: Record<string, number> };
+
+/** The highest a card grows (an agent that waits, its questions in it), at a zoom of 1: past it, its inset scrolls. */
+export const cardMaxH = (windowH: number): number => Math.round(0.7 * windowH);
+
+/** It waits for the user: a question or a permission. Such an agent is unfolded at every altitude. */
+export const waits = (agent: Agent): boolean => agent.status === 'waiting' || agent.pending.length > 0;
 
 /**
  * The east of `agent`: its subagents running, its background tasks running, then the ended subagents folded in one pile
@@ -126,7 +133,7 @@ export function teamOf(agent: Agent, opts: FrameOpts): TeamItem[] {
   return out;
 }
 
-const sizeOf = (i: TeamItem): Size => (i.kind === 'sub' ? SUB : i.kind === 'bg' ? BG : { w: SUB.w, h: FOLDED_H });
+const defaultSize = (i: TeamItem): Size => (i.kind === 'sub' ? SUB : i.kind === 'bg' ? BG : { w: SUB.w, h: FOLDED_H });
 
 /** A curve from (x1, y1), leaving to the right, to (x2, y2), arriving from the left. */
 function curve(x1: number, y1: number, x2: number, y2: number): string {
@@ -148,7 +155,7 @@ const frames = new WeakMap<Agent, { key: string; frame: Frame }>();
  * column on the right. A subagent whose parent is in the team, and a background task whose subagent is, lie right of it.
  */
 export function frameOf(agent: Agent, opts: FrameOpts = {}): Frame {
-  const key = `${!!opts.teamOpen}|${opts.seenAt ?? 0}|${opts.centreH ?? ''}|${opts.planOpen !== false}`;
+  const key = `${!!opts.teamOpen}|${opts.seenAt ?? 0}|${opts.centreH ?? ''}|${opts.planOpen !== false}|${JSON.stringify(opts.teamH ?? {})}`;
   const known = frames.get(agent);
   if (known?.key === key) return known.frame;
   const frame = computeFrame(agent, opts);
@@ -181,6 +188,10 @@ function computeFrame(agent: Agent, opts: FrameOpts): Frame {
   const rowEnd = new Map<string, { root: string; x: number }>();
   const colX = CARD.w + 2 * GAP;
   let colY = centre.y;
+  const sizeOf = (i: TeamItem): Size => {
+    const s = defaultSize(i);
+    return opts.teamH?.[i.id] ? { w: s.w, h: opts.teamH[i.id] } : s;
+  };
   const place = (i: TeamItem, x: number, y: number) => placed.set(i.id, { ...i, ...sizeOf(i), x, y });
   // The column first, then each child right of its parent, as long as one is placed.
   for (const i of items)
@@ -295,4 +306,25 @@ export function layoutNear(
     links.push(linkOf({ id: `launched:${from}:${to}`, state: 'launched', x1: a.x + a.w, y1: y(a), x2: b.x, y2: y(b) }, 0, 0));
   }
   return { ...packed, links };
+}
+
+/**
+ * Afar, with the agents that wait unfolded (spec, « Un agent qui attend l'utilisateur est toujours déplié ») : in the
+ * order of `discs`, an agent in `open` is its frame, the others their disc; all in rows, with no overlap.
+ */
+export function layoutFarOpen(
+  discs: Disc[],
+  open: Map<string, Frame>,
+  maxW = 2400,
+): { discs: Placed<Disc>[]; frames: Placed<Frame>[]; links: Link[]; w: number; h: number } {
+  type Item = { disc: Disc; frame?: Frame; w: number; h: number };
+  const items: Item[] = discs.map((disc) => {
+    const frame = open.get(disc.agentId);
+    return frame ? { disc, frame, w: frame.w, h: frame.h } : { disc, w: DISC.w, h: DISC.h };
+  });
+  const packed = packRows(items, maxW, GAP);
+  const placedDiscs = packed.items.filter((i) => !i.frame).map((i) => ({ ...i.disc, x: i.x, y: i.y, w: i.w, h: i.h }));
+  const frames = packed.items.filter((i) => i.frame).map((i) => ({ ...i.frame!, x: i.x, y: i.y }));
+  const links = frames.flatMap((f) => f.links.map((e) => linkOf(e, f.x, f.y)));
+  return { discs: placedDiscs, frames, links, w: packed.w, h: packed.h };
 }
