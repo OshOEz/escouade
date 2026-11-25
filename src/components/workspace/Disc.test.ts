@@ -4,7 +4,7 @@ import { setLang } from '../../lib/i18n';
 import { discOf, type Side } from '../../lib/workspace-layout';
 import type { Agent } from '../../lib/types';
 import { agent } from '../../test/ipc';
-import { kit, planWith, planWithRunning, req } from '../../test/workspace';
+import { kit, planWith, planWithRunning, req, ribbon } from '../../test/workspace';
 import DiscHost from './Disc.host.test.svelte';
 
 const renderDisc = (a: Agent, onpick: (id: string, side?: Side) => void = () => {}) =>
@@ -65,5 +65,16 @@ describe('the disc of an agent', () => {
   it('says the tools under their number', () => {
     renderDisc(agent({ canvas: { tools: [kit('skill', 'x'), kit('plugin', 'y')], subs: [] } }));
     expect(screen.getByText('outils')).toBeTruthy();
+  });
+
+  it('says the CI in a word, red when it fails', () => {
+    const a = agent();
+    const { container } = render(DiscHost, {
+      disc: { ...discOf(a, [ribbon('ci', 'failure')]), x: 0, y: 0, w: 300, h: 300 },
+      agent: a,
+      onpick: () => {},
+    });
+    expect(screen.getByText('CI')).toBeTruthy();
+    expect(container.querySelector('.sat.ci.failure')).toBeTruthy();
   });
 });

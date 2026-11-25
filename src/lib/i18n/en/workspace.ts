@@ -20,6 +20,21 @@ export default defineZone('workspace', {
     team: { one: 'team', other: 'team' },
     tools: { one: 'tool', other: 'tools' },
     question: { one: 'question', other: 'questions' },
+    deliverables: { one: 'deliverable', other: 'deliverables' },
+    ci: 'CI',
+  },
+  land: {
+    title: 'Landing zone · {landed} landed, {coming} on approach',
+    empty: 'Nothing has landed yet',
+    artifact: 'Artifact · version {n} · {ago}',
+    open: 'Open ↗',
+  },
+  ribbon: {
+    label: '{kind}, {state}',
+    output: 'Output',
+    checks: '{total} checks, {failed} failed',
+    kind: { tests: 'Tests', ci: 'CI', deploy: 'Deployment' },
+    state: { running: 'running', success: 'passed', failure: 'failed' },
   },
   launched: 'launched',
   tool: {

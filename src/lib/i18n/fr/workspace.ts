@@ -23,6 +23,23 @@ export default {
     team: { one: 'équipe', other: 'équipe' },
     tools: { one: 'outil', other: 'outils' },
     question: { one: 'question', other: 'questions' },
+    deliverables: { one: 'livrable', other: 'livrables' },
+    ci: 'CI',
+  },
+  /** The landing zone, south of a compass: what the agent delivered, its remote CI, its deployments. */
+  land: {
+    title: 'Zone d’atterrissage · {landed} posés, {coming} en approche',
+    empty: 'Rien n’a encore atterri',
+    artifact: 'Artefact · version {n} · {ago}',
+    open: 'Ouvrir ↗',
+  },
+  /** A card with a ribbon: a test run, a CI, a deployment. */
+  ribbon: {
+    label: '{kind}, {state}',
+    output: 'Sortie',
+    checks: '{total} contrôles, {failed} en échec',
+    kind: { tests: 'Tests', ci: 'CI', deploy: 'Déploiement' },
+    state: { running: 'en cours', success: 'réussi', failure: 'en échec' },
   },
   /** The word on the dotted link from an agent to one it launched. */
   launched: 'a lancé',

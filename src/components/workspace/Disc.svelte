@@ -64,8 +64,7 @@
       };
     });
   });
-  const satWord = (kind: SatKind, count: number) =>
-    kind === 'team' || kind === 'tools' || kind === 'question' ? t(`workspace.sat.${kind}`, { count }) : '';
+  const satWord = (kind: SatKind, count: number) => t(`workspace.sat.${kind}`, { count });
 
   function key(e: KeyboardEvent) {
     if (e.key !== 'Enter' && e.key !== ' ') return;
@@ -104,7 +103,7 @@
     <!-- Clicked, it brings the side it stands for; not a stop of the Tab key of its own: a button in a button is not read. -->
     <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
     <path
-      class="sat {s.kind}"
+      class="sat {s.kind} {s.state ?? ''}"
       d={s.d}
       onclick={(e) => {
         e.stopPropagation();
@@ -202,6 +201,16 @@
   }
   .sat.tools {
     stroke: var(--skill);
+  }
+  .sat.deliverables {
+    stroke: var(--info);
+  }
+  .sat.ci {
+    stroke: var(--run);
+  }
+  .sat.ci.failure {
+    stroke: var(--del);
+    fill: color-mix(in oklch, var(--del) 18%, var(--raise));
   }
   .sat.question {
     stroke: var(--wait);
