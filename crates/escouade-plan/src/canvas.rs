@@ -34,6 +34,8 @@ pub struct KitUse {
     /// Its calls running now: none survives a reload.
     #[serde(skip_deserializing)]
     pub running: u32,
+    /// Its first call.
+    pub first_at: i64,
     pub last_at: i64,
 }
 
@@ -66,7 +68,8 @@ pub fn kit_of(name: &str, input: &Value) -> Option<(KitKind, String)> {
         let skill = input["skill"].as_str()?.trim();
         return (!skill.is_empty()).then(|| (KitKind::Skill, skill.to_string()));
     }
-    let (server, _) = name.strip_prefix("mcp__")?.split_once("__")?;
+    // The tool's name is after the last `__`: a server's own name may hold some.
+    let (server, _) = name.strip_prefix("mcp__")?.rsplit_once("__")?;
     (!server.is_empty()).then(|| (KitKind::Plugin, server.to_string()))
 }
 
@@ -101,7 +104,12 @@ impl Canvas {
         if let Some(call) = parent {
             if !self.subs.iter().any(|t| t.call == call) {
                 if self.subs.len() >= MAX_THREADS {
-                    self.subs.remove(0);
+                    // The first come with nothing running: a call that runs keeps its card and its flow.
+                    let idle = self
+                        .subs
+                        .iter()
+                        .position(|t| t.tools.iter().all(|k| k.running == 0));
+                    self.subs.remove(idle.unwrap_or(0));
                 }
                 self.subs.push(ThreadKit {
                     call: call.to_string(),
@@ -121,7 +129,8 @@ impl Canvas {
             return Change::View;
         }
         if tools.len() >= MAX_KIT {
-            let oldest = (0..tools.len()).min_by_key(|&i| tools[i].last_at);
+            // The least recent of those with nothing running, else the least recent.
+            let oldest = (0..tools.len()).min_by_key(|&i| (tools[i].running > 0, tools[i].last_at));
             tools.remove(oldest.expect("full"));
         }
         tools.push(KitUse {
@@ -129,6 +138,7 @@ impl Canvas {
             name: kit,
             calls: 1,
             running: 1,
+            first_at: now,
             last_at: now,
         });
         Change::Saved

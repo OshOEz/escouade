@@ -102,3 +102,56 @@ fn keeps_at_most_30_subagent_threads() {
     assert_eq!(c.subs[0].call, "a2");
     assert!(!c.is_empty());
 }
+
+#[test]
+fn a_server_named_with_two_underscores_is_kept_whole() {
+    assert_eq!(
+        kit_of("mcp__my__srv__get", &json!({})),
+        Some((KitKind::Plugin, "my__srv".into()))
+    );
+    assert_eq!(
+        kit_of("mcp__plugin_superpowers_chrome__click", &json!({})),
+        Some((KitKind::Plugin, "plugin_superpowers_chrome".into()))
+    );
+}
+
+#[test]
+fn keeps_the_time_of_the_first_call() {
+    let mut c = Canvas::default();
+    c.on_tool_use(None, "k1", "Skill", &json!({"skill": "x"}), 3);
+    c.on_tool_use(None, "k2", "Skill", &json!({"skill": "x"}), 8);
+    assert_eq!((c.tools[0].first_at, c.tools[0].last_at), (3, 8));
+}
+
+#[test]
+fn the_caps_spare_what_runs() {
+    let mut c = Canvas::default();
+    c.on_tool_use(None, "run", "mcp__s0__t", &json!({}), 0);
+    for i in 1..MAX_KIT as i64 {
+        let id = format!("k{i}");
+        c.on_tool_use(None, &id, &format!("mcp__s{i}__t"), &json!({}), i);
+        c.on_tool_result(&id, false, "", i);
+    }
+    c.on_tool_use(None, "new", "mcp__new__t", &json!({}), 99);
+    assert!(c.tools.iter().any(|t| t.name == "s0"));
+    assert!(c.tools.iter().all(|t| t.name != "s1"));
+
+    let mut c = Canvas::default();
+    c.on_tool_use(Some("a0"), "run", "Skill", &json!({"skill": "x"}), 0);
+    for i in 1..=MAX_THREADS {
+        let id = format!("k{i}");
+        c.on_tool_use(
+            Some(&format!("a{i}")),
+            &id,
+            "Skill",
+            &json!({"skill": "x"}),
+            i as i64,
+        );
+        c.on_tool_result(&id, false, "", i as i64);
+    }
+    assert_eq!(c.subs.len(), MAX_THREADS);
+    assert_eq!(
+        (c.subs[0].call.as_str(), c.subs[1].call.as_str()),
+        ("a0", "a2")
+    );
+}

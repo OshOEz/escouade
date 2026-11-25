@@ -4182,6 +4182,18 @@ npm test")
     }
 
     #[test]
+    fn the_canvas_counts_once_a_call_read_again_after_a_restart() {
+        let mut a = rt();
+        call(&mut a, None, "k1", "Skill", json!({"skill": "x"}));
+        returns(&mut a, "k1", "ok", Value::Null);
+        // A restart: the canvas comes back from the disk, the calls it had seen forgotten.
+        a.meta.canvas =
+            serde_json::from_value(serde_json::to_value(&a.meta.canvas).unwrap()).unwrap();
+        call(&mut a, None, "k1", "Skill", json!({"skill": "x"}));
+        assert_eq!(a.view().meta.canvas.unwrap().tools[0].calls, 1);
+    }
+
+    #[test]
     fn a_reloaded_agent_has_no_call_of_its_canvas_running() {
         let mut a = rt();
         call(&mut a, None, "k1", "Skill", json!({"skill": "x"}));
