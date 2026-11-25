@@ -397,7 +397,7 @@ function computeFrame(agent: Agent, opts: FrameOpts): Frame {
             : i.sub.status === 'failed'
               ? 'failed'
               : 'done';
-    links.push({ id: `${agent.id}:${i.id}`, state, x1: from.x + from.w, y1: from.y + from.h / 2, x2: i.x, y2: i.y + i.h / 2 });
+    links.push({ id: `${agent.id}:team:${i.id}`, state, x1: from.x + from.w, y1: from.y + from.h / 2, x2: i.x, y2: i.y + i.h / 2 });
   }
 
   // A flow from a tool only while one of its calls runs, under no card: from the tool's side on the aisle, down the aisle
@@ -407,7 +407,7 @@ function computeFrame(agent: Agent, opts: FrameOpts): Frame {
   const gapY = centre.y - TOOL.drop / 2;
   for (const t of west) {
     if (!t.running) continue;
-    const id = `tool:${t.kind}:${t.name}`;
+    const id = `${agent.id}:tool:${t.kind}:${t.name}`;
     const left = t.x === 0;
     const [x1, y1] = [left ? t.x + t.w : t.x, t.y + t.h / 2];
     const lane = aisle + (left ? -6 : 6);

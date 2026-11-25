@@ -82,6 +82,17 @@ describe('the workspace', () => {
     expect(pieces(container).map((p) => p.id)).toEqual(['a1']);
   });
 
+  it('draws two agents running the same tool, in two projects on the canvas of every project', () => {
+    const canvas = { tools: [kit('plugin', 'escouade', 1, 1)], subs: [] };
+    resetApp({
+      projects: [project(), project({ id: 'p2', name: 'autre' })],
+      agents: [agent({ id: 'a1', canvas }), agent({ id: 'a2', canvas }), agent({ id: 'a3', projectId: 'p2', canvas })],
+    });
+    const { container } = render(WorkspaceView, {});
+    expect(pieces(container).map((p) => p.id)).toEqual(['a1', 'a2', 'a3']);
+    expect(container.querySelectorAll('path.link.run')).toHaveLength(3);
+  });
+
   it('says when there is no agent', () => {
     resetApp({ agents: [] });
     show();

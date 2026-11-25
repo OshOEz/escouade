@@ -104,8 +104,10 @@ describe('the compass of the workspace', () => {
       // The plan's link runs down the middle of the card: no tool card on it.
       expect(t.x + t.w < CARD.w / 2 || t.x > CARD.w / 2).toBe(true);
     }
-    expect(f.links.filter((l) => l.id.startsWith('tool:'))).toEqual([expect.objectContaining({ id: 'tool:plugin:github', state: 'run' })]);
-    const link = f.links.find((l) => l.id === 'tool:plugin:github')!;
+    expect(f.links.filter((l) => l.id.startsWith('a1:tool:'))).toEqual([
+      expect.objectContaining({ id: 'a1:tool:plugin:github', state: 'run' }),
+    ]);
+    const link = f.links.find((l) => l.id === 'a1:tool:plugin:github')!;
     expect(link.y2).toBe(f.centre.y);
     expect(f.south!.y).toBe(f.centre.y + f.centre.h + GAP);
   });
@@ -142,11 +144,11 @@ describe('the compass of the workspace', () => {
     const tools = [kit('skill', 'a', 1, 1), kit('skill', 'b', 1, 1), kit('skill', 'c'), kit('skill', 'd'), kit('skill', 'e')];
     const f = frameOf(agent({ canvas: { tools, subs: [] } }));
     const r = layoutNear([f]);
-    for (const id of ['tool:skill:a', 'tool:skill:b']) {
+    for (const id of ['a1:tool:skill:a', 'a1:tool:skill:b']) {
       const d = r.links.find((l) => l.id === id)!.d;
       clear(
         d,
-        [...f.west, f.centre].filter((t) => !('name' in t) || `tool:skill:${t.name}` !== id),
+        [...f.west, f.centre].filter((t) => !('name' in t) || `a1:tool:skill:${t.name}` !== id),
       );
       const end = pointsOf(d).at(-1)!;
       expect(end[1]).toBe(f.centre.y);
@@ -163,7 +165,7 @@ describe('the compass of the workspace', () => {
     });
     const f = frameOf(a);
     const gh = f.west.find((t) => t.name === 'github')!;
-    const d = layoutNear([f]).links.find((l) => l.id === 'tool:plugin:github')!.d;
+    const d = layoutNear([f]).links.find((l) => l.id === 'a1:tool:plugin:github')!.d;
     clear(d, [...f.west.filter((t) => t !== gh), f.centre, ...f.team]);
   });
 
@@ -174,7 +176,7 @@ describe('the compass of the workspace', () => {
     });
     const f = frameOf(a);
     const s1 = f.team.find((t) => t.id === 's1')!;
-    const link = f.links.find((l) => l.id === 'tool:plugin:github')!;
+    const link = f.links.find((l) => l.id === 'a1:tool:plugin:github')!;
     expect([link.x2, link.y2]).toEqual([s1.x, s1.y + s1.h / 2]);
   });
   it('keeps the card where it was without tools', () => {
@@ -239,6 +241,25 @@ describe('the compass of the workspace', () => {
       `M ${x} ${COLUMN.head + a.h + GAP + b.centre.y} L ${x} ${COLUMN.head + a.h + GAP + b.north!.h}`,
     );
     expect(r.links.some((l) => l.id === 'launched:a:b')).toBe(true);
+  });
+  it('gives every link of the canvas its own id: two agents on the same tool, in two projects too', () => {
+    const busy = (id: string, projectId = 'p1') =>
+      agent({
+        id,
+        projectId,
+        plan: planWith(['inProgress'], { agents: [sub('s1'), sub('s2', 'completed')] }),
+        canvas: { tools: [kit('plugin', 'escouade', 1, 1)], subs: [{ call: 's1', tools: [kit('skill', 'tdd', 1, 1)] }] },
+      });
+    const near = layoutColumns(
+      [
+        { projectId: 'p1', frames: [frameOf(busy('a1')), frameOf(busy('a2'))], launched: [['a1', 'a2']] },
+        { projectId: 'p2', frames: [frameOf(busy('b1', 'p2')), frameOf(busy('b2', 'p2'), { level: 'mid' })], launched: [['b1', 'b2']] },
+      ],
+      true,
+    );
+    const ids = near.links.map((l) => l.id);
+    expect(ids.filter((id) => id.endsWith(':tool:plugin:escouade'))).toHaveLength(3);
+    expect(new Set(ids).size).toBe(ids.length);
   });
   it('lays one project out with no head, as it stacks', () => {
     const a = frameOf(agent({ id: 'a' }));
