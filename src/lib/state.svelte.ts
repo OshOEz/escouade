@@ -775,8 +775,12 @@ class AppState {
   });
   /** The editor is the content that has the keyboard: alone on screen, or in the active pane. */
   editorActive = $derived(this.panesOn ? this.panes?.active === 'editor' : this.editorOn);
-  /** The keys that answer a request go to `agentId`'s: shown alone, or in the active pane. */
+  /**
+   * The keys that answer a request go to `agentId`'s: shown alone, or in the active pane. On the « Workspace », to none:
+   * several cards may wait at once, one answers them by a click or by Tab.
+   */
   keysFor(agentId: string): boolean {
+    if (this.workspaceOn) return false;
     return !this.panesOn || this.panes?.active === `agent:${agentId}`;
   }
   /** The agents on screen: the one shown alone, or those of the panes. */

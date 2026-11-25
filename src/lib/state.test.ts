@@ -1239,6 +1239,13 @@ describe('workspace', () => {
     expect(app.panesOn).toBe(false);
   });
 
+  it('gives the answer keys up on the canvas: several cards may wait at once', () => {
+    resetApp({ projects: [project({ id: 'p1' })], agents: [agent({ id: 'a1', projectId: 'p1' })] });
+    expect(app.keysFor('a1')).toBe(true);
+    app.openWorkspace('p1');
+    expect(app.keysFor('a1')).toBe(false);
+  });
+
   it('is closed by the other views', () => {
     app.openWorkspace('p1');
     app.openDocs('p1');

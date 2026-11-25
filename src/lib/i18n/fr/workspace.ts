@@ -46,6 +46,8 @@ export default {
     files: { one: '{count} fichier', other: '{count} fichiers' },
     label: '{name}, {state}',
   },
+  /** The requests of an agent that waits, in its card. `fromSub`: on the agent's card, a subagent's question is on its own. */
+  ask: { loading: 'Chargement de la question…', fromSub: 'question de {name}' },
   /** A disc, for a screen reader: « release-2-3, En cours ». */
   discLabel: '{name}, {state}',
   /** What a screen reader hears after it: the plan, then the questions. */

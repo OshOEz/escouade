@@ -14,3 +14,10 @@ export function observeWidth(node: HTMLElement, onWidth: (width: number) => void
   ro.observe(node);
   return { destroy: () => ro.disconnect() };
 }
+
+/** Like `observeWidth`, for the height of its border box, before any transform (a zoomed canvas keeps its own). */
+export function observeHeight(node: HTMLElement, onHeight: (height: number) => void) {
+  const ro = new ResizeObserver(() => onHeight(node.offsetHeight));
+  ro.observe(node);
+  return { destroy: () => ro.disconnect() };
+}

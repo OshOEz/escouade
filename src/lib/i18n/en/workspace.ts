@@ -39,6 +39,7 @@ export default defineZone('workspace', {
     files: { one: '{count} file', other: '{count} files' },
     label: '{name}, {state}',
   },
+  ask: { loading: 'Loading the question…', fromSub: 'question from {name}' },
   discLabel: '{name}, {state}',
   discProgress: { one: '{count} of {total} task done', other: '{count} of {total} tasks done' },
 });

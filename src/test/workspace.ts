@@ -1,5 +1,5 @@
 // Builders for the tests of the « Workspace »: plans and pending requests, smallest that the window accepts.
-import type { BgTask, PendingRequest, PlanState, PlanTask, SubAgent } from '../lib/types';
+import type { BgTask, PendingRequest, PermissionItem, PlanState, PlanTask, QuestionItem, SubAgent } from '../lib/types';
 
 const task = (i: number, status: PlanTask['status']): PlanTask => ({ id: String(i + 1), title: `Tâche ${i + 1}`, status });
 
@@ -48,4 +48,29 @@ export const req = (id: string, kind: PendingRequest['kind'] = 'question'): Pend
   questions: [{ question: `Question ${id} ?`, options: ['Oui', 'Non'] }],
   cut: false,
   defaultNo: false,
+});
+
+/** The conversation's item of a question `id` (as `req(id)` sums it up): « Question <id> ? », « Oui » or « Non ». */
+export const questionItem = (id: string, over: Partial<QuestionItem> = {}): QuestionItem => ({
+  kind: 'question',
+  id,
+  toolUseId: `t-${id}`,
+  questions: [{ question: `Question ${id} ?`, header: '', multiSelect: false, options: [{ label: 'Oui' }, { label: 'Non' }] }],
+  answers: null,
+  ts: 1,
+  ...over,
+});
+
+/** The conversation's item of a permission `id` to run `command`. */
+export const permissionItem = (id: string, command: string, over: Partial<PermissionItem> = {}): PermissionItem => ({
+  kind: 'permission',
+  id,
+  toolUseId: `t-${id}`,
+  toolName: 'Bash',
+  input: { command },
+  canAlways: false,
+  defaultNo: false,
+  decision: null,
+  ts: 1,
+  ...over,
 });

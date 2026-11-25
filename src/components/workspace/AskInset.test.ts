@@ -1,0 +1,71 @@
+import { fireEvent, render, screen } from '@testing-library/svelte';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { conversationOf, dropConversation } from '../../lib/conversations.svelte';
+import { setLang } from '../../lib/i18n';
+import { app } from '../../lib/state.svelte';
+import { agent, fakeBackend, resetApp } from '../../test/ipc';
+import { permissionItem, questionItem, req } from '../../test/workspace';
+import AskInset from './AskInset.svelte';
+
+describe('the questions on a card of the workspace', () => {
+  let backend: ReturnType<typeof fakeBackend>;
+  let let_go: () => void;
+  beforeEach(() => {
+    setLang('fr');
+    backend = fakeBackend({
+      get_conversation: () => [questionItem('q1'), questionItem('q2', { sub: 's1' }), permissionItem('p1', 'rm -rf dist')],
+    });
+    resetApp({
+      agents: [
+        agent({ id: 'a1', status: 'waiting', pending: ['q1', 'q2', 'p1'], requests: [req('q1'), req('q2'), req('p1', 'permission')] }),
+      ],
+    });
+    // The agent's card keeps its conversation loaded while it waits (AgentCard).
+    let_go = conversationOf('a1').show();
+  });
+  afterEach(() => {
+    let_go();
+    dropConversation('a1');
+  });
+
+  it("shows the agent's own requests with the conversation's cards", async () => {
+    render(AskInset, { agent: app.agents.a1, sub: undefined, maxH: 700 });
+    expect(await screen.findByText('Question q1 ?')).toBeTruthy();
+    expect(screen.getByText('rm -rf dist')).toBeTruthy();
+    // That of the subagent s1 is on its own card.
+    expect(screen.queryByText('Question q2 ?')).toBeNull();
+  });
+
+  it('shows those of a subagent on its card', async () => {
+    render(AskInset, { agent: app.agents.a1, sub: 's1', maxH: 700 });
+    expect(await screen.findByText('Question q2 ?')).toBeTruthy();
+    expect(screen.queryByText('Question q1 ?')).toBeNull();
+  });
+
+  it("answers by the conversation's card", async () => {
+    render(AskInset, { agent: app.agents.a1, sub: undefined, maxH: 700 });
+    await fireEvent.click(await screen.findByRole('button', { name: 'Oui' }));
+    expect(backend.called('answer_question')[0].args).toMatchObject({ id: 'a1', requestId: 'q1', answers: { 'Question q1 ?': 'Oui' } });
+  });
+
+  it('scrolls past its height', async () => {
+    const { container } = render(AskInset, { agent: app.agents.a1, sub: undefined, maxH: 420 });
+    await screen.findByText('Question q1 ?');
+    expect((container.querySelector('.ask') as HTMLElement).style.maxHeight).toBe('420px');
+  });
+
+  it('says its question loads', () => {
+    dropConversation('a1');
+    backend = fakeBackend({ get_conversation: () => new Promise(() => {}) });
+    let_go = conversationOf('a1').show();
+    render(AskInset, { agent: app.agents.a1, sub: undefined, maxH: 700 });
+    expect(screen.getByText('Chargement de la question…')).toBeTruthy();
+  });
+
+  it('shows nothing once answered', async () => {
+    const { container, rerender } = render(AskInset, { agent: app.agents.a1, sub: undefined, maxH: 700 });
+    await screen.findByText('Question q1 ?');
+    await rerender({ agent: { ...app.agents.a1, status: 'running', pending: [], requests: [] }, sub: undefined, maxH: 700 });
+    expect(container.querySelector('.ask')).toBeNull();
+  });
+});
