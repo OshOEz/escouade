@@ -306,6 +306,8 @@
 <style>
   /* The work area's own surface (App.svelte, `.work`), with discreet dots. */
   .ws {
+    /* The surface of its cards and piles: the sidebar's selected card (rgba of --fg-rgb at 6 %), opaque over the links. */
+    --ws-card: color-mix(in oklch, var(--text) 6%, var(--panel));
     position: relative;
     flex: 1;
     min-width: 0;

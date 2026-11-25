@@ -42,7 +42,7 @@
     padding: 6px 10px;
     border-top: 2px solid var(--edge);
     border-radius: 3px;
-    background: color-mix(in oklch, var(--text) 6%, var(--panel));
+    background: var(--ws-card);
     box-shadow: inset 0 0 0 1px var(--line-2);
     color: var(--text);
     font-size: 12.5px;

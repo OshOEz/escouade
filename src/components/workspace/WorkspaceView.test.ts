@@ -1,5 +1,5 @@
 import { tick } from 'svelte';
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { fireEvent, render, screen } from '@testing-library/svelte';
@@ -318,6 +318,15 @@ describe('the workspace', () => {
     // jsdom lays out nothing: the stylesheet says the tags wrap, the card's height being measured.
     const source = readFileSync(resolve(dirname(fileURLToPath(import.meta.url)), 'TeamCard.svelte'), 'utf8');
     expect(source.slice(source.indexOf('  .kits {'), source.indexOf('}', source.indexOf('  .kits {')))).toContain('flex-wrap: wrap');
+  });
+
+  it('paints every card and pile of the canvas with one surface, opaque over the links', () => {
+    const here = dirname(fileURLToPath(import.meta.url));
+    for (const file of readdirSync(here).filter((f) => f.endsWith('.svelte') && f !== 'WorkspaceView.svelte')) {
+      const source = readFileSync(resolve(here, file), 'utf8');
+      expect(source, file).not.toMatch(/rgba\(var\(--fg-rgb\), 0\.04\)|color-mix\(in oklch, var\(--text\) 6%/);
+    }
+    expect(readFileSync(resolve(here, 'WorkspaceView.svelte'), 'utf8')).toContain('--ws-card: color-mix(in oklch, var(--text) 6%, var(--panel));');
   });
 
   describe('an agent that waits', () => {

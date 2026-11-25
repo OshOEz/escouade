@@ -110,7 +110,7 @@
     height: 100%;
     border: none;
     border-radius: 3px;
-    background: rgba(var(--fg-rgb), 0.04);
+    background: var(--ws-card);
     box-shadow: inset 0 0 0 1px var(--line-2);
     color: var(--soft);
     font: inherit;

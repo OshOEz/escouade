@@ -26,7 +26,7 @@
     height: 100%;
     border: none;
     border-radius: 3px;
-    background: color-mix(in oklch, var(--text) 6%, var(--panel));
+    background: var(--ws-card);
     box-shadow:
       inset 0 0 0 1px var(--line-2),
       4px 4px 0 -1px var(--panel),

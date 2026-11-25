@@ -258,7 +258,7 @@
     width: 100%;
     padding: 8px 10px 9px;
     border-radius: 9px;
-    background: color-mix(in oklch, var(--text) 6%, var(--panel));
+    background: var(--ws-card);
     box-shadow: inset 0 0 0 1px var(--line-2);
     color: var(--text);
     font-size: 13px;
