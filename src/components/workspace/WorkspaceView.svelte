@@ -53,7 +53,6 @@
   // From afar, an agent that waits is unfolded among the discs (« toujours déplié, quelle que soit l'altitude »).
   const far = $derived(layoutFarOpen(ordered.order.map(discOf), new Map(ordered.order.filter(waits).map((a) => [a.id, frameAt(a)]))));
   const near = $derived(layoutNear(ordered.order.map(frameAt), ordered.launched));
-  const byId = $derived(new Map(agents.map((a) => [a.id, a])));
   const questions = $derived(agents.reduce((n, a) => n + (a.requests?.length ?? 0), 0));
 
   let view: HTMLDivElement | undefined = $state();
@@ -61,6 +60,8 @@
   const alt = $derived(altitude(cam.zoom));
   /** The compasses on screen: all of them near, those of the agents that wait from afar. */
   const shown = $derived(alt === 'far' ? far : { links: near.links, w: near.w, h: near.h, frames: near.items });
+  const discAt = $derived(new Map(far.discs.map((d) => [d.agentId, d])));
+  const compassAt = $derived(new Map(shown.frames.map((f) => [f.agentId, f])));
   let drag: { x: number; y: number } | null = $state(null);
   /** The user placed the camera: a resize of the window no longer fits it. */
   let moved = false;
@@ -197,18 +198,16 @@
 >
   {#if agents.length}
     <div class="world" style:transform="translate({cam.x}px, {cam.y}px) scale({cam.zoom})">
-      {#if alt === 'far'}
-        <svg width={far.w} height={far.h} viewBox="0 0 {far.w} {far.h}" overflow="visible">
-          {#each far.discs as d (d.agentId)}
-            {@const a = byId.get(d.agentId)}
-            {#if a}<Disc disc={d} agent={a} onpick={pick} />{/if}
-          {/each}
-        </svg>
-      {/if}
       {#if shown.frames.length}<Links links={shown.links} w={shown.w} h={shown.h} />{/if}
-      {#each shown.frames as f (f.agentId)}
-        {@const a = byId.get(f.agentId)}
-        {#if a}<Compass frame={f} agent={a} ontoggle={toggleTeam} onsize={(id, h) => sized(f.agentId, id, h)} zoom={cam.zoom} />{/if}
+      <!-- One piece per agent, in the canvas's order: the keyboard goes from one to the next as the eye does. -->
+      {#each ordered.order as a (a.id)}
+        {@const d = alt === 'far' ? discAt.get(a.id) : undefined}
+        {@const f = compassAt.get(a.id)}
+        {#if d}
+          <svg class="one" width="1" height="1" overflow="visible"><Disc disc={d} agent={a} onpick={pick} /></svg>
+        {:else if f}
+          <Compass frame={f} agent={a} ontoggle={toggleTeam} onsize={(id, h) => sized(a.id, id, h)} zoom={cam.zoom} />
+        {/if}
       {/each}
     </div>
   {:else}
@@ -253,7 +252,11 @@
     top: 0;
     transform-origin: 0 0;
   }
-  .world svg {
+  /* A disc's own: drawn at its place in the world, past its 1 px box. */
+  .world svg.one {
+    position: absolute;
+    left: 0;
+    top: 0;
     display: block;
   }
   .empty {

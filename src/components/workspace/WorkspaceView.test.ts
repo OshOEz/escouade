@@ -328,5 +328,32 @@ describe('the workspace', () => {
       expect(zoomShown()).toBe(zoom);
       expect(capAt()).toBe(want());
     });
+
+    it('is tabbed to in its place among the discs', async () => {
+      fakeBackend({ get_conversation: () => [questionItem('q1')] });
+      resetApp({
+        agents: [
+          agent({ id: 'a1', name: 'un' }),
+          agent({ id: 'a2', name: 'deux', status: 'waiting', pending: ['q1'], requests: [req('q1')] }),
+          agent({ id: 'a3', name: 'trois' }),
+        ],
+      });
+      const { container } = show();
+      await screen.findByText('Question q1 ?');
+      // The order of the DOM is the order on screen: row by row, left to right.
+      const pieces = [...container.querySelectorAll('.world [data-agent]')].map((e) => {
+        const [x, y] = e.matches('g')
+          ? e
+              .getAttribute('transform')!
+              .match(/translate\((.+) (.+)\)/)!
+              .slice(1)
+              .map(Number)
+          : [parseFloat((e as HTMLElement).style.left), parseFloat((e as HTMLElement).style.top)];
+        return { id: e.getAttribute('data-agent'), x, y };
+      });
+      expect(pieces).toHaveLength(3);
+      const onScreen = [...pieces].sort((p, q) => p.y - q.y || p.x - q.x);
+      expect(pieces.map((p) => p.id)).toEqual(onScreen.map((p) => p.id));
+    });
   });
 });
