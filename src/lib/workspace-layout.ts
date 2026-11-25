@@ -154,6 +154,8 @@ export type ToolPile = { hidden: number; open: boolean };
  */
 export type Level = 'mid' | 'near';
 export const PILE = { w: 184, h: 64 } as const;
+/** The west and south piles on the card's axis: the plan's line goes through their middle, not along an edge. */
+const PILE_X = (CARD.w - PILE.w) / 2;
 export type PileSide = 'west' | 'east' | 'south';
 export type Pile = { side: PileSide; count: number; running: boolean };
 /** The pile of the ended subagents, and the gap between two cards of the team. */
@@ -339,7 +341,7 @@ function computeFrame(agent: Agent, opts: FrameOpts): Frame {
         'west',
         tools.length,
         tools.some((t) => t.running),
-        0,
+        PILE_X,
         top,
       )
     : null;
@@ -374,7 +376,7 @@ function computeFrame(agent: Agent, opts: FrameOpts): Frame {
   const pileLink = (p: Placed<Pile>, e: Omit<Edge, 'id' | 'state'>) =>
     links.push({ id: `${agent.id}:pile:${p.side}`, state: p.running ? 'run' : 'plan', ...e });
   if (westPile) {
-    const x = PILE.w / 2;
+    const x = CARD.w / 2;
     pileLink(westPile, { x1: x, y1: westPile.y + PILE.h, x2: x, y2: centre.y, straight: true });
   }
 
@@ -501,12 +503,12 @@ function computeFrame(agent: Agent, opts: FrameOpts): Frame {
       'south',
       landing.length,
       landing.some((l) => !landed(l)),
-      0,
+      PILE_X,
       southY,
     );
     if (pile) {
       pileLink(pile, { x1: x, y1: own.y + own.h, x2: x, y2: pile.y, straight: true });
-      w = Math.max(w, PILE.w);
+      w = Math.max(w, PILE_X + PILE.w);
       h = pile.y + PILE.h;
     }
   } else {

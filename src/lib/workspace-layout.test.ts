@@ -444,6 +444,14 @@ describe('the piles at mid-height', () => {
     expect(f.northMini).toBe(true);
     expect(f.h).toBeLessThan(frameOf(busy(), { landing: [art(true)] }).h);
   });
+  it("sets the west and south piles on the card's axis: the plan's line goes through their middle, not along an edge", () => {
+    const f = frameOf(busy(), { level: 'mid', landing: [art(true)] });
+    const axis = f.links.find((l) => l.id.endsWith(':plan'))!.x1;
+    for (const p of f.piles.filter((p) => p.side !== 'east')) expect(p.x + p.w / 2).toBe(axis);
+    for (const side of ['west', 'south']) {
+      expect(f.links.find((l) => l.id.endsWith(`:pile:${side}`))!.x1).toBe(axis);
+    }
+  });
   it('unfolds the sides asked for', () => {
     const f = frameOf(busy(), { level: 'mid', unfolded: ['west'] });
     expect(f.west).toHaveLength(2);
