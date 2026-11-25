@@ -289,6 +289,18 @@ Un clic sur un satellite zoome sur l'agent ; il cadre le côté concerné une fo
 - Une CI locale se reconnaît aussi aux commandes qui ressemblent à des tests.
 - La spec reste dans le dépôt, à côté des autres specs.
 
+## Choix validés le 25 novembre, après le lot 1
+
+- Les lancements du Kanban (`test:<agent>:…`) sont les serveurs de la recette, pas des tests : ils ne comptent pas comme
+  CI locale. Une CI locale est une commande de tests lancée par l'agent ou un sous-agent.
+- Les tests ont leur case à part : une carte de tests posée à côté de l'agent ou du sous-agent qui les lance, près de
+  ses outils, plutôt que dans la zone d'atterrissage (à préciser au lot 5).
+- Un déploiement se rattache à un agent par sa PR, et aussi par sa branche : le cœur apprend à savoir si le commit d'un
+  déploiement est sur la branche d'un agent (travail dans le cœur, lot 5).
+- Écrire à un sous-agent suit la règle actuelle du cœur (un sous-agent en arrière-plan qui a un `taskId`).
+- Les cartes à ruban montrent la branche, pas le commit ni la version, qu'aucune donnée de la fenêtre ne porte.
+- Le bouton Éditeur ouvre un menu sur tout le bouton.
+
 ## Mes choix, à corriger
 
 L'utilisateur n'a pas tranché ces points ; j'ai pris ma recommandation.

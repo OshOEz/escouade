@@ -21,6 +21,11 @@ en cartes « artefact » et « ruban ». Trois composants les dessinent ; `frame
 viennent les données » et ses précisions CI distante, CI locale, déploiement, « De loin » (satellites livrables et CI),
 lot 5 de « Les lots », « Choix validés le 25 novembre »).
 
+
+> **À reprendre avant exécution** (réponses du 25 novembre, voir la spec, « Choix validés … après le lot 1 ») : retirer
+> les lancements du Kanban de la CI locale ; poser la carte de tests à côté de l'agent ou du sous-agent qui les lance,
+> près de ses outils, et non sur la zone ; ajouter au cœur le rattachement d'un déploiement par la branche de l'agent.
+
 ## Global Constraints
 
 - La zone : « contour pointillé, fond hachuré, repères d'angle, titre « Zone d'atterrissage · n posés, n en approche ».
