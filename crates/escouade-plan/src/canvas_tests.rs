@@ -289,3 +289,48 @@ fn a_summary_with_only_artifacts_or_commands_is_not_empty() {
     c.on_tool_use(Some("a1"), "b1", "Bash", &json!({"command": "ls"}), 1);
     assert!(!c.is_empty());
 }
+
+#[test]
+fn a_tool_saved_before_its_first_call_was_kept_starts_at_its_last() {
+    let c: Canvas = serde_json::from_value(json!({
+        "tools": [{"kind": "skill", "name": "a", "calls": 2, "lastAt": 7}],
+        "subs": [{"call": "s", "tools": [{"kind": "plugin", "name": "b", "firstAt": 3, "lastAt": 9}]}]
+    }))
+    .unwrap();
+    assert_eq!(c.tools[0].first_at, 7);
+    assert_eq!(c.subs[0].tools[0].first_at, 3);
+}
+
+#[test]
+fn an_asset_uploaded_with_artifact_is_no_version_of_the_page() {
+    let mut c = Canvas::default();
+    let asset =
+        json!({"url": "https://claude.ai/artifact/x", "file_path": "logo.png", "asset": true});
+    assert_eq!(
+        c.on_tool_use(None, "a1", "Artifact", &asset, 1),
+        Change::None
+    );
+    let assets = json!({"url": "https://claude.ai/artifact/x", "file_paths": ["a.png", "b.png"]});
+    assert_eq!(
+        c.on_tool_use(None, "a2", "Artifact", &assets, 2),
+        Change::None
+    );
+    assert!(c.publishing.is_empty());
+}
+
+#[test]
+fn a_terminal_call_read_again_after_a_restart_is_one_run() {
+    let mut c = Canvas::default();
+    let bash = json!({"command": "npm test"});
+    c.on_tool_use(None, "b1", "Bash", &bash, 1);
+    c.on_tool_use(Some("s1"), "b2", "Bash", &bash, 1);
+    // The app restarted: what it remembered of the calls it saw is gone, the canvas is read back.
+    let mut c: Canvas = serde_json::from_value(serde_json::to_value(&c).unwrap()).unwrap();
+    assert_eq!(c.on_tool_use(None, "b1", "Bash", &bash, 5), Change::None);
+    assert_eq!(
+        c.on_tool_use(Some("s1"), "b2", "Bash", &bash, 5),
+        Change::None
+    );
+    assert_eq!(c.commands.len(), 1);
+    assert_eq!(c.subs[0].commands.len(), 1);
+}

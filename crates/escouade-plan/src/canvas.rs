@@ -32,17 +32,44 @@ pub enum KitKind {
 
 /// A skill or a plugin a thread used.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", default)]
+#[serde(rename_all = "camelCase", default, from = "StoredKitUse")]
 pub struct KitUse {
     pub kind: KitKind,
     pub name: String,
     pub calls: u32,
-    /// Its calls running now: none survives a reload.
-    #[serde(skip_deserializing)]
+    /// Its calls running now: none survives a reload (`StoredKitUse`).
     pub running: u32,
     /// Its first call.
     pub first_at: i64,
     pub last_at: i64,
+}
+
+/// A `KitUse` as saved: one saved before its first call was kept (no `firstAt`) starts at its last.
+#[derive(Deserialize, Default)]
+#[serde(rename_all = "camelCase", default)]
+struct StoredKitUse {
+    kind: KitKind,
+    name: String,
+    calls: u32,
+    first_at: i64,
+    last_at: i64,
+}
+
+impl From<StoredKitUse> for KitUse {
+    fn from(s: StoredKitUse) -> Self {
+        KitUse {
+            kind: s.kind,
+            name: s.name,
+            calls: s.calls,
+            running: 0,
+            first_at: if s.first_at == 0 {
+                s.last_at
+            } else {
+                s.first_at
+            },
+            last_at: s.last_at,
+        }
+    }
 }
 
 /// The skills and plugins of a subagent, by its call.
@@ -200,7 +227,10 @@ impl Canvas {
         now: i64,
     ) -> Change {
         if name == "Artifact" {
-            let publish = input["action"].as_str().is_none_or(|a| a == "publish");
+            // A file uploaded to a page's assets (`asset`, `file_paths`) is no version of it.
+            let publish = input["action"].as_str().is_none_or(|a| a == "publish")
+                && input["asset"].as_bool() != Some(true)
+                && input.get("file_paths").is_none();
             if !publish || !self.seen.first_time(id) {
                 return Change::None;
             }
@@ -220,6 +250,11 @@ impl Canvas {
         }
         if name == "Bash" {
             if input["run_in_background"].as_bool() == Some(true) || !self.seen.first_time(id) {
+                return Change::None;
+            }
+            // A call still running read again after a restart (`seen` is not saved) is the same run.
+            let subs = self.subs.iter().flat_map(|t| t.commands.iter());
+            if self.commands.iter().chain(subs).any(|c| c.call == id) {
                 return Change::None;
             }
             let command = input["command"].as_str().unwrap_or("").trim();
