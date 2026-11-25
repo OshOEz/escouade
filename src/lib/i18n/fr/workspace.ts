@@ -57,7 +57,13 @@ export default {
     fold: 'Replier les outils',
   },
   /** A side of a compass folded at mid-height, a button that unfolds it. */
-  pile: { west: 'Outils ×{count}', east: 'Équipe ×{count}', south: 'Livrables ×{count}' },
+  pile: {
+    west: 'Outils ×{count}',
+    east: 'Équipe ×{count}',
+    south: 'Livrables ×{count}',
+    /** Its name for a screen reader: what a click does. */
+    unfold: { west: 'Déplier les outils ({count})', east: "Déplier l'équipe ({count})", south: 'Déplier les livrables ({count})' },
+  },
   /** The team, east of the card: its subagents and background tasks. */
   team: {
     task: 'tâche {n}',

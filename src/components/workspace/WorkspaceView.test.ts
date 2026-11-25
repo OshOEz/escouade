@@ -1,3 +1,4 @@
+import { tick } from 'svelte';
 import { readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -225,10 +226,10 @@ describe('the workspace', () => {
     resetApp({ agents: [agent({ id: 'a1', canvas: { tools: [kit('skill', 'a'), kit('plugin', 'b')], subs: [] } })] });
     show();
     await zoomTo(0.59);
-    expect(screen.getByRole('button', { name: 'Outils ×2' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Déplier les outils (2)' })).toBeTruthy();
     expect(screen.queryByRole('article', { name: /Skill a/ })).toBeNull();
     await zoomTo(0.92);
-    expect(screen.queryByRole('button', { name: 'Outils ×2' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Déplier les outils (2)' })).toBeNull();
     expect(screen.getByRole('article', { name: /Skill a/ })).toBeTruthy();
   });
 
@@ -237,8 +238,11 @@ describe('the workspace', () => {
     const { container } = show();
     await zoomTo(0.59);
     const before = centreOf(container, 'a1');
-    await fireEvent.click(screen.getByRole('button', { name: 'Outils ×1' }));
+    await fireEvent.click(screen.getByRole('button', { name: 'Déplier les outils (1)' }));
     expect(zoomShown()).toBe('59 %');
+    // The focus on what came out of the pile, not lost on the body.
+    await tick();
+    expect(document.activeElement?.closest('[data-agent="a1"] [data-side="west"]')).toBeTruthy();
     expect(screen.getByRole('article', { name: /Skill a/ })).toBeTruthy();
     expect(centreOf(container, 'a1')).toEqual(before);
   });

@@ -48,7 +48,13 @@ export default defineZone('workspace', {
     more: { one: '+ {count} tool', other: '+ {count} tools' },
     fold: 'Fold the tools',
   },
-  pile: { west: 'Tools ×{count}', east: 'Team ×{count}', south: 'Deliverables ×{count}' },
+  pile: {
+    west: 'Tools ×{count}',
+    east: 'Team ×{count}',
+    south: 'Deliverables ×{count}',
+    /** Its name for a screen reader: what a click does. */
+    unfold: { west: 'Unfold the tools ({count})', east: 'Unfold the team ({count})', south: 'Unfold the deliverables ({count})' },
+  },
   team: {
     task: 'task {n}',
     write: 'Write to {name}',

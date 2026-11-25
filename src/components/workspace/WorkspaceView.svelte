@@ -2,7 +2,7 @@
   // The « Workspace » of a project (spec 2026-11-25-vue-workspace-design.md, « La toile »): its agents on a dotted
   // canvas one moves and zooms, each a disc seen from afar, its compass from 45 %, its sides in piles up to 80 %. The canvas is one world, transformed
   // by the camera; the controls float above it.
-  import { untrack } from 'svelte';
+  import { tick, untrack } from 'svelte';
   import { t } from '../../lib/i18n';
   import { menu } from '../../lib/menu.svelte';
   import { app } from '../../lib/state.svelte';
@@ -212,12 +212,22 @@
     unfolded[agentId] = [...(unfolded[agentId] ?? []), side];
     const to = at();
     if (from && to) place(keepAnchor(cam, from, to));
+    // The pile is gone with the focus: it goes to the first of what came out of it.
+    void tick().then(() => {
+      const items = [...(view?.querySelectorAll<HTMLElement>(`[data-agent="${agentId}"] [data-side="${side}"]`) ?? [])];
+      const first = items.flatMap((el) => [el, ...el.querySelectorAll<HTMLElement>('*')]).find((el) => el.matches(FOCUSABLE)) ?? items[0];
+      if (!first) return;
+      if (!first.matches(FOCUSABLE)) first.setAttribute('tabindex', '-1');
+      first.focus();
+    });
   }
 
   function toggleTeam(agentId: string) {
     teamOpen[agentId] = !teamOpen[agentId];
     if (teamOpen[agentId]) seenAt[agentId] = Date.now();
   }
+
+  const FOCUSABLE = 'button:not([disabled]), a[href], input, textarea, select, [tabindex]:not([tabindex="-1"])';
 
   // Escape leaves the canvas, unless the focus is in a field, or a menu, a dialog or a popover is open (it is theirs).
   const OVER = '[aria-modal="true"], [role="dialog"], [role="listbox"], [role="menu"]';

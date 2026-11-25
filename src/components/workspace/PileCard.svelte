@@ -1,6 +1,6 @@
 <script lang="ts">
   // A side of a compass folded at mid-height (spec 2026-11-25-vue-workspace-design.md, « À mi-hauteur : des piles ») :
-  // a button that says its side and its count, and unfolds it; ringed while one of its items runs.
+  // a button that says its side and its count, and unfolds it (its name says so: it is gone once unfolded); ringed while one of its items runs.
   import { t } from '../../lib/i18n';
   import type { Pile, PileSide } from '../../lib/workspace-layout';
 
@@ -12,7 +12,7 @@
   class="pile"
   class:running={pile.running}
   data-side={pile.side}
-  aria-expanded="false"
+  aria-label={t(`workspace.pile.unfold.${pile.side}`, { count: pile.count })}
   onclick={() => onunfold(pile.side)}
 >
   {t(`workspace.pile.${pile.side}`, { count: pile.count })}
