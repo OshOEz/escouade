@@ -1286,6 +1286,34 @@ describe('workspace', () => {
     app.selectProject('p1');
     expect(app.workspaceOn).toBe(true);
   });
+
+  describe('of every project, from « Vue d’ensemble »', () => {
+    it('opens over the overview and goes back to it', () => {
+      app.selectProject('p1');
+      app.openOverviewCanvas();
+      expect(app.ui.view).toBe('overview');
+      expect(app.overviewCanvasOn).toBe(true);
+      expect(app.workspaceOn).toBe(false);
+      app.closeOverviewCanvas();
+      expect(app.overviewCanvasOn).toBe(false);
+      expect(app.ui.view).toBe('overview');
+    });
+
+    it('gives the answer keys up, as the canvas of a project', () => {
+      resetApp({ projects: [project({ id: 'p1' })], agents: [agent({ id: 'a1', projectId: 'p1' })] });
+      app.openOverviewCanvas();
+      expect(app.keysFor('a1')).toBe(false);
+    });
+
+    it('is closed by the other views: the overview opens again on its list', () => {
+      resetApp({ projects: [project({ id: 'p1' })], agents: [agent({ id: 'a1', projectId: 'p1' })] });
+      app.openOverviewCanvas();
+      app.selectAgent('a1');
+      expect(app.overviewCanvasOn).toBe(false);
+      app.openOverview();
+      expect(app.overviewCanvasOn).toBe(false);
+    });
+  });
 });
 
 describe('board', () => {

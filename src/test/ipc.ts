@@ -441,6 +441,7 @@ export function resetApp(over: { projects?: Project[]; agents?: Agent[]; tickets
   app.prDrafts = {};
   app.docs = {};
   app.workspace = {};
+  app.overviewCanvas = false;
   app.docsSpace = {};
   app.docsPage = {};
   app.docsEdit = null;

@@ -576,6 +576,8 @@ class AppState {
   prs = $state<Record<string, boolean>>({});
   /** Projects whose « Workspace » (the canvas of the agents) fills the main area, in place of the other views (not saved). */
   workspace = $state<Record<string, boolean>>({});
+  /** « Vue d’ensemble » shows the « Workspace » of every project in place of its list (not saved). */
+  overviewCanvas = $state(false);
   /** The reviews written by an agent (ESC-66), by project then by pull request. */
   prReviews = $state<Record<string, Record<number, AgentReview>>>({});
   /** The pull request whose view (ESC-457) fills the « Pull requests » view, by project: its number, its repository when
@@ -672,6 +674,8 @@ class AppState {
   );
   /** The « Workspace » of the project on screen is shown: the canvas of its agents. */
   workspaceOn = $derived(this.ui.view === 'project' && !!this.project && !!this.workspace[this.project.id]);
+  /** The « Workspace » of every project is shown, over « Vue d’ensemble ». */
+  overviewCanvasOn = $derived(this.ui.view === 'overview' && this.overviewCanvas);
   /** The editor of the project on screen is open, and on screen: the statistics hide it. */
   editorOn = $derived(
     this.ui.view === 'project' &&
@@ -780,7 +784,7 @@ class AppState {
    * several cards may wait at once, one answers them by a click or by Tab.
    */
   keysFor(agentId: string): boolean {
-    if (this.workspaceOn) return false;
+    if (this.workspaceOn || this.overviewCanvasOn) return false;
     return !this.panesOn || this.panes?.active === `agent:${agentId}`;
   }
   /** The agents on screen: the one shown alone, or those of the panes. */
@@ -1504,7 +1508,20 @@ class AppState {
     if (this.ui.view === 'overview') return;
     this.overviewFrom = this.ui.view;
     this.ui.view = 'overview';
+    // Opened again, it shows its list: its canvas was left with it.
+    this.overviewCanvas = false;
     this.persistUi();
+  }
+
+  /** Shows the « Workspace » of every project over « Vue d’ensemble ». */
+  openOverviewCanvas() {
+    this.openOverview();
+    this.overviewCanvas = true;
+  }
+
+  /** Back from the canvas of every project to the list of « Vue d’ensemble ». */
+  closeOverviewCanvas() {
+    this.overviewCanvas = false;
   }
 
   /** Goes back from « Vue d’ensemble » to the view it covered. */
