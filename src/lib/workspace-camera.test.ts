@@ -39,15 +39,23 @@ describe('the camera of the workspace', () => {
 
   it('tells the altitude', () => {
     expect(altitude(0.44)).toBe('far');
-    expect(altitude(0.45)).toBe('near');
+    expect(altitude(0.45)).toBe('mid');
+    expect(altitude(0.79)).toBe('mid');
+    expect(altitude(0.8)).toBe('near');
+  });
+  it('fits the piles when the unfolded compasses do not hold', () => {
+    const view = { w: 1200, h: 800 };
+    const c = fitBest({ far: { w: 1500, h: 700 }, mid: { w: 2000, h: 1200 }, near: { w: 4000, h: 2600 } }, view);
+    expect(altitude(c.zoom)).toBe('mid');
+    expect(c.zoom).toBeLessThan(0.8);
   });
   it('caps the zoom of a fit', () => {
     expect(fit({ w: 10, h: 10 }, { w: 2000, h: 2000 }, 32, 0.44).zoom).toBe(0.44);
   });
-  it('fits the compasses when they hold at 45 % or more, else the discs', () => {
+  it('fits the compasses when they hold at 80 % or more, else the discs', () => {
     const view = { w: 1000, h: 800 };
-    expect(fitBest({ far: { w: 300, h: 300 }, near: { w: 900, h: 600 } }, view).zoom).toBeGreaterThanOrEqual(0.45);
-    const c = fitBest({ far: { w: 1500, h: 700 }, near: { w: 6000, h: 3000 } }, view);
+    expect(fitBest({ far: { w: 300, h: 300 }, mid: { w: 600, h: 400 }, near: { w: 900, h: 600 } }, view).zoom).toBeGreaterThanOrEqual(0.8);
+    const c = fitBest({ far: { w: 1500, h: 700 }, mid: { w: 6000, h: 3000 }, near: { w: 6000, h: 3000 } }, view);
     expect(altitude(c.zoom)).toBe('far');
   });
   it('keeps an agent where it was on screen', () => {

@@ -13,9 +13,11 @@ export const DOT = 18;
 /** The height the floating bar and « Quitter » take at the top of the canvas: a fit keeps the cards below it (px). */
 export const HUD_H = 56;
 
-/** Below this zoom the agents are discs seen from afar; above it, their compass. */
+/** Below this zoom the agents are discs seen from afar; above it, their compass, its sides in piles. */
 export const FAR_BELOW = 0.45;
-export type Altitude = 'far' | 'near';
+/** From this zoom up, every side of a compass is unfolded. */
+export const NEAR_FROM = 0.8;
+export type Altitude = 'far' | 'mid' | 'near';
 
 export const clampZoom = (z: number) => Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, z));
 
@@ -38,11 +40,12 @@ export function fit(world: Size, view: Size, margin = 32, max = ZOOM_MAX): Camer
   return { x: (view.w - world.w * zoom) / 2, y: (view.h - world.h * zoom) / 2, zoom };
 }
 
-export const altitude = (zoom: number): Altitude => (zoom < FAR_BELOW ? 'far' : 'near');
+export const altitude = (zoom: number): Altitude => (zoom < FAR_BELOW ? 'far' : zoom < NEAR_FROM ? 'mid' : 'near');
 
 /** The altitudes and the zooms each is seen at, from the closest to the farthest. */
 export const ALTITUDES: { name: Altitude; min: number; max: number }[] = [
-  { name: 'near', min: FAR_BELOW, max: ZOOM_MAX },
+  { name: 'near', min: NEAR_FROM, max: ZOOM_MAX },
+  { name: 'mid', min: FAR_BELOW, max: NEAR_FROM - 0.001 },
   { name: 'far', min: ZOOM_MIN, max: FAR_BELOW - 0.001 },
 ];
 
