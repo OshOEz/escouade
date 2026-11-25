@@ -21,6 +21,7 @@ export default {
   /** The word under a satellite's number. */
   sat: {
     team: { one: 'équipe', other: 'équipe' },
+    tools: { one: 'outil', other: 'outils' },
     question: { one: 'question', other: 'questions' },
   },
   /** The word on the dotted link from an agent to one it launched. */

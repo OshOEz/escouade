@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { agent } from '../test/ipc';
-import { planWith, planWithRunning, req, sub } from '../test/workspace';
+import { kit, planWith, planWithRunning, req, sub } from '../test/workspace';
 import { planView } from './plan';
 import type { Box } from './workspace-camera';
 import {
@@ -18,6 +18,7 @@ import {
   packRows,
   SUB,
   teamOf,
+  toolCards,
   waits,
 } from './workspace-layout';
 
@@ -46,6 +47,27 @@ describe('the discs of the workspace', () => {
       { kind: 'question', count: 2 },
     ]);
     expect(discOf(agent()).satellites).toEqual([]);
+  });
+
+  it('gathers the tools of the agent and its subagents', () => {
+    const a = agent({
+      canvas: { tools: [kit('plugin', 'github', 2), kit('skill', 'tdd')], subs: [{ call: 's1', tools: [kit('plugin', 'github', 3, 1)] }] },
+    });
+    expect(toolCards(a)).toEqual([
+      { kind: 'skill', name: 'tdd', calls: 1, running: false, runningIn: null },
+      { kind: 'plugin', name: 'github', calls: 5, running: true, runningIn: 's1' },
+    ]);
+    expect(toolCards(agent())).toEqual([]);
+  });
+
+  it('puts the tools satellite in its place', () => {
+    const a = agent({
+      status: 'waiting',
+      requests: [req('q')],
+      plan: planWithRunning(1, 0),
+      canvas: { tools: [kit('skill', 'x')], subs: [] },
+    });
+    expect(discOf(a).satellites.map((s) => s.kind)).toEqual(['team', 'tools', 'question']);
   });
 
   it('lays the discs out in rows', () => {

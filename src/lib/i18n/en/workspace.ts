@@ -18,6 +18,7 @@ export default defineZone('workspace', {
   progress: '{done}/{total} · {percent} %',
   sat: {
     team: { one: 'team', other: 'team' },
+    tools: { one: 'tool', other: 'tools' },
     question: { one: 'question', other: 'questions' },
   },
   launched: 'launched',

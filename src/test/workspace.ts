@@ -1,5 +1,5 @@
 // Builders for the tests of the « Workspace »: plans and pending requests, smallest that the window accepts.
-import type { BgTask, PendingRequest, PermissionItem, PlanState, PlanTask, QuestionItem, SubAgent } from '../lib/types';
+import type { BgTask, KitUse, PendingRequest, PermissionItem, PlanState, PlanTask, QuestionItem, SubAgent } from '../lib/types';
 
 const task = (i: number, status: PlanTask['status']): PlanTask => ({ id: String(i + 1), title: `Tâche ${i + 1}`, status });
 
@@ -74,3 +74,6 @@ export const permissionItem = (id: string, command: string, over: Partial<Permis
   ts: 1,
   ...over,
 });
+
+/** A skill or a plugin of a canvas summary, with its calls and those running. */
+export const kit = (kind: KitUse['kind'], name: string, calls = 1, running = 0): KitUse => ({ kind, name, calls, running, lastAt: 1 });

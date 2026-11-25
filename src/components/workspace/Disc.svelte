@@ -64,7 +64,8 @@
       };
     });
   });
-  const satWord = (kind: SatKind, count: number) => (kind === 'team' || kind === 'question' ? t(`workspace.sat.${kind}`, { count }) : '');
+  const satWord = (kind: SatKind, count: number) =>
+    kind === 'team' || kind === 'tools' || kind === 'question' ? t(`workspace.sat.${kind}`, { count }) : '';
 
   function key(e: KeyboardEvent) {
     if (e.key !== 'Enter' && e.key !== ' ') return;
@@ -198,6 +199,9 @@
   }
   .sat.team {
     stroke: var(--run);
+  }
+  .sat.tools {
+    stroke: var(--skill);
   }
   .sat.question {
     stroke: var(--wait);

@@ -4,7 +4,7 @@ import { setLang } from '../../lib/i18n';
 import { discOf, type Side } from '../../lib/workspace-layout';
 import type { Agent } from '../../lib/types';
 import { agent } from '../../test/ipc';
-import { planWith, planWithRunning, req } from '../../test/workspace';
+import { kit, planWith, planWithRunning, req } from '../../test/workspace';
 import DiscHost from './Disc.host.test.svelte';
 
 const renderDisc = (a: Agent, onpick: (id: string, side?: Side) => void = () => {}) =>
@@ -60,5 +60,10 @@ describe('the disc of an agent', () => {
     await fireEvent.click(container.querySelector('.sat.team')!);
     expect(onpick).toHaveBeenCalledWith('a9', 'east');
     expect(onpick).toHaveBeenCalledTimes(1);
+  });
+
+  it('says the tools under their number', () => {
+    renderDisc(agent({ canvas: { tools: [kit('skill', 'x'), kit('plugin', 'y')], subs: [] } }));
+    expect(screen.getByText('outils')).toBeTruthy();
   });
 });

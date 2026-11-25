@@ -5,7 +5,7 @@ import { bgRows, isRunning, ownerOf, type BgRow } from './bgtasks';
 import { drivenAgents } from './later';
 import { planView } from './plan';
 import { sidebarSubs, subagentInfo } from './subagents';
-import type { Agent, ConvItem, SubAgent, Ticket } from './types';
+import type { Agent, ConvItem, KitUse, SubAgent, Ticket } from './types';
 import type { Box, Size } from './workspace-camera';
 
 export type DiscState = 'run' | 'wait' | 'error' | 'done' | 'idle';
@@ -29,6 +29,8 @@ export function discOf(agent: Agent): Disc {
   const questions = agent.requests?.length ?? 0;
   const satellites: Satellite[] = [];
   if (team) satellites.push({ kind: 'team', count: team });
+  const tools = toolCards(agent).length;
+  if (tools) satellites.push({ kind: 'tools', count: tools });
   if (questions) satellites.push({ kind: 'question', count: questions });
   return {
     agentId: agent.id,
@@ -38,6 +40,26 @@ export function discOf(agent: Agent): Disc {
     total: mini?.total ?? 0,
     satellites,
   };
+}
+
+/** A skill or a plugin of an agent, its subagents' calls added; `runningIn`: the subagent's call a call of it runs in. */
+export type ToolCard = { kind: 'skill' | 'plugin'; name: string; calls: number; running: boolean; runningIn: string | null };
+
+/** The tools of `agent` and of its subagents, one card a tool: the skills then the plugins, each by name (a card never jumps). */
+export function toolCards(agent: Agent): ToolCard[] {
+  const canvas = agent.canvas;
+  if (!canvas) return [];
+  const cards = new Map<string, ToolCard>();
+  const threads: [string | null, KitUse[]][] = [[null, canvas.tools], ...canvas.subs.map((s): [string, KitUse[]] => [s.call, s.tools])];
+  for (const [call, tools] of threads)
+    for (const k of tools) {
+      const key = `${k.kind}:${k.name}`;
+      const card = cards.get(key) ?? { kind: k.kind, name: k.name, calls: 0, running: false, runningIn: null };
+      card.calls += k.calls;
+      if (k.running > 0 && !card.running) [card.running, card.runningIn] = [true, call];
+      cards.set(key, card);
+    }
+  return [...cards.values()].sort((a, b) => (a.kind === b.kind ? a.name.localeCompare(b.name) : a.kind === 'skill' ? -1 : 1));
 }
 
 /** The discs in rows of `perRow`, in the order given. */

@@ -2069,6 +2069,8 @@ export interface Agent {
   isola: boolean;
   /** How far it is through a plan (its task list, its subagents, its workflows), worked out by the backend from its stream; absent until it has any. */
   plan?: PlanState;
+  /** The skills and plugins it and its subagents used, for the « Workspace » (the backend's canvas summary); absent until it has any. */
+  canvas?: CanvasSummary;
   /** « Vue Claude Code »: it runs in Claude Code's own interface, in a terminal, not in Escouade's conversation view. */
   terminal: boolean;
   /**
@@ -2353,6 +2355,22 @@ export interface TaskOutput {
   truncated: boolean;
   /** Where it was read: the running process, its output file (the process is gone, or the Claude Code view), or nowhere (a workflow, a remote agent, no file). */
   source: 'process' | 'file' | 'none';
+}
+
+/** A skill (a call of `Skill`) or a plugin (the server of a tool `mcp__<server>__<tool>`) a thread used. */
+export interface KitUse {
+  kind: 'skill' | 'plugin';
+  name: string;
+  calls: number;
+  /** Its calls running now. */
+  running: number;
+  lastAt: number;
+}
+
+/** What the « Workspace » reads of an agent without its conversation: its tools, and each subagent's by its call. */
+export interface CanvasSummary {
+  tools: KitUse[];
+  subs: { call: string; tools: KitUse[] }[];
 }
 
 /** How far an agent is through a plan: its task list, its subagents, its workflows. */
