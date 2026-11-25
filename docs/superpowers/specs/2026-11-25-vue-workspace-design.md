@@ -293,8 +293,8 @@ Un clic sur un satellite zoome sur l'agent ; il cadre le côté concerné une fo
 
 - Les lancements du Kanban (`test:<agent>:…`) sont les serveurs de la recette, pas des tests : ils ne comptent pas comme
   CI locale. Une CI locale est une commande de tests lancée par l'agent ou un sous-agent.
-- Les tests ont leur case à part : une carte de tests posée à côté de l'agent ou du sous-agent qui les lance, près de
-  ses outils, plutôt que dans la zone d'atterrissage (à préciser au lot 5).
+- Les tests ont leur case à part : une carte de tests collée sous la carte de l'agent ou du sous-agent qui les lance,
+  et non dans la zone d'atterrissage.
 - Un déploiement se rattache à un agent par sa PR, et aussi par sa branche : le cœur apprend à savoir si le commit d'un
   déploiement est sur la branche d'un agent (travail dans le cœur, lot 5).
 - Écrire à un sous-agent suit la règle actuelle du cœur (un sous-agent en arrière-plan qui a un `taskId`).
