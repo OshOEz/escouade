@@ -376,10 +376,13 @@ impl Core {
                         }
                         Ok(list) => {
                             out.environments = summarize(&list);
-                            if let Ok(project) = self.project(project_id) {
-                                out.branches =
-                                    branch_deployments(&list, &self.own_commits(&project).await);
-                            }
+                            // No project, no agent: nothing left of an earlier reading.
+                            out.branches = match self.project(project_id) {
+                                Ok(project) => {
+                                    branch_deployments(&list, &self.own_commits(&project).await)
+                                }
+                                Err(_) => Vec::new(),
+                            };
                             out.read_at = Some(now_ms());
                             out.error = None;
                         }
@@ -420,8 +423,10 @@ impl Core {
         out
     }
 
-    /// The commits of each live agent's own branch (`<target>..HEAD`, 200 at most), by agent: an
-    /// agent of several repositories, or whose folder or target git does not know, is left out.
+    /// The commits of each live agent's own branch (`HEAD` but its target, 200 at most), by agent:
+    /// an agent of several repositories, or whose folder or target git does not know, is left out.
+    /// The target is wherever it is known, as `update_base` brings it (its upstream, origin's, the
+    /// local branch): a local one behind would give the agent the commits merged since.
     async fn own_commits(&self, project: &crate::model::Project) -> Vec<(String, HashSet<String>)> {
         let target = self.ci_target(project).await;
         let dirs: Vec<(String, String)> = self
@@ -440,10 +445,29 @@ impl Core {
             })
             .collect();
         let mut out = Vec::new();
-        let range = format!("{target}..HEAD");
         for (id, dir) in dirs {
-            if let Ok(list) = git::text(&dir, &["rev-list", "--max-count=200", &range]).await {
-                out.push((id, list.lines().map(str::to_string).collect()));
+            let mut bases = Vec::new();
+            if let Some(up) = git::upstream_of(&dir, &target).await {
+                bases.push(up.tracking);
+            }
+            bases.push(format!("refs/remotes/origin/{target}"));
+            bases.push(target.clone());
+            let mut args = vec!["rev-list", "--max-count=200", "--end-of-options", "HEAD"];
+            let mut not = Vec::new();
+            for base in bases {
+                // `commit_of` takes no name that starts with `-`: the target is typed by the user.
+                if git::commit_of(&dir, &base).await.is_ok() {
+                    not.push(format!("^{base}"));
+                }
+            }
+            if not.is_empty() {
+                log::debug!("own commits of {id}: target « {target} » unknown in {dir}");
+                continue;
+            }
+            args.extend(not.iter().map(String::as_str));
+            match git::text(&dir, &args).await {
+                Ok(list) => out.push((id, list.lines().map(str::to_string).collect())),
+                Err(e) => log::debug!("own commits of {id}: {e:#}"),
             }
         }
         out
