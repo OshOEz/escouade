@@ -3,11 +3,15 @@
   // world, with its plan north, its card at the centre and its team east. Their order in the DOM is the keyboard's:
   // north, west (its tools, drawn above the card), centre, east, south (lot 5 puts the south after the team).
   // `onsize` tells the height of its cards, by their id (the agent's: `centre`): a card that grows moves the others.
+  import { untrack } from 'svelte';
   import { t } from '../../lib/i18n';
+  import { readPrDetail } from '../../lib/workspace-ci.svelte';
   import type { Agent } from '../../lib/types';
   import type { Box, Size } from '../../lib/workspace-camera';
+  import type { Landing } from '../../lib/workspace-landing';
   import type { Frame, Placed } from '../../lib/workspace-layout';
   import AgentCard from './AgentCard.svelte';
+  import LandingZone from './LandingZone.svelte';
   import PlanBand from './PlanBand.svelte';
   import RibbonCard from './RibbonCard.svelte';
   import TeamCard from './TeamCard.svelte';
@@ -16,6 +20,7 @@
   let {
     frame,
     agent,
+    landing = [],
     ontoggle,
     ontoggletools,
     onsize,
@@ -23,12 +28,23 @@
   }: {
     frame: Placed<Frame>;
     agent: Agent;
+    /** What lands in its zone, south (`landingOf`). */
+    landing?: Landing[];
     ontoggle: (agentId: string) => void;
     ontoggletools?: (agentId: string) => void;
     onsize?: (id: string, h: number) => void;
     zoom?: number;
   } = $props();
 
+  // Its open pull request's detail (checks, deployments) read when it is on screen, and when its checks change.
+  const prKey = $derived.by(() => {
+    const pr = agent.prs.find((p) => p.state === 'open');
+    return pr ? `${pr.number}:${pr.checks}` : '';
+  });
+  $effect(() => {
+    void prKey;
+    untrack(() => void readPrDetail(agent));
+  });
   const testOf = (under: string) => frame.tests.find((r) => r.under === under);
   const at = (b: Box | (Size & { x: number; y: number })) => `left:${b.x}px;top:${b.y}px;width:${b.w}px;height:${b.h}px`;
 </script>
@@ -61,6 +77,7 @@
     <div class="slot" style={at(item)}><TeamCard {agent} {item} ontoggle={() => ontoggle(agent.id)} {onsize} {zoom} /></div>
     {@render tests(item.id)}
   {/each}
+  <div class="slot" style={at(frame.south)}><LandingZone agentId={agent.id} items={landing} onsize={(h) => onsize?.('south', h)} /></div>
 </div>
 
 <style>

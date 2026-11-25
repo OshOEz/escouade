@@ -21,6 +21,8 @@
     type Camera,
     HUD_H,
   } from '../../lib/workspace-camera';
+  import { followEnvironments, prDetails, readPrDetail } from '../../lib/workspace-ci.svelte';
+  import { landingOf } from '../../lib/workspace-landing';
   import { canvasOrder, discOf, frameOf, layoutFarOpen, layoutNear, waits, type Side } from '../../lib/workspace-layout';
   import type { Agent } from '../../lib/types';
   import Icon from '../Icon.svelte';
@@ -49,6 +51,7 @@
       centreH: heights[a.id]?.centre || undefined,
       teamH: heights[a.id],
       testCommand: project.board.testCommand,
+      southH: heights[a.id]?.south || undefined,
     });
   function sized(agentId: string, id: string, h: number) {
     const mine = heights[agentId];
@@ -62,10 +65,16 @@
     if (Object.keys(rest).length) heights[agentId] = rest;
     else delete heights[agentId];
   }
+  /** What lands in each agent's zone: its pages, its remote CI, its deployments. */
+  const landing = $derived(
+    new Map(agents.map((a) => [a.id, landingOf(a, { pr: prDetails[a.id] ?? null, environments: app.environments[project.id] ?? null })])),
+  );
+  // The canvas follows the project's deployments while it is open, as the view « Environnements ».
+  $effect(() => followEnvironments(project.id));
   // From afar, an agent that waits is unfolded among the discs (« toujours déplié, quelle que soit l'altitude »).
   const far = $derived(
     layoutFarOpen(
-      ordered.order.map((a) => discOf(a)),
+      ordered.order.map((a) => discOf(a, landing.get(a.id))),
       new Map(ordered.order.filter(waits).map((a) => [a.id, frameAt(a)])),
     ),
   );
@@ -174,6 +183,7 @@
     };
     if (side === 'east' && f.team.length) b = span(f.team);
     if (side === 'west' && f.west.length) b = span(f.west);
+    if (side === 'south') b = f.south;
     const [px, py] = centre();
     place({ zoom: 1, x: px - (f.x + b.x + b.w / 2), y: py - (f.y + b.y + b.h / 2) });
   }
@@ -228,6 +238,7 @@
           <Compass
             frame={f}
             agent={a}
+            landing={landing.get(a.id)}
             ontoggle={toggleTeam}
             ontoggletools={(id) => (toolsOpen[id] = !toolsOpen[id])}
             onsize={(id, h) => sized(a.id, id, h)}

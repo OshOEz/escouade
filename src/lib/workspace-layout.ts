@@ -137,6 +137,8 @@ export const PLAN = { w: 560, head: 72, folded: 62, row: 30, pad: 6, list: 232 }
 export const GAP = 48;
 /** A test card, stuck under the card that runs it: one line of command, its height fixed. */
 export const TEST = { h: 76, gap: 8 } as const;
+/** The landing zone, empty: its height until it is measured. */
+export const SOUTH = { h: 132 } as const;
 /**
  * A tool's card (« de la doc, pas un agent »): above the agent's card, two to a row around an aisle in the middle of the
  * card, where the plan's link runs; `row`: between two rows; `drop`: from the last row to the card, for a flow to show.
@@ -187,6 +189,8 @@ export type Frame = {
   team: Placed<TeamItem>[];
   /** The latest test run of each card, stuck under it (`under`: 'centre' or the subagent's id). */
   tests: Placed<TestRun>[];
+  /** The landing zone: always there, below all the rest, as wide as the frame. */
+  south: Box;
   links: Edge[];
 };
 /**
@@ -203,6 +207,8 @@ export type FrameOpts = {
   toolsOpen?: boolean;
   /** The board's test command (`testCommand`): a run of it is a test run. */
   testCommand?: string;
+  /** The landing zone's height measured. */
+  southH?: number;
 };
 
 /** The highest a card grows (an agent that waits, its questions in it), at a zoom of 1: past it, its inset scrolls. */
@@ -279,7 +285,7 @@ const frames = new WeakMap<Agent, { key: string; frame: Frame }>();
  * column on the right. A subagent whose parent is in the team, and a background task whose subagent is, lie right of it.
  */
 export function frameOf(agent: Agent, opts: FrameOpts = {}): Frame {
-  const key = `${!!opts.teamOpen}|${opts.seenAt ?? 0}|${opts.centreH ?? ''}|${opts.planOpen !== false}|${JSON.stringify(opts.teamH ?? {})}|${!!opts.toolsOpen}|${opts.testCommand ?? ''}`;
+  const key = `${!!opts.teamOpen}|${opts.seenAt ?? 0}|${opts.centreH ?? ''}|${opts.planOpen !== false}|${JSON.stringify(opts.teamH ?? {})}|${!!opts.toolsOpen}|${opts.testCommand ?? ''}|${opts.southH ?? ''}`;
   const known = frames.get(agent);
   if (known?.key === key) return known.frame;
   const frame = computeFrame(agent, opts);
@@ -426,16 +432,23 @@ function computeFrame(agent: Agent, opts: FrameOpts): Frame {
   }
 
   const boxes: Box[] = [centre, ...(north ? [north] : []), ...west, ...(westMore ? [westMore] : []), ...team, ...tests];
+  const w = Math.max(...boxes.map((b) => b.x + b.w));
+  const south: Box = { x: 0, y: Math.max(...boxes.map((b) => b.y + b.h)) + GAP, w, h: opts.southH || SOUTH.h };
+  // One line down to it, from the agent's card or its test card.
+  const own = tests.find((r) => r.under === 'centre') ?? centre;
+  const x = CARD.w / 2;
+  links.push({ id: `${agent.id}:south`, state: 'plan', x1: x, y1: own.y + own.h, x2: x, y2: south.y, straight: true });
   return {
     agentId: agent.id,
-    w: Math.max(...boxes.map((b) => b.x + b.w)),
-    h: Math.max(...boxes.map((b) => b.y + b.h)),
+    w,
+    h: south.y + south.h,
     centre,
     north,
     west,
     westMore,
     team,
     tests,
+    south,
     links,
   };
 }

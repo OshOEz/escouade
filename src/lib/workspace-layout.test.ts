@@ -17,6 +17,7 @@ import {
   layoutFarOpen,
   layoutNear,
   packRows,
+  SOUTH,
   SUB,
   teamOf,
   TEST,
@@ -133,7 +134,12 @@ describe('the compass of the workspace', () => {
   });
   it('draws a moving link only to what runs', () => {
     const f = frameOf(agent({ plan: planWith(['inProgress'], { agents: [sub('s1'), sub('s2', 'failed')] }) }));
-    expect(f.links.map((l) => l.state).sort()).toEqual(['failed', 'plan', 'run']);
+    expect(
+      f.links
+        .filter((l) => !l.id.endsWith(':south'))
+        .map((l) => l.state)
+        .sort(),
+    ).toEqual(['failed', 'plan', 'run']);
     expect(f.north).not.toBeNull();
     expect(frameOf(agent()).north).toBeNull();
   });
@@ -153,7 +159,7 @@ describe('the compass of the workspace', () => {
     expect(f.links.filter((l) => l.id.startsWith('tool:'))).toEqual([expect.objectContaining({ id: 'tool:plugin:github', state: 'run' })]);
     const link = f.links.find((l) => l.id === 'tool:plugin:github')!;
     expect(link.y2).toBe(f.centre.y);
-    expect(f.h).toBe(f.centre.y + f.centre.h);
+    expect(f.south.y).toBe(f.centre.y + f.centre.h + GAP);
   });
   it('shows the most recent tools, the others in a pile that unfolds', () => {
     const tools = Array.from({ length: 10 }, (_, i) => ({ ...kit('skill', `s${i}`), firstAt: i, lastAt: i === 0 ? 99 : i }));
@@ -254,9 +260,10 @@ describe('the compass of the workspace', () => {
     const b = frameOf(agent({ id: 'b' }));
     const r = layoutNear([a, b], [['a', 'b']]);
     expect(r.items[1].x).toBe(a.w + GAP);
-    expect(r.links.map((l) => l.state)).toEqual(['plan', 'launched']);
-    expect(r.links[1].d.startsWith(`M ${a.w} `)).toBe(true);
-    expect(r.links[1].d.endsWith(`${a.w + GAP} ${b.centre.y + b.centre.h / 2}`)).toBe(true);
+    const links = r.links.filter((l) => !l.id.endsWith(':south'));
+    expect(links.map((l) => l.state)).toEqual(['plan', 'launched']);
+    expect(links[1].d.startsWith(`M ${a.w} `)).toBe(true);
+    expect(links[1].d.endsWith(`${a.w + GAP} ${b.centre.y + b.centre.h / 2}`)).toBe(true);
   });
 
   it('computes the frame of an agent once, while it and its options stay the same', () => {
@@ -271,7 +278,7 @@ describe('the compass of the workspace', () => {
     const b = frameOf(agent({ id: 'b', plan: planWith(['inProgress']) }));
     const r = layoutNear([a, b]);
     const x = r.items[1].x + 360 / 2;
-    expect(r.links[0].d).toBe(`M ${x} ${b.centre.y} L ${x} ${b.north!.h}`);
+    expect(r.links.find((l) => l.id === 'b:plan')!.d).toBe(`M ${x} ${b.centre.y} L ${x} ${b.north!.h}`);
   });
 });
 
@@ -383,5 +390,15 @@ describe('the test cards', () => {
       canvas: { tools: [], subs: [{ call: 's1', tools: [], commands: [cmd('c', 'npm test')] }] },
     });
     expect(frameOf(a).tests).toEqual([]);
+  });
+});
+
+describe('the landing zone', () => {
+  it('always draws the landing zone south, below the tests, with one link down to it', () => {
+    const f = frameOf(agent({ canvas: { tools: [], subs: [], commands: [cmd('c0', 'cargo test')] } }));
+    expect(f.south.y).toBeGreaterThan(f.tests[0].y + f.tests[0].h);
+    expect(f.south.h).toBe(SOUTH.h);
+    expect(f.links.filter((l) => l.id.endsWith(':south'))).toHaveLength(1);
+    expect(frameOf(agent(), { southH: 300 }).south.h).toBe(300);
   });
 });

@@ -413,4 +413,15 @@ describe('the workspace', () => {
       expect(cards[at - 1].getAttribute('data-side')).toBe('centre');
     });
   });
+
+  describe('the landing zone', () => {
+    it('shows the landing zone south of every compass', async () => {
+      resetApp({ agents: [agent({ id: 'a1' }), agent({ id: 'a2' })] });
+      const { container } = show();
+      await zoomTo(1);
+      expect(screen.getAllByText('Rien n’a encore atterri')).toHaveLength(2);
+      const sides = [...container.querySelectorAll('[data-agent="a1"] [data-side]')].map((e) => e.getAttribute('data-side'));
+      expect(sides.at(-1)).toBe('south');
+    });
+  });
 });
