@@ -23,23 +23,17 @@
   import { holdModeOf } from '../lib/outbox.svelte';
   import { injectedSource } from '../lib/events';
   import { parseLocalCommand } from '../lib/localcmd';
+  import { effortChoicesOf, modeChoicesOf, modelChoicesOf, setAgentOption } from '../lib/agent-options';
   import { outgoing, pendingItemOf, sendPaused, submitDraft } from '../lib/send.svelte';
   import { fileOrigins } from '../lib/file-origin';
   import { basename, dirname, fSize } from '../lib/format';
   import { t } from '../lib/i18n';
   import { api } from '../lib/ipc';
-  import { EFFORTS, MODES, modeLabel, modeTitle, modelOptions } from '../lib/models';
+  import { EFFORTS } from '../lib/models';
   import {
     can,
     capsOf,
-    effortsOf,
-    modelCost,
-    modelMenu,
-    modelsOf,
     modelTakes,
-    modesOf,
-    fromConfig,
-    readingModels,
     refreshModels,
     searchesModels,
     setFavorite,
@@ -125,60 +119,10 @@
   // A harness that lists many models, or those of its providers (OpenCode): a search, the favorites first, then a group by
   // family (by provider); a favorite says its provider, out of its group.
   const manyModels = $derived(searchesModels(agent));
-  const modelChoices = $derived(
-    manyModels
-      ? modelMenu(agent).map((m) => {
-          const cost = modelCost(agent, m.id);
-          const detail =
-            (m.favorite ? m.provider : undefined) ?? cost?.label ?? (fromConfig(agent, m.id) ? t('composer.model.fromConfig') : undefined);
-          return { value: m.id, label: m.label, detail, title: cost?.title, favorite: m.favorite, group: m.group };
-        })
-      : // Claude Code's aliases (`default`, `opus`…) are read for its own agents only: Cursor's Auto is `default` too.
-        modelOptions((agent.engine ?? 'claude') === 'claude' ? app.models : [], modelsOf(agent)).map((o) => {
-          // What it costs beside the others, when its harness bills by model (Copilot: `×3`).
-          const cost = modelCost(agent, o.value);
-          if (cost) return { ...o, detail: cost.label, title: cost.title };
-          // Codex's model of its config.toml, which it does not list (ESC-186).
-          if (fromConfig(agent, o.value)) return { ...o, detail: t('composer.model.fromConfig') };
-          // Codex's stand-in while its account's list is being read (ESC-186).
-          return o.value && readingModels(agent) ? { ...o, detail: t('composer.model.reading') } : o;
-        }),
-  );
-  // A harness with no stand-in (OpenCode) while its account's list is being read: one greyed line that says so (ESC-186).
-  const modelOptionsShown = $derived(
-    modelChoices.length || !readingModels(agent) ? modelChoices : [{ value: '', label: t('composer.model.reading'), disabled: true }],
-  );
-  // The modes its harness takes, each with what it means there when that is not what Escouade's menu says.
+  const modelOptionsShown = $derived(modelChoicesOf(agent));
   const caps = $derived(capsOf(agent.engine));
-  // The five modes keep their places: one its harness lacks is greyed, with why (choice 17 of the 2.0 design).
-  const takes = $derived(new Set(modesOf(agent, MODES, agent.mode).map((m) => m.value)));
-  const modeOptions = $derived(
-    MODES.map((md) => {
-      // « Bypass » its harness has, not allowed in the settings (SEC-09).
-      if (md.value === 'bypassPermissions' && !takes.has(md.value) && caps?.modes.some((m) => m.id === md.value))
-        return { value: md.value, label: md.label, disabled: true, reason: t('composer.mode.bypassNotAllowed') };
-      if (!takes.has(md.value)) {
-        const harness = engineName(agent.engine);
-        // A harness of one mode alone runs in it, whatever is asked (ESC-489): the others say so.
-        const only = caps?.modes.length === 1 ? caps.modes[0].id : null;
-        const reason = only
-          ? t('composer.mode.only', { harness, mode: modeLabel(only) })
-          : md.value === 'auto'
-            ? t('composer.mode.missingAuto', { harness })
-            : t('composer.mode.missing', { harness, mode: md.label });
-        return { value: md.value, label: md.label, disabled: true, reason };
-      }
-      const unavailable = md.value === 'auto' && !modelTakes(agent, agent.model, 'auto');
-      const meaning = caps?.modes.find((m) => m.id === md.value)?.meaning ?? modeTitle(md.value, speakerOf(agent.engine));
-      return {
-        value: md.value,
-        label: md.label,
-        detail: unavailable ? t('composer.mode.autoUnavailableDetail') : meaning,
-        title: unavailable ? t('composer.mode.autoUnavailableTitle') : meaning,
-        disabled: unavailable,
-      };
-    }),
-  );
+  // The five modes, each with what it means there; one its harness lacks greyed, with why.
+  const modeOptions = $derived(modeChoicesOf(agent));
   // The account chip: with several accounts of the agent's harness, beside the model. It changes the account only while
   // the agent has no session (nothing said to it yet, no copy's original behind it): then its conversation is filed in that
   // account. Another harness's accounts are never offered: the agent runs on its own harness.
@@ -683,12 +627,7 @@
     }
   }
 
-  function setOption(o: { model?: string; effort?: string; mode?: string }) {
-    const a = app.agents[agent.id];
-    if (a) Object.assign(a, o);
-    if (o.mode === 'bypassPermissions') app.toast(t('composer.mode.bypassToast', { engine: speakerOf(agent.engine) }), 'info');
-    app.run(api.setAgentOptions(agent.id, o));
-  }
+  const setOption = (o: { model?: string; effort?: string; mode?: string }) => setAgentOption(agent.id, o);
 </script>
 
 <div class="composer-wrap" bind:this={wrap}>
@@ -802,7 +741,7 @@
         <Dropdown
           caption={t('composer.bar.effort')}
           value={effortOk ? agent.effort : ''}
-          options={effortsOf(agent, EFFORTS).map((ef) => ({ value: ef.value, label: ef.label, detail: ef.title }))}
+          options={effortChoicesOf(agent)}
           shownLabel={EFFORTS.find((ef) => ef.value === agent.effort)?.label}
           open={menu === 'effort'}
           showCaption={!tight}

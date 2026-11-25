@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { agent, fakeBackend, project, SETTINGS, BARE_ENGINE, CLAUDE_ENGINE } from '../test/ipc';
 import type { DraftAttachment } from './attachments';
-import { connection } from './connection.svelte';
+import { connection, type ServerInfo } from './connection.svelte';
 import { conversationOf, dropConversation } from './conversations.svelte';
 import { forgetDraft, getDraft } from './drafts';
 import { cancelHeld, heldOf } from './outbox.svelte';
@@ -94,7 +94,7 @@ describe('submitDraft', () => {
 
   it('sends nothing while the server connection is cut', async () => {
     await start([agent({ id: 'a1' })]);
-    connection.server = 's1';
+    connection.server = { id: 's1' } as ServerInfo;
     connection.state = 'lost';
     expect(submitDraft(app.agents.a1, 'a1', 'x', []).cleared).toBe('none');
   });
