@@ -428,3 +428,79 @@ async fn a_commit_still_missing_after_a_fetch_is_not_fetched_for_again() {
     h.core.project_environments_read(&p.id).await;
     assert!(fetched(), "a new commit is fetched for");
 }
+
+#[test]
+fn a_deployment_lands_on_the_agents_whose_branch_has_its_commit() {
+    let list = [
+        dep("Preview", "success", "b2"),
+        dep("Preview", "success", "b1"),
+        dep("production", "success", "m1"),
+        dep("staging", "in_progress", "c1"),
+        dep("staging", "success", ""),
+    ];
+    let set = |s: &[&str]| s.iter().map(|x| x.to_string()).collect::<HashSet<_>>();
+    let own = [
+        ("a1".to_string(), set(&["b1", "b2"])),
+        ("a2".to_string(), set(&["c1"])),
+    ];
+    let got = branch_deployments(&list, &own);
+    assert_eq!(
+        got.iter()
+            .map(|b| (
+                b.deployment.environment.as_str(),
+                b.deployment.sha.as_str(),
+                b.agents.clone()
+            ))
+            .collect::<Vec<_>>(),
+        [
+            ("Preview", "b2", vec!["a1".to_string()]),
+            ("staging", "c1", vec!["a2".to_string()])
+        ]
+    );
+}
+
+#[tokio::test]
+async fn an_agents_branch_deployed_is_told_and_main_is_not() {
+    use crate::core_tests::{git, harness};
+    use serde_json::json;
+    let h = harness("deploys-branch");
+    let server = crate::integrations::fake::FakeServer::start().await;
+    let (id, _, _) = crate::agentprs_tests::github_agent(&h, &server).await;
+    let dir = std::path::PathBuf::from(h.agent(&id).worktree.unwrap().path);
+    let own = git(&dir, &["rev-parse", "HEAD"]).trim().to_string();
+    let main = git(&dir, &["rev-parse", "main"]).trim().to_string();
+    let d = |n: u64, env: &str, sha: &str| {
+        json!({"id": n, "environment": env, "sha": sha, "ref": "x",
+               "created_at": "2026-11-01T10:00:00Z", "creator": {"login": "ada"}})
+    };
+    server.on(
+        "GET",
+        "/repos/acme/demo/deployments",
+        200,
+        json!([d(2, "Preview", &own), d(1, "production", &main)]),
+    );
+    for n in [1, 2] {
+        server.on(
+            "GET",
+            &format!("/repos/acme/demo/deployments/{n}/statuses"),
+            200,
+            json!([{"state": "success", "environment_url": "https://example.com"}]),
+        );
+    }
+    let envs = h
+        .core
+        .project_environments_read(&h.agent(&id).project_id)
+        .await;
+    assert_eq!(envs.error, None);
+    assert_eq!(
+        envs.branches.len(),
+        1,
+        "main's production is no deployment of the agent"
+    );
+    assert_eq!(envs.branches[0].deployment.sha, own);
+    assert_eq!(envs.branches[0].agents, [id.clone()]);
+    assert_eq!(
+        serde_json::to_value(&envs).unwrap()["branches"][0]["agents"][0],
+        json!(id)
+    );
+}
