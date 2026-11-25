@@ -1,6 +1,7 @@
 import { fireEvent, render, screen } from '@testing-library/svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { DraftAttachment } from '../../lib/attachments';
+import { connection, type ServerInfo } from '../../lib/connection.svelte';
 import { dropConversation } from '../../lib/conversations.svelte';
 import { forgetDraft, getDraft, setDraft } from '../../lib/drafts';
 import { setLang } from '../../lib/i18n';
@@ -31,6 +32,8 @@ describe('the card of an agent on the workspace', () => {
     menu.close();
     forgetDraft('a1');
     dropConversation('a1');
+    connection.server = null;
+    connection.state = 'local';
   });
 
   it("sends by Enter through the conversation's path", async () => {
@@ -115,5 +118,19 @@ describe('the card of an agent on the workspace', () => {
     await new Promise((r) => setTimeout(r, 0));
     expect(backend.called('send_message')).toHaveLength(0);
     expect(field.value).toBe('Bonjour');
+  });
+
+  it('says that sending waits while the connection to the server is cut', async () => {
+    connection.server = { id: 's1' } as ServerInfo;
+    connection.state = 'lost';
+    await typeAndEnter('Bonjour');
+    expect(screen.getByText('Envoi suspendu jusqu’à la reprise ; ton brouillon est gardé.')).toBeTruthy();
+    expect(backend.called('send_message')).toHaveLength(0);
+  });
+
+  it('sends a draft of files alone', async () => {
+    setDraft('a1', { text: '', files: [image('a.png')] });
+    await typeAndEnter('');
+    await vi.waitFor(() => expect(backend.called('send_message')[0]?.args).toMatchObject({ id: 'a1', text: '' }));
   });
 });

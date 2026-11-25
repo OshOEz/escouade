@@ -14,7 +14,7 @@
   import { interactiveOf } from '../../lib/interactive';
   import { menu, type MenuItem } from '../../lib/menu.svelte';
   import { EFFORTS, modelLabel } from '../../lib/models';
-  import { pendingItemOf, submitDraft } from '../../lib/send.svelte';
+  import { pendingItemOf, sendPaused, submitDraft } from '../../lib/send.svelte';
   import { tip } from '../../lib/tip';
   import { cardActivity, cardSpend } from '../../lib/sidebar';
   import { app } from '../../lib/state.svelte';
@@ -82,12 +82,12 @@
 
   function send() {
     const body = text.trim();
-    if (!body) return;
+    const d = getDraft(agentId);
+    if (!body && !d.files.length) return;
     // An interactive command of its harness never goes as a message: its conversation opens, the text kept in the draft.
     if (interactiveOf(agent.engine, body)) return app.selectAgent(agentId);
     // Its request not read yet: the text would leave as a new message instead of answering it.
     if (agent.pending.length && !pendingItemOf(agent)) return;
-    const d = getDraft(agentId);
     // A file still being copied has no path yet: it would be dropped on the way, as the composer waits for it.
     if (d.files.some((f) => f.copying)) return;
     const s = submitDraft(agent, agentId, text, d.files);
@@ -168,6 +168,8 @@
   </p>
   {#if activity}<p class="act mono">{activity}</p>{/if}
   {#if agent.progressLine}<p class="said">{agent.progressLine}</p>{/if}
+  <!-- S10 (ESC-537): the connection to the server cut, sending waits; said as the composer says it. -->
+  {#if sendPaused()}<p class="paused" role="status">{t('servers.composer.paused')}</p>{/if}
   <div class="bar">
     <input
       bind:this={field}
@@ -259,6 +261,11 @@
   .said {
     color: var(--soft);
     font-size: 12px;
+  }
+  .paused {
+    color: var(--warn-ink);
+    font-size: 11.5px;
+    white-space: normal;
   }
   .bar {
     display: flex;
