@@ -306,6 +306,20 @@ Un clic sur un satellite zoome sur l'agent ; il cadre le côté concerné une fo
   au-dessus de l'agent ; surfaces, bordures, rayons et boutons sont ceux de la zone de travail, et le fond de la toile
   prend la couleur de la zone de travail, teintée par la couleur du projet.
 
+## Changements du 26 novembre (après essai)
+
+Demandés par l'utilisateur après avoir vu la toile :
+
+1. **Plus de disques ni de satellites.** La vue de loin disparaît : en dessous de 60 %, la toile montre les boussoles en
+   piles (jusqu'au zoom minimal, 30 %) ; à partir de 60 %, tout est déplié. Un agent qui attend reste déplié partout.
+2. **Les agents s'empilent verticalement**, l'un sous l'autre, dans l'ordre de la barre latérale. Un agent lancé par un
+   autre prend sa place dans cet ordre (le trait « a lancé » reste).
+3. **Une toile de tous les projets**, depuis la « Vue d'ensemble » : un bouton « Workspace » y revient, et la toile y
+   montre les agents de tous les projets ; les agents d'un même projet empilés en colonne, sous le nom du projet (avec
+   sa couleur), et les projets côte à côte, dans l'ordre du rail, avec un espace net entre deux colonnes.
+4. **À l'ouverture, la toile est à 100 %**, pas ajustée à l'écran : le premier agent (ou la première colonne) en haut à
+   gauche, sous la barre flottante. « Ajuster » garde son rôle.
+
 ## Mes choix, à corriger
 
 L'utilisateur n'a pas tranché ces points ; j'ai pris ma recommandation.
