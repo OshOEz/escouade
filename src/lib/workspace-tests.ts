@@ -34,25 +34,88 @@ export const TEST_PATTERNS: readonly string[] = [
 /** A runner called by its path (`vendor/bin/phpunit`). */
 const BY_PATH = ['/phpunit', '/rspec', '/pytest'];
 /** What runs the command after it. */
-const LAUNCHERS = ['npx', 'bunx', 'pnpm exec', 'yarn exec', 'python -m', 'python3 -m', 'uv run', 'poetry run', 'bundle exec'].map((l) =>
-  l.split(' '),
-);
+const LAUNCHERS = [
+  'npx',
+  'bunx',
+  'pnpm exec',
+  'yarn exec',
+  'pnpm',
+  'yarn',
+  'python -m',
+  'python3 -m',
+  'uv run',
+  'poetry run',
+  'bundle exec',
+].map((l) => l.split(' '));
+/** What runs a command somewhere after its own options: its test suite is any of its tails. */
+const WRAPPERS = [
+  'timeout',
+  'docker compose run',
+  'docker compose exec',
+  'docker-compose run',
+  'docker-compose exec',
+  'docker run',
+  'docker exec',
+].map((l) => l.split(' '));
+const SHELLS = ['sh', 'bash', 'zsh'];
+const SCRIPT_RUNNERS = ['npm', 'pnpm', 'yarn', 'bun'];
 
 const startsWith = (words: string[], prefix: string[]) => prefix.every((w, i) => words[i] === w);
+
+/** The simple commands of a shell line, word by word: quotes kept together and taken off, cut on `&& || ; | & ( )` and lines. */
+function commandsOf(line: string): string[][] {
+  const out: string[][] = [];
+  let words: string[] = [];
+  let word: string | null = null;
+  let quote = '';
+  const endWord = () => {
+    if (word !== null) words.push(word);
+    word = null;
+  };
+  const endCommand = () => {
+    endWord();
+    if (words.length) out.push(words);
+    words = [];
+  };
+  for (let i = 0; i < line.length; i++) {
+    const c = line[i];
+    if (quote) {
+      if (c === quote) quote = '';
+      else if (c === '\\' && quote === '"' && i + 1 < line.length) word = (word ?? '') + line[++i];
+      else word = (word ?? '') + c;
+    } else if (c === '"' || c === "'") {
+      quote = c;
+      word = word ?? '';
+    } else if (c === '\\' && i + 1 < line.length) {
+      if (line[i + 1] !== '\n') word = (word ?? '') + line[i + 1];
+      i++;
+    } else if (/\s/.test(c) && c !== '\n') endWord();
+    else if ('\n;&|()'.includes(c)) endCommand();
+    else word = (word ?? '') + c;
+  }
+  endCommand();
+  return out;
+}
+
+function runsTests(words: string[]): boolean {
+  while (words.length && /^[A-Za-z_][A-Za-z0-9_]*=/.test(words[0])) words = words.slice(1);
+  if (!words.length) return false;
+  if (TEST_PATTERNS.some((p) => startsWith(words, p.split(' '))) || BY_PATH.some((p) => words[0].endsWith(p))) return true;
+  const [w0, w1, w2] = words;
+  // A package script `test` or `test:*` (`npm run test:unit`, `pnpm test:e2e`).
+  if (SCRIPT_RUNNERS.includes(w0) && /^test(:|$)/.test((w1 === 'run' ? w2 : w1) ?? '')) return true;
+  if (SHELLS.includes(w0) && w1 === '-c') return w2 !== undefined && looksLikeTests(w2);
+  const wrapper = WRAPPERS.find((l) => startsWith(words, l));
+  if (wrapper) return words.slice(wrapper.length).some((_, i) => runsTests(words.slice(wrapper.length + i)));
+  const launcher = LAUNCHERS.find((l) => startsWith(words, l));
+  return !!launcher && runsTests(words.slice(launcher.length));
+}
 
 export function looksLikeTests(command: string, testCommand = ''): boolean {
   const own = testCommand.trim();
   const line = command.trim();
   if (own && line.startsWith(own) && (line.length === own.length || /\s/.test(line[own.length]))) return true;
-  return line.split(/&&|\|\||;|\|/).some((piece) => {
-    let words = piece.trim().split(/\s+/);
-    while (words.length && /^[A-Za-z_][A-Za-z0-9_]*=/.test(words[0])) words = words.slice(1);
-    for (let launcher = LAUNCHERS.find((l) => startsWith(words, l)); launcher; launcher = LAUNCHERS.find((l) => startsWith(words, l))) {
-      words = words.slice(launcher.length);
-    }
-    if (!words.length) return false;
-    return TEST_PATTERNS.some((p) => startsWith(words, p.split(' '))) || BY_PATH.some((p) => words[0].endsWith(p));
-  });
+  return commandsOf(line).some(runsTests);
 }
 
 /** A test card: `under` is 'centre' (the agent's card) or the id of the subagent's. */

@@ -15,12 +15,40 @@ describe('looksLikeTests', () => {
     'bundle exec rspec spec/a_spec.rb',
     'vendor/bin/phpunit',
     './gradlew test',
+    'cd app\nnpm test',
+    'npm run test:unit',
+    'pnpm test:e2e',
+    'yarn run test:ci -- --bail',
+    'pnpm vitest run',
+    'yarn vitest',
+    'yarn jest --ci',
+    'timeout 600 cargo test',
+    'timeout -s KILL 60 npm test',
+    "sh -c 'cd web && npm test'",
+    'bash -c "pytest -q"',
+    'docker compose run --rm -e CI=1 app npm test',
+    'docker-compose exec web pytest',
+    '(cd app && npx vitest)',
   ])('sees a test suite in %s', (c) => expect(looksLikeTests(c)).toBe(true));
 
-  it.each(['npm run build', 'cat test.txt', 'git commit -m "test"', 'ls tests/', 'cargo build --tests', 'echo jest', 'npm run dev'])(
-    'sees none in %s',
-    (c) => expect(looksLikeTests(c)).toBe(false),
-  );
+  it.each([
+    'npm run build',
+    'cat test.txt',
+    'git commit -m "test"',
+    'ls tests/',
+    'cargo build --tests',
+    'echo jest',
+    'npm run dev',
+    'echo "build ok; npm test next"',
+    "echo 'a && cargo test'",
+    'npm run testing-library-setup',
+    'test -f package.json',
+    'pnpm build',
+    'yarn add vitest',
+    "sh -c 'npm run build'",
+    'docker compose run app npm run build',
+    'timeout 5 cat test.log',
+  ])('sees none in %s', (c) => expect(looksLikeTests(c)).toBe(false));
 
   it("takes the board's test command, and what starts with it", () => {
     expect(looksLikeTests('./scripts/check.sh --fast', './scripts/check.sh')).toBe(true);
