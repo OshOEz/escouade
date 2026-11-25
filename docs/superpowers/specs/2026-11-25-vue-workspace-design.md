@@ -300,6 +300,11 @@ Un clic sur un satellite zoome sur l'agent ; il cadre le côté concerné une fo
 - Écrire à un sous-agent suit la règle actuelle du cœur (un sous-agent en arrière-plan qui a un `taskId`).
 - Les cartes à ruban montrent la branche, pas le commit ni la version, qu'aucune donnée de la fenêtre ne porte.
 - Le bouton Éditeur ouvre un menu sur tout le bouton.
+- La toile reprend le design d'Escouade 2.3, pas celui des maquettes : la carte d'un agent est celle de la barre latérale
+  (point d'état, état en minuscules, modèle · durée, température, tokens · coût), le plan est le bandeau actuel (pastille
+  « Plan », titre, « n/m tâches · %  », jauge en segments, lignes numérotées 01, 02… avec leur cercle d'état), posé
+  au-dessus de l'agent ; surfaces, bordures, rayons et boutons sont ceux de la zone de travail, et le fond de la toile
+  prend la couleur de la zone de travail, teintée par la couleur du projet.
 
 ## Mes choix, à corriger
 
