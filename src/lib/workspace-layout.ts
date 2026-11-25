@@ -8,7 +8,7 @@ import { sidebarSubs, subagentInfo } from './subagents';
 import type { Agent, ConvItem, KitUse, SubAgent, Ticket } from './types';
 import type { Box, Size } from './workspace-camera';
 import { landed, type Landing, type RibbonState } from './workspace-landing';
-import { looksLikeTests, testsOf, type TestRun } from './workspace-tests';
+import { testsOf, type TestRun } from './workspace-tests';
 
 export type DiscState = 'run' | 'wait' | 'error' | 'done' | 'idle';
 /** The satellites, in their order from top to bottom; each lot of the spec brings its own. */
@@ -256,10 +256,11 @@ export function teamOf(agent: Agent, opts: FrameOpts): TeamItem[] {
   const subs = plan?.agents ?? [];
   const item = (sub: SubAgent): TeamItem => ({ kind: 'sub', id: sub.id, sub });
   const out: TeamItem[] = subs.filter(isRunning).map(item);
+  // The test run in the background a card shows as its test card, under it; another one running stays in the team.
+  const carded = new Set(testsOf(agent, opts.testCommand ?? '').flatMap((r) => (r.opens?.kind === 'task' ? [r.opens.task] : [])));
   out.push(
     ...bgRows(plan)
-      // A test run in the background is its test card, under the card that runs it.
-      .filter((row) => isRunning(row) && !(row.kind === 'command' && looksLikeTests(row.command ?? '', opts.testCommand)))
+      .filter((row) => isRunning(row) && !carded.has(row.id))
       .map((row): TeamItem => ({ kind: 'bg', id: row.id, row })),
   );
   // In the sidebar's order, the latest ended first.
@@ -294,8 +295,11 @@ function linkOf(e: Edge, dx: number, dy: number): Link {
   return { id: e.id, state: e.state, d: e.straight ? `M ${x1} ${y1} L ${x2} ${y2}` : curve(x1, y1, x2, y2) };
 }
 
-/** The frames computed, by agent object: one replaced (every update of the core replaces it) is computed again. */
-const frames = new WeakMap<Agent, { key: string; frame: Frame }>();
+/**
+ * The frames computed, by agent object and altitude: one replaced (every update of the core replaces it) is computed
+ * again; crossing back to an altitude finds its frame.
+ */
+const frames = new WeakMap<Agent, Map<string, { key: string; frame: Frame }>>();
 
 /**
  * The compass of `agent`, in its own coordinates: the plan's band on top (with tasks), its card below, its team in a
@@ -303,10 +307,12 @@ const frames = new WeakMap<Agent, { key: string; frame: Frame }>();
  */
 export function frameOf(agent: Agent, opts: FrameOpts = {}): Frame {
   const key = `${!!opts.teamOpen}|${opts.seenAt ?? 0}|${opts.centreH ?? ''}|${opts.planOpen !== false}|${JSON.stringify(opts.teamH ?? {})}|${!!opts.toolsOpen}|${opts.testCommand ?? ''}|${opts.southH ?? ''}|${opts.level ?? ''}|${opts.unfolded ?? ''}|${opts.landing?.length ?? 0}:${opts.landing?.filter((l) => !landed(l)).length ?? 0}`;
-  const known = frames.get(agent);
+  let byLevel = frames.get(agent);
+  if (!byLevel) frames.set(agent, (byLevel = new Map()));
+  const known = byLevel.get(opts.level ?? '');
   if (known?.key === key) return known.frame;
   const frame = computeFrame(agent, opts);
-  frames.set(agent, { key, frame });
+  byLevel.set(opts.level ?? '', { key, frame });
   return frame;
 }
 

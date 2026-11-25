@@ -273,6 +273,13 @@ describe('the compass of the workspace', () => {
     expect(frameOf({ ...a }, { seenAt: 5 })).toEqual(f);
     expect(frameOf(a, { seenAt: 5, teamOpen: true })).not.toBe(f);
   });
+  it('keeps the frame of each altitude: crossing back to one computes nothing again', () => {
+    const a = agent({ id: 'a', plan: planWith(['inProgress'], { agents: [sub('s1')] }) });
+    const near = frameOf(a, { level: 'near' });
+    const mid = frameOf(a, { level: 'mid' });
+    expect(frameOf(a, { level: 'near' })).toBe(near);
+    expect(frameOf(a, { level: 'mid' })).toBe(mid);
+  });
   it('draws the links of a frame away from the origin in the world', () => {
     const a = frameOf(agent({ id: 'a' }));
     const b = frameOf(agent({ id: 'b', plan: planWith(['inProgress']) }));
@@ -381,7 +388,22 @@ describe('the test cards', () => {
     const f = frameOf(a);
     expect(f.team.map((i) => i.id)).toEqual(['t2']);
     expect(f.tests.map((t) => t.under)).toEqual(['centre']);
-    expect(frameOf(agent({ plan: a.plan }), { testCommand: 'npm run dev' }).team).toEqual([]);
+    const dev = planWith([], { bgTasks: [{ ...bg('t2'), command: 'npm run dev' }] });
+    expect(frameOf(agent({ plan: dev }), { testCommand: 'npm run dev' }).team).toEqual([]);
+  });
+
+  it('keeps in the team a test run that is not its card: only the latest is', () => {
+    const a = agent({
+      plan: planWith([], {
+        bgTasks: [
+          { ...bg('t1'), command: 'npm test', startedAt: 1 },
+          { ...bg('t2'), command: 'cargo test', startedAt: 2 },
+        ],
+      }),
+    });
+    const f = frameOf(a);
+    expect(f.tests.map((t) => t.id)).toEqual(['tests:t2']);
+    expect(f.team.map((i) => i.id)).toEqual(['t1']);
   });
 
   it('shows no test card for a subagent folded in the pile', () => {
