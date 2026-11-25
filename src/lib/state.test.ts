@@ -1225,6 +1225,42 @@ describe('editor of a removed agent or project', () => {
   });
 });
 
+describe('workspace', () => {
+  beforeEach(() => resetApp({ projects: [project({ id: 'p1' }), project({ id: 'p2', name: 'Autre' })] }));
+
+  it('opens in place of the board, the docs, the pull requests and the editor', () => {
+    app.openBoard('p1');
+    app.openWorkspace('p1');
+    expect(app.workspaceOn).toBe(true);
+    expect(app.boardOn).toBe(false);
+    expect(app.docsOn).toBe(false);
+    expect(app.prsOn).toBe(false);
+    expect(app.editorOn).toBe(false);
+    expect(app.panesOn).toBe(false);
+  });
+
+  it('is closed by the other views', () => {
+    app.openWorkspace('p1');
+    app.openDocs('p1');
+    expect(app.workspaceOn).toBe(false);
+  });
+
+  it('closes and gives back the view underneath', () => {
+    app.openWorkspace('p1');
+    app.closeWorkspace('p1');
+    expect(app.workspaceOn).toBe(false);
+    expect(app.ui.view).toBe('project');
+  });
+
+  it('is per project', () => {
+    app.openWorkspace('p1');
+    app.selectProject('p2');
+    expect(app.workspaceOn).toBe(false);
+    app.selectProject('p1');
+    expect(app.workspaceOn).toBe(true);
+  });
+});
+
 describe('board', () => {
   beforeEach(() => resetApp());
 

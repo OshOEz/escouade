@@ -574,6 +574,8 @@ class AppState {
   docs = $state<Record<string, boolean>>({});
   /** Projects whose « Pull requests » view (ESC-65) fills the main area, in place of the agents (not saved). */
   prs = $state<Record<string, boolean>>({});
+  /** Projects whose « Workspace » (the canvas of the agents) fills the main area, in place of the other views (not saved). */
+  workspace = $state<Record<string, boolean>>({});
   /** The reviews written by an agent (ESC-66), by project then by pull request. */
   prReviews = $state<Record<string, Record<number, AgentReview>>>({});
   /** The pull request whose view (ESC-457) fills the « Pull requests » view, by project: its number, its repository when
@@ -644,16 +646,29 @@ class AppState {
   }
   /** The board of the project on screen is shown: never while the Kanban is off (F-1), nor its project's (ESC-658). */
   boardOn = $derived(
-    this.ui.view === 'project' && !!this.project && !!this.board[this.project.id] && this.partOn(this.project.id, 'kanban'),
+    this.ui.view === 'project' &&
+      !!this.project &&
+      !!this.board[this.project.id] &&
+      !this.workspace[this.project.id] &&
+      this.partOn(this.project.id, 'kanban'),
   );
   /** The Docs tab of the project on screen is shown (ESC-258): never while the Docs space is off (F-1), nor its project's. */
   docsOn = $derived(
-    this.ui.view === 'project' && !!this.project && !!this.docs[this.project.id] && !this.boardOn && this.partOn(this.project.id, 'docs'),
+    this.ui.view === 'project' && !!this.project && !!this.docs[this.project.id] && !this.boardOn && !this.workspace[this.project.id] && this.partOn(this.project.id, 'docs'),
   );
   /** The « Pull requests » view of the project on screen is shown (ESC-65). */
-  prsOn = $derived(this.ui.view === 'project' && !!this.project && !!this.prs[this.project.id] && !this.boardOn && !this.docsOn);
+  prsOn = $derived(
+    this.ui.view === 'project' && !!this.project && !!this.prs[this.project.id] && !this.boardOn && !this.docsOn && !this.workspaceOn,
+  );
+  /** The « Workspace » of the project on screen is shown: the canvas of its agents. */
+  workspaceOn = $derived(this.ui.view === 'project' && !!this.project && !!this.workspace[this.project.id]);
   /** The editor of the project on screen is open, and on screen: the statistics hide it. */
-  editorOn = $derived(this.ui.view === 'project' && !!(this.project && this.editor[this.project.id]?.on) && this.feature('editor'));
+  editorOn = $derived(
+    this.ui.view === 'project' &&
+      !!(this.project && this.editor[this.project.id]?.on) &&
+      !this.workspace[this.project.id] &&
+      this.feature('editor'),
+  );
   split = $derived(this.ui.layout === 'split');
   /** Estimated cost of the turns running now (their exact cost joins `usage.todayCost` at their end). */
   liveCost = $derived(Object.values(this.agents).reduce((sum, a) => sum + (a.liveCost ?? 0), 0));
@@ -736,7 +751,7 @@ class AppState {
     return p && raw ? prunePanes(raw, (x) => this.paneExists(p, x)) : null;
   });
   /** The panes are on screen: the Kanban, the pull requests and the Docs cover them (they come back when those close). */
-  panesOn = $derived(this.ui.view === 'project' && !!this.panes && !this.boardOn && !this.docsOn && !this.prsOn);
+  panesOn = $derived(this.ui.view === 'project' && !!this.panes && !this.boardOn && !this.docsOn && !this.prsOn && !this.workspaceOn);
   /** The content shown alone in the work area, which a content dropped beside it splits (null: none, or a wide view). */
   singleItem = $derived.by((): PaneItem | null => {
     const p = this.project;
@@ -1908,6 +1923,7 @@ class AppState {
     this.board[projectId] = true;
     this.docs[projectId] = false;
     this.prs[projectId] = false;
+    this.workspace[projectId] = false;
     this.selectedTerm[projectId] = null;
     this.selectedPage[projectId] = null;
     this.selectedLaunch[projectId] = null;
@@ -1917,6 +1933,26 @@ class AppState {
 
   closeBoard(projectId = this.ui.activeProject) {
     if (projectId) this.board[projectId] = false;
+  }
+
+  /** Shows the « Workspace » of a project: the canvas of its agents, in place of every other view of its main area. */
+  openWorkspace(projectId = this.ui.activeProject) {
+    if (!projectId) return;
+    this.ui.activeProject = projectId;
+    this.ui.view = 'project';
+    this.board[projectId] = false;
+    this.docs[projectId] = false;
+    this.prs[projectId] = false;
+    this.selectedTerm[projectId] = null;
+    this.selectedPage[projectId] = null;
+    this.selectedLaunch[projectId] = null;
+    this.closeEditor(projectId);
+    this.workspace[projectId] = true;
+    this.persistUi();
+  }
+
+  closeWorkspace(projectId = this.ui.activeProject) {
+    if (projectId) this.workspace[projectId] = false;
   }
 
   /**
@@ -1930,6 +1966,7 @@ class AppState {
     this.board[projectId] = false;
     this.docs[projectId] = true;
     this.prs[projectId] = false;
+    this.workspace[projectId] = false;
     if (space) this.docsSpace[projectId] = space;
     if (page !== undefined) this.docsPage[projectId] = page;
     // A space chosen: the discussion open leaves the main area.
@@ -1971,6 +2008,7 @@ class AppState {
     this.board[projectId] = false;
     this.docs[projectId] = false;
     this.prs[projectId] = true;
+    this.workspace[projectId] = false;
     this.selectedTerm[projectId] = null;
     this.selectedPage[projectId] = null;
     this.selectedLaunch[projectId] = null;
@@ -2153,6 +2191,7 @@ class AppState {
     this.board[projectId] = false;
     this.docs[projectId] = false;
     this.prs[projectId] = false;
+    this.workspace[projectId] = false;
     this.selectedTerm[projectId] = null;
     this.selectedPage[projectId] = null;
     this.selectedLaunch[projectId] = null;
