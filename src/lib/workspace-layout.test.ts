@@ -98,4 +98,26 @@ describe('the compass of the workspace', () => {
     expect(r.links[1].d.startsWith(`M ${a.w} `)).toBe(true);
     expect(r.links[1].d.endsWith(`${a.w + GAP} ${b.centre.y + b.centre.h / 2}`)).toBe(true);
   });
+
+  it('says the tasks it cuts, 9 tiles at most in all', () => {
+    const rows = planView(agent({ plan: planWith(['done', 'inProgress', ...Array(10).fill('pending')]) }))!.rows;
+    const b = bandTiles(rows);
+    expect(b).toMatchObject({ folded: 1, hidden: 4 });
+    expect(b.rows).toHaveLength(7);
+    expect(bandTiles(rows.slice(0, 5)).hidden).toBe(0);
+  });
+  it('computes the frame of an agent once, while it and its options stay the same', () => {
+    const a = agent({ id: 'a', plan: planWith(['inProgress'], { agents: [sub('s1')] }) });
+    const f = frameOf(a, { seenAt: 5 });
+    expect(frameOf(a, { seenAt: 5 })).toBe(f);
+    expect(frameOf({ ...a }, { seenAt: 5 })).toEqual(f);
+    expect(frameOf(a, { seenAt: 5, teamOpen: true })).not.toBe(f);
+  });
+  it('draws the links of a frame away from the origin in the world', () => {
+    const a = frameOf(agent({ id: 'a' }));
+    const b = frameOf(agent({ id: 'b', plan: planWith(['inProgress']) }));
+    const r = layoutNear([a, b]);
+    const x = r.items[1].x + 360 / 2;
+    expect(r.links[0].d).toBe(`M ${x} ${b.centre.y} L ${x} ${b.north!.h}`);
+  });
 });

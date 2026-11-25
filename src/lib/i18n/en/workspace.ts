@@ -26,6 +26,7 @@ export default defineZone('workspace', {
     chip: 'Plan',
     count: '{done}/{total} tasks · {percent} %',
     folded: { one: '{count} done', other: '{count} done' },
+    hidden: { one: '+ {count} more', other: '+ {count} more' },
   },
   team: {
     task: 'task {n}',

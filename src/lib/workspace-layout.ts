@@ -84,18 +84,26 @@ export type TeamItem =
 
 /** `run` alone moves: a moving link always means « it runs right now ». */
 export type LinkState = 'run' | 'done' | 'failed' | 'plan' | 'launched';
-/** `d`: the SVG path, in the frame's coordinates, then the world's. */
+/** `d`: the SVG path, in the world's coordinates. */
 export type Link = { id: string; state: LinkState; d: string };
+/** A link of a frame, from (x1, y1) to (x2, y2) in the frame's coordinates: a curve, or a straight line. */
+export type Edge = { id: string; state: LinkState; x1: number; y1: number; x2: number; y2: number; straight?: boolean };
 
-export type Frame = { agentId: string; w: number; h: number; centre: Box; north: Box | null; team: Placed<TeamItem>[]; links: Link[] };
+export type Frame = { agentId: string; w: number; h: number; centre: Box; north: Box | null; team: Placed<TeamItem>[]; links: Edge[] };
 /** `teamOpen`: its pile of ended subagents unfolded; `seenAt`: when it was unfolded last; `centreH`: its card's height. */
 export type FrameOpts = { teamOpen?: boolean; seenAt?: number; centreH?: number };
 
-/** The tiles of the plan's band: all of them up to 9, else the tasks done folded and the others, in order. */
-export function bandTiles(rows: PlanRow[]): { folded: number; rows: PlanRow[] } {
-  if (rows.length <= MAX_TILES) return { folded: 0, rows };
+/**
+ * The tiles of the plan's band: all of them up to 9, else the tasks done folded and the others, in order; past 9 tiles
+ * still, the last says how many are `hidden`.
+ */
+export function bandTiles(rows: PlanRow[]): { folded: number; rows: PlanRow[]; hidden: number } {
+  if (rows.length <= MAX_TILES) return { folded: 0, rows, hidden: 0 };
   const left = rows.filter((r) => r.state !== 'done');
-  return { folded: rows.length - left.length, rows: left.slice(0, MAX_TILES - 1) };
+  const folded = rows.length - left.length;
+  const slots = MAX_TILES - (folded ? 1 : 0);
+  if (left.length <= slots) return { folded, rows: left, hidden: 0 };
+  return { folded, rows: left.slice(0, slots - 1), hidden: left.length - (slots - 1) };
 }
 
 /**
@@ -131,32 +139,48 @@ function curve(x1: number, y1: number, x2: number, y2: number): string {
   return `M ${x1} ${y1} C ${mx} ${y1}, ${mx} ${y2}, ${x2} ${y2}`;
 }
 
-/** The path `d` moved by (dx, dy): its points are pairs « x y », as `curve` and the plan's line write them. */
-const shift = (d: string, dx: number, dy: number) => d.replace(/(-?[\d.]+) (-?[\d.]+)/g, (_, x, y) => `${+x + dx} ${+y + dy}`);
+/** The link of an edge of a frame drawn at (dx, dy) of the world. */
+function linkOf(e: Edge, dx: number, dy: number): Link {
+  const [x1, y1, x2, y2] = [e.x1 + dx, e.y1 + dy, e.x2 + dx, e.y2 + dy];
+  return { id: e.id, state: e.state, d: e.straight ? `M ${x1} ${y1} L ${x2} ${y2}` : curve(x1, y1, x2, y2) };
+}
+
+/** The frames computed, by agent object: one replaced (every update of the core replaces it) is computed again. */
+const frames = new WeakMap<Agent, { key: string; frame: Frame }>();
 
 /**
  * The compass of `agent`, in its own coordinates: the plan's band on top (with tasks), its card below, its team in a
  * column on the right. A subagent whose parent is in the team, and a background task whose subagent is, lie right of it.
  */
 export function frameOf(agent: Agent, opts: FrameOpts = {}): Frame {
+  const key = `${!!opts.teamOpen}|${opts.seenAt ?? 0}|${opts.centreH ?? ''}`;
+  const known = frames.get(agent);
+  if (known?.key === key) return known.frame;
+  const frame = computeFrame(agent, opts);
+  frames.set(agent, { key, frame });
+  return frame;
+}
+
+function computeFrame(agent: Agent, opts: FrameOpts): Frame {
   const rows = planView(agent)?.rows ?? [];
   let north: Box | null = null;
   if (rows.length) {
     const b = bandTiles(rows);
-    const n = b.rows.length + (b.folded ? 1 : 0);
+    const n = b.rows.length + (b.folded ? 1 : 0) + (b.hidden ? 1 : 0);
     north = { x: 0, y: 0, w: Math.max(CARD.w, n * (TILE.w + TILE_GAP) + TILE_GAP), h: BAND_H };
   }
   const centre: Box = { x: 0, y: north ? BAND_H + GAP : 0, w: CARD.w, h: opts.centreH ?? CARD.h };
-  const links: Link[] = [];
+  const links: Edge[] = [];
   if (north) {
     const x = CARD.w / 2;
-    links.push({ id: `${agent.id}:plan`, state: 'plan', d: `M ${x} ${centre.y} L ${x} ${north.h}` });
+    links.push({ id: `${agent.id}:plan`, state: 'plan', x1: x, y1: centre.y, x2: x, y2: north.h, straight: true });
   }
 
   const items = teamOf(agent, opts);
+  const ids = new Set(items.map((i) => i.id));
   const parentOf = (i: TeamItem): string | undefined => {
     const p = i.kind === 'sub' ? i.sub.parent : i.kind === 'bg' ? ownerOf(agent.plan, i.row)?.id : undefined;
-    return p && p !== i.id && items.some((o) => o.id === p) ? p : undefined;
+    return p && p !== i.id && ids.has(p) ? p : undefined;
   };
   const placed = new Map<string, Placed<TeamItem>>();
   /** The right end of each row the column started, by the item that started it. */
@@ -191,7 +215,7 @@ export function frameOf(agent: Agent, opts: FrameOpts = {}): Frame {
     const from = p ? placed.get(p)! : centre;
     const state: LinkState =
       i.kind === 'bg' ? 'run' : i.kind === 'folded' ? 'done' : i.sub.status === 'running' ? 'run' : i.sub.status === 'failed' ? 'failed' : 'done';
-    links.push({ id: `${agent.id}:${i.id}`, state, d: curve(from.x + from.w, from.y + from.h / 2, i.x, i.y + i.h / 2) });
+    links.push({ id: `${agent.id}:${i.id}`, state, x1: from.x + from.w, y1: from.y + from.h / 2, x2: i.x, y2: i.y + i.h / 2 });
   }
 
   const boxes: Box[] = [centre, ...(north ? [north] : []), ...team];
@@ -235,14 +259,17 @@ export function canvasOrder(
 ): { order: Agent[]; launched: [from: string, to: string][] } {
   const order: Agent[] = [];
   const launched: [string, string][] = [];
-  const shown = new Set(agents.map((a) => a.id));
+  const shown = new Map(agents.map((a) => [a.id, a]));
+  const placed = new Set<string>();
   const visit = (a: Agent) => {
-    if (order.includes(a)) return;
+    if (placed.has(a.id)) return;
+    placed.add(a.id);
     order.push(a);
     for (const d of drivenAgents(a.plan, all, tickets, a.id)) {
-      if (!shown.has(d.id) || order.some((o) => o.id === d.id)) continue;
+      const next = shown.get(d.id);
+      if (!next || placed.has(d.id)) continue;
       launched.push([a.id, d.id]);
-      visit(agents.find((x) => x.id === d.id)!);
+      visit(next);
     }
   };
   for (const a of agents) visit(a);
@@ -256,17 +283,14 @@ export function layoutNear(
   maxW = 2400,
 ): { items: Placed<Frame>[]; links: Link[]; w: number; h: number } {
   const packed = packRows(frames, maxW, GAP);
-  const links: Link[] = packed.items.flatMap((f) => f.links.map((l) => ({ ...l, d: shift(l.d, f.x, f.y) })));
+  const links: Link[] = packed.items.flatMap((f) => f.links.map((e) => linkOf(e, f.x, f.y)));
   const byId = new Map(packed.items.map((f) => [f.agentId, f]));
   for (const [from, to] of launched) {
     const a = byId.get(from);
     const b = byId.get(to);
     if (!a || !b) continue;
-    links.push({
-      id: `launched:${from}:${to}`,
-      state: 'launched',
-      d: curve(a.x + a.w, a.y + a.centre.y + a.centre.h / 2, b.x, b.y + b.centre.y + b.centre.h / 2),
-    });
+    const y = (f: Placed<Frame>) => f.y + f.centre.y + f.centre.h / 2;
+    links.push(linkOf({ id: `launched:${from}:${to}`, state: 'launched', x1: a.x + a.w, y1: y(a), x2: b.x, y2: y(b) }, 0, 0));
   }
   return { ...packed, links };
 }

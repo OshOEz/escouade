@@ -22,4 +22,10 @@ describe('the plan of an agent on the workspace', () => {
     render(PlanBand, { agent: agent({ plan: planWith([...Array(8).fill('done'), 'inProgress', 'pending']) }) });
     expect(screen.getByText('8 faites')).toBeTruthy();
   });
+
+  it('says how many tasks it does not show', () => {
+    render(PlanBand, { agent: agent({ plan: planWith(['done', 'inProgress', ...Array(10).fill('pending')]) }) });
+    expect(screen.getByText('+ 4 autres')).toBeTruthy();
+    expect(screen.getAllByRole('listitem')).toHaveLength(9);
+  });
 });

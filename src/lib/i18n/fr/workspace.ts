@@ -31,6 +31,8 @@ export default {
     chip: 'Plan',
     count: '{done}/{total} tâches · {percent} %',
     folded: { one: '{count} faite', other: '{count} faites' },
+    /** The tasks past the band's 9 tiles. */
+    hidden: { one: '+ {count} autre', other: '+ {count} autres' },
   },
   /** The team, east of the card: its subagents and background tasks. */
   team: {

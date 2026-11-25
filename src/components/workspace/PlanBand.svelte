@@ -9,7 +9,7 @@
   let { agent }: { agent: Agent } = $props();
 
   const view = $derived(planView(agent));
-  const band = $derived(view ? bandTiles(view.rows) : { folded: 0, rows: [] });
+  const band = $derived(view ? bandTiles(view.rows) : { folded: 0, rows: [], hidden: 0 });
 </script>
 
 {#if view}
@@ -34,6 +34,9 @@
           {#if r.percent !== null}<span class="bar" aria-hidden="true"><i style:width="{r.percent}%"></i></span>{/if}
         </li>
       {/each}
+      {#if band.hidden}
+        <li class="tile folded">{t('workspace.plan.hidden', { count: band.hidden })}</li>
+      {/if}
     </ol>
   </section>
 {/if}
