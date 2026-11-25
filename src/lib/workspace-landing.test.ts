@@ -70,6 +70,16 @@ describe('landingOf', () => {
     ).toEqual(['feat/y → staging', 'feat/y → Preview']);
   });
 
+  it('lands one deployment an environment: the latest, when the pull request was deployed there twice', () => {
+    const pr = pullRequest({ head: 'feat/y', state: 'open', checks: null });
+    const deployments = [
+      { environment: 'Preview', state: 'in_progress', url: 'https://new' },
+      { environment: 'Preview', state: 'inactive', url: 'https://old' },
+    ];
+    const r = landingOf(agent({ prs: [pr] }), ctx({ pr: { ...prDetail(), deployments } }));
+    expect(r).toEqual([expect.objectContaining({ kind: 'deploy', id: 'deploy:Preview', state: 'running', where: 'new' })]);
+  });
+
   it('lands nothing for an agent with nothing', () => {
     expect(landingOf(agent(), ctx())).toEqual([]);
   });

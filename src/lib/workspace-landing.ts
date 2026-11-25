@@ -115,8 +115,10 @@ export function landingOf(agent: Agent, ctx: LandingCtx): Landing[] {
 
   const branch = agent.worktree?.branch ?? agent.foundWorktree?.branch ?? '';
   const envs = new Set<string>();
-  // Those of the open pull request only: a detail read before it closed lands nothing.
+  // Those of the open pull request only: a detail read before it closed lands nothing. The host gives the latest first:
+  // one an environment, the latest.
   for (const d of pr ? (ctx.pr?.deployments ?? []) : []) {
+    if (envs.has(d.environment)) continue;
     envs.add(d.environment);
     out.push(
       ribbon({
