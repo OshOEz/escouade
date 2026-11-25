@@ -7,6 +7,8 @@ import { req } from '../../test/workspace';
 import WorkspaceView from './WorkspaceView.svelte';
 
 const show = () => render(WorkspaceView, { project: app.projects[0] });
+/** The zoom the bar shows (jsdom has no size: the canvas opens fitted at its lowest zoom). */
+const zoomShown = () => document.querySelector('.bar .pct')?.textContent;
 
 describe('the workspace', () => {
   beforeEach(() => {
@@ -50,6 +52,29 @@ describe('the workspace', () => {
     expect(screen.getByText('250 %')).toBeTruthy();
     for (let i = 0; i < 30; i++) await fireEvent.click(screen.getByRole('button', { name: 'Dézoomer' }));
     expect(screen.getByText('30 %')).toBeTruthy();
+  });
+
+  it('keeps its camera when an agent changes', async () => {
+    resetApp({ agents: [agent({ id: 'a1', status: 'running' })] });
+    show();
+    const opened = zoomShown();
+    await fireEvent.click(screen.getByRole('button', { name: 'Zoomer' }));
+    const zoomed = zoomShown();
+    expect(zoomed).not.toBe(opened);
+    app.agents.a1 = { ...app.agents.a1, status: 'waiting' };
+    await new Promise((r) => setTimeout(r, 0));
+    expect(zoomShown()).toBe(zoomed);
+  });
+
+  it('leaves Ctrl and Cmd shortcuts to the app', async () => {
+    resetApp({ agents: [agent()] });
+    show();
+    const opened = zoomShown();
+    await fireEvent.keyDown(window, { key: '+', metaKey: true });
+    await fireEvent.keyDown(window, { key: '=', ctrlKey: true });
+    expect(zoomShown()).toBe(opened);
+    await fireEvent.keyDown(window, { key: '+' });
+    expect(zoomShown()).not.toBe(opened);
   });
 
   it('closes on « Quitter »', async () => {

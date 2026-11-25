@@ -755,7 +755,7 @@ class AppState {
   /** The content shown alone in the work area, which a content dropped beside it splits (null: none, or a wide view). */
   singleItem = $derived.by((): PaneItem | null => {
     const p = this.project;
-    if (!p || this.ui.view !== 'project' || this.panesOn || this.boardOn || this.docsOn || this.prsOn) return null;
+    if (!p || this.ui.view !== 'project' || this.panesOn || this.boardOn || this.docsOn || this.prsOn || this.workspaceOn) return null;
     if (this.editorOn) return { kind: 'editor' };
     if (this.runCommand) return { kind: 'launch', id: this.selectedLaunch[p.id]! };
     if (this.term) return { kind: 'term', id: this.term.id };
@@ -781,7 +781,7 @@ class AppState {
       ? this.panes.active.startsWith('agent:')
         ? (this.agents[this.panes.active.slice(6)] ?? null)
         : null
-      : this.ui.view === 'project' && !this.term && !this.pageShown && !this.runCommand && !this.editorOn && !this.boardOn && !this.prsOn
+      : this.ui.view === 'project' && !this.term && !this.pageShown && !this.runCommand && !this.editorOn && !this.boardOn && !this.prsOn && !this.workspaceOn
         ? this.agent
         : null,
   );
@@ -1633,6 +1633,7 @@ class AppState {
     this.selectedLaunch[a.projectId] = null;
     this.board[a.projectId] = false;
     this.docs[a.projectId] = false;
+    this.workspace[a.projectId] = false;
     this.prs[a.projectId] = false;
     const ed = this.editor[a.projectId];
     if (ed?.on) {
@@ -1654,7 +1655,8 @@ class AppState {
       this.selectedLaunch[p.id] = null;
       this.board[p.id] = false;
       this.docs[p.id] = false;
-      this.prs[p.id] = false;
+      this.workspace[p.id] = false;
+    this.prs[p.id] = false;
       this.closeEditor(p.id);
       this.paneShow(p.id, { kind: 'term', id });
     }
@@ -1669,7 +1671,8 @@ class AppState {
       this.selectedPage[p.id] = null;
       this.board[p.id] = false;
       this.docs[p.id] = false;
-      this.prs[p.id] = false;
+      this.workspace[p.id] = false;
+    this.prs[p.id] = false;
       this.closeEditor(p.id);
       this.paneShow(p.id, { kind: 'launch', id: commandId });
     }
@@ -1685,7 +1688,8 @@ class AppState {
       this.selectedLaunch[p.id] = null;
       this.board[p.id] = false;
       this.docs[p.id] = false;
-      this.prs[p.id] = false;
+      this.workspace[p.id] = false;
+    this.prs[p.id] = false;
       this.closeEditor(p.id);
       this.paneShow(p.id, { kind: 'page', id: key });
     }

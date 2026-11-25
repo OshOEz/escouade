@@ -1252,6 +1252,26 @@ describe('workspace', () => {
     expect(app.ui.view).toBe('project');
   });
 
+  it('gives way to an agent, a terminal, a launch or a page picked in the sidebar', () => {
+    resetApp({ projects: [project({ id: 'p1' })], agents: [agent({ id: 'a1', projectId: 'p1' })] });
+    app.openWorkspace('p1');
+    app.selectAgent('a1');
+    expect(app.workspaceOn).toBe(false);
+    for (const pick of [() => app.selectTerm('t1'), () => app.selectLaunch('c1'), () => app.selectPage('k1')]) {
+      app.openWorkspace('p1');
+      pick();
+      expect(app.workspaceOn).toBe(false);
+    }
+  });
+
+  it('hides the agent under it: nothing is shown alone, no agent is seen', () => {
+    resetApp({ projects: [project({ id: 'p1' })], agents: [agent({ id: 'a1', projectId: 'p1' })] });
+    app.selectAgent('a1');
+    app.openWorkspace('p1');
+    expect(app.agentShown).toBeNull();
+    expect(app.singleItem).toBeNull();
+  });
+
   it('is per project', () => {
     app.openWorkspace('p1');
     app.selectProject('p2');

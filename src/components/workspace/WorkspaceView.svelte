@@ -2,6 +2,7 @@
   // The « Workspace » of a project (spec 2026-11-25-vue-workspace-design.md, « La toile »): its agents on a dotted
   // canvas one moves and zooms, each a disc seen from afar. The canvas is one world, transformed by the camera; the
   // controls float above it.
+  import { untrack } from 'svelte';
   import { t } from '../../lib/i18n';
   import { menu } from '../../lib/menu.svelte';
   import { app } from '../../lib/state.svelte';
@@ -33,7 +34,8 @@
     cam = fit(world, size());
   }
   $effect(() => {
-    if (view) fitAll();
+    // Only on opening: the agents changing must not move the camera the user placed.
+    if (view) untrack(fitAll);
   });
 
   const zoomBy = (factor: number) => {
@@ -73,6 +75,7 @@
   const typing = (el: Element | null) =>
     !!el && (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement || (el as HTMLElement).isContentEditable);
   function key(e: KeyboardEvent) {
+    if (e.metaKey || e.ctrlKey || e.altKey || e.defaultPrevented) return;
     if (typing(document.activeElement) || menu.open || document.querySelector('[aria-modal="true"]')) return;
     if (e.key === 'Escape') app.closeWorkspace(project.id);
     else if (e.key === '+' || e.key === '=') zoomBy(ZOOM_STEP);

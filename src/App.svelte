@@ -305,6 +305,7 @@
     void app.editorOn;
     void app.boardOn;
     void app.docsOn;
+    void app.workspaceOn;
     void app.ui.view;
     void app.panes;
     app.markSeen();
