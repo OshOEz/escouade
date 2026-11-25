@@ -3,7 +3,6 @@
 </script>
 
 <script lang="ts">
-  import { connection } from '../lib/connection.svelte';
   import { untrack } from 'svelte';
   import {
     MAX_TOTAL,
@@ -20,11 +19,11 @@
   import { interactiveCommands, interactiveOf, queueViewCommand, takeViewCommand, type Opens } from '../lib/interactive';
   import { canSwitchView, inHarnessView, toggleRemote } from '../lib/agent-actions';
   import { conversationOf } from '../lib/conversations.svelte';
-  import { getDraft, giveBack, setDraft } from '../lib/drafts';
-  import { hold, holdModeOf, settled } from '../lib/outbox.svelte';
+  import { getDraft, setDraft } from '../lib/drafts';
+  import { holdModeOf } from '../lib/outbox.svelte';
   import { injectedSource } from '../lib/events';
   import { parseLocalCommand } from '../lib/localcmd';
-  import { reportRefusal, sendDraft } from '../lib/send.svelte';
+  import { outgoing, pendingItemOf, sendPaused, submitDraft } from '../lib/send.svelte';
   import { fileOrigins } from '../lib/file-origin';
   import { basename, dirname, fSize } from '../lib/format';
   import { t } from '../lib/i18n';
@@ -50,7 +49,7 @@
   import { keyLabel } from '../lib/platform';
   import { observeWidth } from '../lib/resize';
   import { app, atWork } from '../lib/state.svelte';
-  import type { Agent, QuestionItem } from '../lib/types';
+  import type { Agent } from '../lib/types';
   import { insertAt } from '../lib/dictation';
   import type { DictationTarget } from '../lib/dictation.svelte';
   import AttachmentChip from './AttachmentChip.svelte';
@@ -81,9 +80,6 @@
   /** `mark`: where an interactive command opens (ESC-401), said before it is pressed. */
   let suggestions = $state<{ label: string; detail: string; value: string; mark?: string }[]>([]);
   let sel = $state(0);
-  let sending = $state(false);
-  /** The agent whose message being sent the backend holds until its worktree is prepared. */
-  let heldFor: string | null = null;
   /** Files being read, not attached yet. */
   let reading = $state(0);
   /** A file is being copied: its chip is there, but its path is not known yet. */
@@ -113,7 +109,7 @@
   };
 
   const conv = $derived(conversationOf(agent.id));
-  const pendingItem = $derived(agent.pending.length ? conv.items.find((i) => i.id === agent.pending[0]) : undefined);
+  const pendingItem = $derived(pendingItemOf(agent));
   const busy = $derived(atWork(agent));
   const sendTitle = $derived.by(() => {
     const engine = speakerOf(agent.engine);
@@ -213,7 +209,7 @@
   const narrow = $derived(width > 0 && width < 520);
   const cramped = $derived(width > 0 && width < 300);
   // S10 (ESC-537): the connection to the server cut, sending is paused, not queued: the draft stays, nothing leaves.
-  const paused = $derived(connection.server !== null && connection.state !== 'open');
+  const paused = $derived(sendPaused());
   const placeholder = $derived(
     paused
       ? t('servers.composer.paused')
@@ -562,9 +558,6 @@
     }
   }
 
-  /** The send under way: a message sent before it is taken goes right after it, never dropped. */
-  let inflight: Promise<void> | null = null;
-
   async function send() {
     const body = text.trim();
     if ((!body && !files.length) || reading || copying || paused) return;
@@ -575,90 +568,10 @@
       await openInteractive(opens, body);
       return;
     }
-    // The one before waits for the worktree, which can take minutes: this one is not dropped without a word.
-    if (sending && heldFor === agent.id) {
-      app.toast(t('composer.send.alreadyWaiting'));
-      return;
-    }
-    // Text typed while Claude waits answers the question / refuses the permission.
-    const answering = body ? pendingItem : undefined;
-    const mode = answering ? null : holdModeOf(agent);
-    if (mode) {
-      hold(agent.id, body, files.slice(), mode);
-      text = '';
-      files = [];
-      return;
-    }
-    const message = { id: agent.id, conv, owner: draftFor, body, answering, prevText: text, prevFiles: files };
-    // Another one may still be on its way (its answer can show before its call returns): this one leaves the field at
-    // once, as it would, and goes right after it.
-    const before = inflight;
-    text = '';
-    if (!answering) files = [];
-    const mine = (async () => {
-      if (before) await before;
-      // Nor before a held message on its way.
-      await settled(message.id);
-      await deliver(message);
-    })();
-    inflight = mine;
-    await mine;
-    if (inflight === mine) inflight = null;
-  }
-
-  async function deliver({
-    id,
-    conv,
-    owner,
-    body,
-    answering,
-    prevText,
-    prevFiles,
-  }: {
-    id: string;
-    conv: ReturnType<typeof conversationOf>;
-    owner: string;
-    body: string;
-    answering: typeof pendingItem;
-    prevText: string;
-    prevFiles: DraftAttachment[];
-  }) {
-    sending = true;
-    const agent = app.agents[id];
-    // A new worktree is prepared first (made first, when it waits for the first message: ESC-156): the backend holds the
-    // message until then, and it shows meanwhile.
-    const unhold =
-      !answering && (agent?.setup || agent?.worktreePending)
-        ? conv.holdMessage({
-            text: body,
-            images: prevFiles.filter((f) => f.kind === 'image').length,
-            files: prevFiles.filter((f) => f.kind !== 'image').map((f) => f.name),
-          })
-        : undefined;
-    if (unhold) heldFor = id;
-    try {
-      if (answering?.kind === 'question') {
-        const q = answering as QuestionItem;
-        await api.answerQuestion(id, q.id, Object.fromEntries(q.questions.map((x) => [x.question, body])));
-      } else if (answering?.kind === 'permission') {
-        await api.answerPermission(id, answering.id, 'deny', body);
-      } else {
-        await sendDraft(id, body, prevFiles);
-      }
-      if (answering && prevFiles.length) {
-        app.toast(t('composer.send.filesKept'));
-      }
-      conv.noAccount = null;
-    } catch (e) {
-      // The files of an answer never left the field.
-      giveBack(owner, prevText, answering ? [] : prevFiles);
-      // For want of an account of its harness: said in the conversation, with the way out (choice 19).
-      reportRefusal(owner, e);
-    }
-    // Recorded by now, or given back to the field above.
-    unhold?.();
-    heldFor = null;
-    sending = false;
+    const s = submitDraft(agent, draftFor, text, files);
+    if (s.cleared !== 'none') text = '';
+    if (s.cleared === 'all') files = [];
+    await s.done;
   }
 
   function stop() {
@@ -945,7 +858,7 @@
         <button
           class="btn primary send"
           use:tip={sendTitle}
-          disabled={paused || sending || reading > 0 || copying || (!text.trim() && !files.length)}
+          disabled={paused || !!outgoing[agent.id] || reading > 0 || copying || (!text.trim() && !files.length)}
           onclick={send}
         >
           {t('composer.send.label')}{#if !cramped}<kbd aria-hidden="true"><Icon name="enter" size={12} /></kbd>{/if}
