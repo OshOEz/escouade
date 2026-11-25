@@ -159,7 +159,7 @@ describe('the compass of the workspace', () => {
     expect(f.links.filter((l) => l.id.startsWith('tool:'))).toEqual([expect.objectContaining({ id: 'tool:plugin:github', state: 'run' })]);
     const link = f.links.find((l) => l.id === 'tool:plugin:github')!;
     expect(link.y2).toBe(f.centre.y);
-    expect(f.south.y).toBe(f.centre.y + f.centre.h + GAP);
+    expect(f.south!.y).toBe(f.centre.y + f.centre.h + GAP);
   });
   it('shows the most recent tools, the others in a pile that unfolds', () => {
     const tools = Array.from({ length: 10 }, (_, i) => ({ ...kit('skill', `s${i}`), firstAt: i, lastAt: i === 0 ? 99 : i }));
@@ -396,9 +396,53 @@ describe('the test cards', () => {
 describe('the landing zone', () => {
   it('always draws the landing zone south, below the tests, with one link down to it', () => {
     const f = frameOf(agent({ canvas: { tools: [], subs: [], commands: [cmd('c0', 'cargo test')] } }));
-    expect(f.south.y).toBeGreaterThan(f.tests[0].y + f.tests[0].h);
-    expect(f.south.h).toBe(SOUTH.h);
+    expect(f.south!.y).toBeGreaterThan(f.tests[0].y + f.tests[0].h);
+    expect(f.south!.h).toBe(SOUTH.h);
     expect(f.links.filter((l) => l.id.endsWith(':south'))).toHaveLength(1);
-    expect(frameOf(agent(), { southH: 300 }).south.h).toBe(300);
+    expect(frameOf(agent(), { southH: 300 }).south!.h).toBe(300);
+  });
+});
+
+describe('the piles at mid-height', () => {
+  const busy = () =>
+    agent({
+      plan: planWith(['done', 'inProgress'], { agents: [sub('s1'), sub('s2', 'done')] }),
+      canvas: { tools: [kit('skill', 'a'), kit('plugin', 'b')], subs: [] },
+    });
+  it('folds each side in a pile at mid-height', () => {
+    const f = frameOf(busy(), { level: 'mid', landing: [art(true), art(true), art(false)] });
+    expect(f.piles.map(({ side, count }) => ({ side, count }))).toEqual([
+      { side: 'west', count: 2 },
+      { side: 'east', count: 2 },
+      { side: 'south', count: 3 },
+    ]);
+    expect(f.west).toEqual([]);
+    expect(f.team).toEqual([]);
+    expect(f.south).toBeNull();
+    expect(f.northMini).toBe(true);
+    expect(f.h).toBeLessThan(frameOf(busy(), { landing: [art(true)] }).h);
+  });
+  it('unfolds the sides asked for', () => {
+    const f = frameOf(busy(), { level: 'mid', unfolded: ['west'] });
+    expect(f.west).toHaveLength(2);
+    expect(f.piles.map((p) => p.side)).toEqual(['east']);
+  });
+  it('draws no pile of an empty side, not even of the landing zone', () => {
+    const f = frameOf(agent(), { level: 'mid' });
+    expect(f.piles).toEqual([]);
+    expect(f.south).toBeNull();
+    expect(f.links.filter((l) => l.id.endsWith(':south'))).toEqual([]);
+  });
+  it('animates the link to a pile that holds something running', () => {
+    const f = frameOf(busy(), { level: 'mid' });
+    expect(f.links.find((l) => l.id.endsWith(':pile:east'))?.state).toBe('run');
+    expect(f.links.find((l) => l.id.endsWith(':pile:west'))?.state).not.toBe('run');
+  });
+  it('never folds a waiting agent', () => {
+    const a = { ...busy(), status: 'waiting' as const, requests: [req('q')] };
+    const f = frameOf(a, { level: 'mid' });
+    expect(f.piles).toEqual([]);
+    expect(f.northMini).toBe(false);
+    expect(f.west).toHaveLength(2);
   });
 });

@@ -7,7 +7,7 @@ import { planView } from './plan';
 import { sidebarSubs, subagentInfo } from './subagents';
 import type { Agent, ConvItem, KitUse, SubAgent, Ticket } from './types';
 import type { Box, Size } from './workspace-camera';
-import type { Landing, RibbonState } from './workspace-landing';
+import { landed, type Landing, type RibbonState } from './workspace-landing';
 import { looksLikeTests, testsOf, type TestRun } from './workspace-tests';
 
 export type DiscState = 'run' | 'wait' | 'error' | 'done' | 'idle';
@@ -148,6 +148,14 @@ export const TOOL = { w: 168, h: 60, aisle: 24, row: 12, drop: 32 } as const;
 export const TOOLS_SHOWN = 8;
 /** The pile of the tools: `hidden` of them folded in it, or `open` (it folds them back). */
 export type ToolPile = { hidden: number; open: boolean };
+/**
+ * Mid-height (45 to 80 %): a side folded in one pile (« Outils ×4 », « Équipe ×4 », « Livrables ×3 ») that a click
+ * unfolds; `running` when one of its items runs. The plan is folded to its head and its gauge (`PLAN.folded`).
+ */
+export type Level = 'mid' | 'near';
+export const PILE = { w: 184, h: 64 } as const;
+export type PileSide = 'west' | 'east' | 'south';
+export type Pile = { side: PileSide; count: number; running: boolean };
 /** The pile of the ended subagents, and the gap between two cards of the team. */
 const FOLDED_H = 40;
 const STACK_GAP = 16;
@@ -189,8 +197,12 @@ export type Frame = {
   team: Placed<TeamItem>[];
   /** The latest test run of each card, stuck under it (`under`: 'centre' or the subagent's id). */
   tests: Placed<TestRun>[];
-  /** The landing zone: always there, below all the rest, as wide as the frame. */
-  south: Box;
+  /** The landing zone: below all the rest, as wide as the frame; always there near, none at mid-height when folded. */
+  south: Box | null;
+  /** At mid-height, its sides folded, in the order west, east, south; an empty side has none. */
+  piles: Placed<Pile>[];
+  /** At mid-height, its plan folded to its head and its gauge. */
+  northMini: boolean;
   links: Edge[];
 };
 /**
@@ -209,6 +221,11 @@ export type FrameOpts = {
   testCommand?: string;
   /** The landing zone's height measured. */
   southH?: number;
+  /** Its altitude: at `mid`, the sides not in `unfolded` are piles (never those of an agent that waits). */
+  level?: Level;
+  unfolded?: Side[];
+  /** What lands in its zone: at mid-height, what its pile counts. */
+  landing?: Landing[];
 };
 
 /** The highest a card grows (an agent that waits, its questions in it), at a zoom of 1: past it, its inset scrolls. */
@@ -285,7 +302,7 @@ const frames = new WeakMap<Agent, { key: string; frame: Frame }>();
  * column on the right. A subagent whose parent is in the team, and a background task whose subagent is, lie right of it.
  */
 export function frameOf(agent: Agent, opts: FrameOpts = {}): Frame {
-  const key = `${!!opts.teamOpen}|${opts.seenAt ?? 0}|${opts.centreH ?? ''}|${opts.planOpen !== false}|${JSON.stringify(opts.teamH ?? {})}|${!!opts.toolsOpen}|${opts.testCommand ?? ''}|${opts.southH ?? ''}`;
+  const key = `${!!opts.teamOpen}|${opts.seenAt ?? 0}|${opts.centreH ?? ''}|${opts.planOpen !== false}|${JSON.stringify(opts.teamH ?? {})}|${!!opts.toolsOpen}|${opts.testCommand ?? ''}|${opts.southH ?? ''}|${opts.level ?? ''}|${opts.unfolded ?? ''}|${opts.landing?.length ?? 0}:${opts.landing?.filter((l) => !landed(l)).length ?? 0}`;
   const known = frames.get(agent);
   if (known?.key === key) return known.frame;
   const frame = computeFrame(agent, opts);
@@ -294,14 +311,33 @@ export function frameOf(agent: Agent, opts: FrameOpts = {}): Frame {
 }
 
 function computeFrame(agent: Agent, opts: FrameOpts): Frame {
+  const mid = opts.level === 'mid' && !waits(agent);
+  const folded = (side: Side) => mid && !opts.unfolded?.includes(side);
+  const piles: Placed<Pile>[] = [];
+  const pileAt = (side: PileSide, count: number, running: boolean, x: number, y: number) => {
+    const pile = { side, count, running, x, y, ...PILE };
+    if (count) piles.push(pile);
+    return count ? pile : null;
+  };
   const tasks = planView(agent)?.rows ?? [];
   let north: Box | null = null;
+  const northMini = !!tasks.length && folded('north');
   if (tasks.length) {
-    const h = opts.planOpen === false ? PLAN.folded : PLAN.head + Math.min(tasks.length * PLAN.row + PLAN.pad, PLAN.list);
+    const h = opts.planOpen === false || northMini ? PLAN.folded : PLAN.head + Math.min(tasks.length * PLAN.row + PLAN.pad, PLAN.list);
     north = { x: 0, y: 0, w: PLAN.w, h };
   }
   const top = north ? north.h + GAP : 0;
-  const all = toolCards(agent);
+  const tools = toolCards(agent);
+  const westPile = folded('west')
+    ? pileAt(
+        'west',
+        tools.length,
+        tools.some((t) => t.running),
+        0,
+        top,
+      )
+    : null;
+  const all = folded('west') ? [] : tools;
   let shown = all;
   let pile: ToolPile | null = null;
   if (all.length > TOOLS_SHOWN) {
@@ -322,15 +358,29 @@ function computeFrame(agent: Agent, opts: FrameOpts): Frame {
   const west: Placed<ToolCard>[] = shown.map((t, i) => ({ ...t, ...slot(i) }));
   const westMore = pile && { ...pile, ...slot(west.length) };
   const rows = Math.ceil((west.length + (westMore ? 1 : 0)) / 2);
-  const centreY = rows ? top + rows * (TOOL.h + TOOL.row) - TOOL.row + TOOL.drop : top;
+  const centreY = westPile ? top + PILE.h + TOOL.drop : rows ? top + rows * (TOOL.h + TOOL.row) - TOOL.row + TOOL.drop : top;
   const centre: Box = { x: 0, y: centreY, w: CARD.w, h: opts.centreH ?? CARD.h };
   const links: Edge[] = [];
   if (north) {
     const x = CARD.w / 2;
     links.push({ id: `${agent.id}:plan`, state: 'plan', x1: x, y1: centre.y, x2: x, y2: north.h, straight: true });
   }
+  const pileLink = (p: Placed<Pile>, e: Omit<Edge, 'id' | 'state'>) =>
+    links.push({ id: `${agent.id}:pile:${p.side}`, state: p.running ? 'run' : 'plan', ...e });
+  if (westPile) {
+    const x = PILE.w / 2;
+    pileLink(westPile, { x1: x, y1: westPile.y + PILE.h, x2: x, y2: centre.y, straight: true });
+  }
 
-  const items = teamOf(agent, opts);
+  let items = teamOf(agent, opts);
+  if (folded('east')) {
+    // Its subagents and its background tasks, the ended ones too.
+    const all = teamOf(agent, { ...opts, teamOpen: true }).filter((i) => i.kind !== 'folded');
+    const running = all.some((i) => i.kind === 'bg' || (i.kind === 'sub' && i.sub.status === 'running'));
+    const pile = pileAt('east', all.length, running, CARD.w + 2 * GAP, centre.y);
+    if (pile) pileLink(pile, { x1: centre.x + centre.w, y1: centre.y + centre.h / 2, x2: pile.x, y2: pile.y + PILE.h / 2 });
+    items = [];
+  }
   const ids = new Set(items.map((i) => i.id));
   const parentOf = (i: TeamItem): string | undefined => {
     const p = i.kind === 'sub' ? i.sub.parent : i.kind === 'bg' ? ownerOf(agent.plan, i.row)?.id : undefined;
@@ -431,26 +481,34 @@ function computeFrame(agent: Agent, opts: FrameOpts): Frame {
     } else links.push({ id, state: 'run', x1, y1, x2: lane, y2: centre.y, via: [[lane, y1]] });
   }
 
-  const boxes: Box[] = [centre, ...(north ? [north] : []), ...west, ...(westMore ? [westMore] : []), ...team, ...tests];
-  const w = Math.max(...boxes.map((b) => b.x + b.w));
-  const south: Box = { x: 0, y: Math.max(...boxes.map((b) => b.y + b.h)) + GAP, w, h: opts.southH || SOUTH.h };
+  const boxes: Box[] = [centre, ...(north ? [north] : []), ...west, ...(westMore ? [westMore] : []), ...team, ...tests, ...piles];
+  let w = Math.max(...boxes.map((b) => b.x + b.w));
+  const southY = Math.max(...boxes.map((b) => b.y + b.h)) + GAP;
   // One line down to it, from the agent's card or its test card.
   const own = tests.find((r) => r.under === 'centre') ?? centre;
   const x = CARD.w / 2;
-  links.push({ id: `${agent.id}:south`, state: 'plan', x1: x, y1: own.y + own.h, x2: x, y2: south.y, straight: true });
-  return {
-    agentId: agent.id,
-    w,
-    h: south.y + south.h,
-    centre,
-    north,
-    west,
-    westMore,
-    team,
-    tests,
-    south,
-    links,
-  };
+  let south: Box | null = null;
+  let h = southY - GAP;
+  if (folded('south')) {
+    const landing = opts.landing ?? [];
+    const pile = pileAt(
+      'south',
+      landing.length,
+      landing.some((l) => !landed(l)),
+      0,
+      southY,
+    );
+    if (pile) {
+      pileLink(pile, { x1: x, y1: own.y + own.h, x2: x, y2: pile.y, straight: true });
+      w = Math.max(w, PILE.w);
+      h = pile.y + PILE.h;
+    }
+  } else {
+    south = { x: 0, y: southY, w, h: opts.southH || SOUTH.h };
+    links.push({ id: `${agent.id}:south`, state: 'plan', x1: x, y1: own.y + own.h, x2: x, y2: south.y, straight: true });
+    h = south.y + south.h;
+  }
+  return { agentId: agent.id, w, h, centre, north, west, westMore, team, tests, south, piles, northMini, links };
 }
 
 /** In rows, in order: an item that would pass `maxW` starts the next row; a row is as high as its highest. */
