@@ -39,6 +39,12 @@
     void asks;
     held = !!box?.contains(document.activeElement);
   });
+  /** The wheel scrolls the inset while it can that way; at its end, or with nothing to scroll, the canvas pans. A pinch zooms. */
+  function wheel(e: WheelEvent) {
+    const el = e.currentTarget as HTMLElement;
+    const room = e.deltaY < 0 ? el.scrollTop > 0 : e.deltaY > 0 && el.scrollTop + el.clientHeight < el.scrollHeight - 1;
+    if (room && !e.ctrlKey && !e.metaKey) e.stopPropagation();
+  }
   $effect(() => {
     void asks;
     if (held && (!document.activeElement || document.activeElement === document.body)) onfocusback?.();
@@ -49,9 +55,8 @@
 {#if agent.pending.length && !conv.loaded && mine(undefined)}
   <p class="loading">{t('workspace.ask.loading')}</p>
 {:else if asks.length}
-  <!-- On the canvas, the wheel scrolls the inset rather than pans (a pinch still zooms). -->
   <!-- `current` false: no card takes the answer keys nor shows them, several may wait on screen at once. -->
-  <div class="ask" bind:this={box} style:max-height="{maxH}px" onwheel={(e) => !e.ctrlKey && !e.metaKey && e.stopPropagation()}>
+  <div class="ask" bind:this={box} style:max-height="{maxH}px" onwheel={wheel}>
     {#each asks as item (item.id)}
       {#if label && item.sub}<p class="from">{t('workspace.ask.fromSub', { name: subName(agent, conv.items, item.sub) })}</p>{/if}
       {#if item.kind === 'question'}

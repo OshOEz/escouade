@@ -85,4 +85,24 @@ describe('the questions on a card of the workspace', () => {
     expect(screen.queryByText('Question q1 ?')).toBeNull();
     expect(back).toHaveBeenCalledOnce();
   });
+
+  it('keeps the wheel only when it can scroll that way, else the canvas pans', async () => {
+    const { container } = render(AskInset, { agent: app.agents.a1, mine: (s?: string) => !s, maxH: 700 });
+    await screen.findByText('Question q1 ?');
+    const ask = container.querySelector('.ask') as HTMLElement;
+    const panned = vi.fn();
+    container.addEventListener('wheel', panned);
+    const wheel = (deltaY: number) => ask.dispatchEvent(new WheelEvent('wheel', { deltaY, bubbles: true }));
+    wheel(50); // nothing to scroll
+    expect(panned).toHaveBeenCalledTimes(1);
+    Object.defineProperty(ask, 'scrollHeight', { value: 500 });
+    Object.defineProperty(ask, 'clientHeight', { value: 100 });
+    wheel(50); // down, room below
+    expect(panned).toHaveBeenCalledTimes(1);
+    wheel(-50); // up, at the top
+    expect(panned).toHaveBeenCalledTimes(2);
+    ask.scrollTop = 400;
+    wheel(50); // down, at the bottom
+    expect(panned).toHaveBeenCalledTimes(3);
+  });
 });
