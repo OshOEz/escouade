@@ -71,6 +71,13 @@
     },
   };
 
+  // The request answered: its field takes the focus back, else the card itself (focusable by script alone).
+  function focusBack() {
+    if (field) return field.focus();
+    wrap?.setAttribute('tabindex', '-1');
+    wrap?.focus();
+  }
+
   async function send() {
     const text = message.trim();
     if (!text || !sub || !canWrite) return;
@@ -123,7 +130,6 @@
   <article
     class="card sub {sub.status}"
     class:asks
-    tabindex={asks ? -1 : undefined}
     data-side="east"
     aria-label={t('workspace.card.label', { name, state: word })}
     style:min-height="{SUB.h}px"
@@ -143,12 +149,7 @@
         .join(' · ')}
     </p>
     {#if sub.doing}<p class="doing mono">{sub.doing}</p>{/if}
-    {#if asks}<AskInset
-        {agent}
-        mine={(s) => s === sub.id}
-        onfocusback={() => (field ?? wrap)?.focus()}
-        maxH={askMaxH(innerHeight, zoom, SUB.h)}
-      />{/if}
+    {#if asks}<AskInset {agent} mine={(s) => s === sub.id} onfocusback={focusBack} maxH={askMaxH(innerHeight, zoom, SUB.h)} />{/if}
     {#if canWrite}
       <div class="bar">
         <input
