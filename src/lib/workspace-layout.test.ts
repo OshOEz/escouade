@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { agent } from '../test/ipc';
-import type { KitUse } from './types';
-import { art, kit, planWith, planWithRunning, req, ribbon, sub } from '../test/workspace';
+import type { KitUse, SubAgent } from './types';
+import { art, bg, cmd, kit, planWith, planWithRunning, req, ribbon, sub } from '../test/workspace';
 import { planView } from './plan';
 import type { Box } from './workspace-camera';
 import {
@@ -19,6 +19,7 @@ import {
   packRows,
   SUB,
   teamOf,
+  TEST,
   TOOL,
   toolCards,
   toolName,
@@ -327,5 +328,60 @@ describe('the deliverables and the CI', () => {
       { kind: 'deliverables', count: 2 },
       { kind: 'ci', count: 2, state: 'failure' },
     ]);
+  });
+});
+
+describe('the test cards', () => {
+  const team = (...subs: SubAgent[]) => planWith([], { agents: subs });
+
+  it('sticks a test run under the card that runs it, and moves what is below', () => {
+    const plain = agent({ plan: team(sub('s1'), sub('s2')) });
+    const tested = agent({
+      plan: plain.plan,
+      canvas: { tools: [], subs: [{ call: 's1', tools: [], commands: [cmd('c1', 'npm test')] }], commands: [cmd('c0', 'cargo test')] },
+    });
+    const f = frameOf(tested);
+    const under = (id: string) => f.tests.find((t) => t.under === id)!;
+    expect(under('centre')).toMatchObject({ x: f.centre.x, y: f.centre.y + f.centre.h + TEST.gap, w: CARD.w, h: TEST.h });
+    const s1 = f.team.find((i) => i.id === 's1')!;
+    expect(under('s1')).toMatchObject({ x: s1.x, y: s1.y + s1.h + TEST.gap, w: s1.w });
+    const was = frameOf(plain).team.find((i) => i.id === 's2')!;
+    expect(f.team.find((i) => i.id === 's2')!.y - was.y).toBe(TEST.gap + TEST.h);
+    expect(f.links.map((l) => l.id).filter((id) => id.includes('c0') || id.includes('c1'))).toEqual([]);
+  });
+
+  it('pushes the next row below the tests of a child', () => {
+    const a = agent({
+      plan: team(sub('s1'), { ...sub('s2'), parent: 's1' }, sub('s3')),
+      canvas: { tools: [], subs: [{ call: 's2', tools: [], commands: [cmd('c', 'npm test')] }] },
+    });
+    const f = frameOf(a);
+    const s2 = f.team.find((i) => i.id === 's2')!;
+    const s3 = f.team.find((i) => i.id === 's3')!;
+    expect(s2.y).toBe(f.team.find((i) => i.id === 's1')!.y);
+    expect(s3.y).toBeGreaterThan(s2.y + s2.h + TEST.gap + TEST.h);
+  });
+
+  it('leaves a background test run out of the team: it is its test card', () => {
+    const a = agent({
+      plan: planWith([], {
+        bgTasks: [
+          { ...bg('t1'), command: 'npm test' },
+          { ...bg('t2'), command: 'npm run dev' },
+        ],
+      }),
+    });
+    const f = frameOf(a);
+    expect(f.team.map((i) => i.id)).toEqual(['t2']);
+    expect(f.tests.map((t) => t.under)).toEqual(['centre']);
+    expect(frameOf(agent({ plan: a.plan }), { testCommand: 'npm run dev' }).team).toEqual([]);
+  });
+
+  it('shows no test card for a subagent folded in the pile', () => {
+    const a = agent({
+      plan: team(sub('s1', 'done')),
+      canvas: { tools: [], subs: [{ call: 's1', tools: [], commands: [cmd('c', 'npm test')] }] },
+    });
+    expect(frameOf(a).tests).toEqual([]);
   });
 });

@@ -9,6 +9,7 @@
   import type { Frame, Placed } from '../../lib/workspace-layout';
   import AgentCard from './AgentCard.svelte';
   import PlanBand from './PlanBand.svelte';
+  import RibbonCard from './RibbonCard.svelte';
   import TeamCard from './TeamCard.svelte';
   import ToolCard from './ToolCard.svelte';
 
@@ -28,8 +29,17 @@
     zoom?: number;
   } = $props();
 
+  const testOf = (under: string) => frame.tests.find((r) => r.under === under);
   const at = (b: Box | (Size & { x: number; y: number })) => `left:${b.x}px;top:${b.y}px;width:${b.w}px;height:${b.h}px`;
 </script>
+
+<!-- A test card right after the card it is stuck under: the keyboard reads it next. -->
+{#snippet tests(under: string)}
+  {@const run = testOf(under)}
+  {#if run}
+    <div class="slot" style={at(run)}><RibbonCard agentId={agent.id} item={run} side={under === 'centre' ? 'centre' : 'east'} /></div>
+  {/if}
+{/snippet}
 
 <div class="compass" data-agent={frame.agentId} style={at(frame)}>
   {#if frame.north}<div class="slot" style={at(frame.north)}><PlanBand {agent} /></div>{/if}
@@ -46,8 +56,10 @@
   <div class="slot" style={at(frame.centre)}>
     <AgentCard {agent} shown={frame.team.filter((i) => i.kind === 'sub').map((i) => i.id)} onsize={(h) => onsize?.('centre', h)} {zoom} />
   </div>
+  {@render tests('centre')}
   {#each frame.team as item (item.id)}
     <div class="slot" style={at(item)}><TeamCard {agent} {item} ontoggle={() => ontoggle(agent.id)} {onsize} {zoom} /></div>
+    {@render tests(item.id)}
   {/each}
 </div>
 

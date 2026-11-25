@@ -48,6 +48,7 @@
       planOpen: app.planOpen[a.id] ?? window.innerHeight >= 760,
       centreH: heights[a.id]?.centre || undefined,
       teamH: heights[a.id],
+      testCommand: project.board.testCommand,
     });
   function sized(agentId: string, id: string, h: number) {
     const mine = heights[agentId];

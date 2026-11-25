@@ -7,7 +7,7 @@ import { dropConversation } from '../../lib/conversations.svelte';
 import { setLang } from '../../lib/i18n';
 import { app } from '../../lib/state.svelte';
 import { agent, fakeBackend, project, resetApp } from '../../test/ipc';
-import { kit, planWith, planWithRunning, questionItem, req, sub } from '../../test/workspace';
+import { cmd, kit, planWith, planWithRunning, questionItem, req, sub } from '../../test/workspace';
 import WorkspaceView from './WorkspaceView.svelte';
 import { HUD_H } from '../../lib/workspace-camera';
 
@@ -399,6 +399,18 @@ describe('the workspace', () => {
       expect(pieces).toHaveLength(3);
       const onScreen = [...pieces].sort((p, q) => p.y - q.y || p.x - q.x);
       expect(pieces.map((p) => p.id)).toEqual(onScreen.map((p) => p.id));
+    });
+  });
+
+  describe('the test cards', () => {
+    it('draws the test card right after its card, in the keyboard order', async () => {
+      resetApp({ agents: [agent({ id: 'a1', canvas: { tools: [], subs: [], commands: [cmd('c0', 'cargo test')] } })] });
+      const { container } = show();
+      await zoomTo(1);
+      const cards = [...container.querySelectorAll('[data-agent="a1"] [data-side]')];
+      const at = cards.findIndex((e) => e.getAttribute('aria-label')?.startsWith('Tests'));
+      expect(at).toBeGreaterThan(0);
+      expect(cards[at - 1].getAttribute('data-side')).toBe('centre');
     });
   });
 });

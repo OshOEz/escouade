@@ -8,6 +8,7 @@ import { sidebarSubs, subagentInfo } from './subagents';
 import type { Agent, ConvItem, KitUse, SubAgent, Ticket } from './types';
 import type { Box, Size } from './workspace-camera';
 import type { Landing, RibbonState } from './workspace-landing';
+import { looksLikeTests, testsOf, type TestRun } from './workspace-tests';
 
 export type DiscState = 'run' | 'wait' | 'error' | 'done' | 'idle';
 /** The satellites, in their order from top to bottom; each lot of the spec brings its own. */
@@ -134,6 +135,8 @@ export const BG = { w: 240, h: 60 } as const;
  */
 export const PLAN = { w: 560, head: 72, folded: 62, row: 30, pad: 6, list: 232 } as const;
 export const GAP = 48;
+/** A test card, stuck under the card that runs it: one line of command, its height fixed. */
+export const TEST = { h: 76, gap: 8 } as const;
 /**
  * A tool's card (« de la doc, pas un agent »): above the agent's card, two to a row around an aisle in the middle of the
  * card, where the plan's link runs; `row`: between two rows; `drop`: from the last row to the card, for a flow to show.
@@ -182,6 +185,8 @@ export type Frame = {
   /** The pile of the tools past `TOOLS_SHOWN`, after them; none with fewer. */
   westMore: Placed<ToolPile> | null;
   team: Placed<TeamItem>[];
+  /** The latest test run of each card, stuck under it (`under`: 'centre' or the subagent's id). */
+  tests: Placed<TestRun>[];
   links: Edge[];
 };
 /**
@@ -196,6 +201,8 @@ export type FrameOpts = {
   planOpen?: boolean;
   teamH?: Record<string, number>;
   toolsOpen?: boolean;
+  /** The board's test command (`testCommand`): a run of it is a test run. */
+  testCommand?: string;
 };
 
 /** The highest a card grows (an agent that waits, its questions in it), at a zoom of 1: past it, its inset scrolls. */
@@ -228,7 +235,8 @@ export function teamOf(agent: Agent, opts: FrameOpts): TeamItem[] {
   const out: TeamItem[] = subs.filter(isRunning).map(item);
   out.push(
     ...bgRows(plan)
-      .filter(isRunning)
+      // A test run in the background is its test card, under the card that runs it.
+      .filter((row) => isRunning(row) && !(row.kind === 'command' && looksLikeTests(row.command ?? '', opts.testCommand)))
       .map((row): TeamItem => ({ kind: 'bg', id: row.id, row })),
   );
   // In the sidebar's order, the latest ended first.
@@ -271,7 +279,7 @@ const frames = new WeakMap<Agent, { key: string; frame: Frame }>();
  * column on the right. A subagent whose parent is in the team, and a background task whose subagent is, lie right of it.
  */
 export function frameOf(agent: Agent, opts: FrameOpts = {}): Frame {
-  const key = `${!!opts.teamOpen}|${opts.seenAt ?? 0}|${opts.centreH ?? ''}|${opts.planOpen !== false}|${JSON.stringify(opts.teamH ?? {})}|${!!opts.toolsOpen}`;
+  const key = `${!!opts.teamOpen}|${opts.seenAt ?? 0}|${opts.centreH ?? ''}|${opts.planOpen !== false}|${JSON.stringify(opts.teamH ?? {})}|${!!opts.toolsOpen}|${opts.testCommand ?? ''}`;
   const known = frames.get(agent);
   if (known?.key === key) return known.frame;
   const frame = computeFrame(agent, opts);
@@ -331,28 +339,43 @@ function computeFrame(agent: Agent, opts: FrameOpts): Frame {
     const s = defaultSize(i);
     return opts.teamH?.[i.id] ? { w: s.w, h: opts.teamH[i.id] } : s;
   };
+  const runs = new Map(testsOf(agent, opts.testCommand ?? '').map((r) => [r.under, r]));
+  /** How far a card's test card reaches below it. */
+  const below = (id: string) => (runs.has(id) ? TEST.gap + TEST.h : 0);
   const place = (i: TeamItem, x: number, y: number) => placed.set(i.id, { ...i, ...sizeOf(i), x, y });
-  // The column first, then each child right of its parent, as long as one is placed.
-  for (const i of items)
-    if (!parentOf(i)) {
-      place(i, colX, colY);
-      rowEnd.set(i.id, { root: i.id, x: colX + sizeOf(i).w });
-      colY += sizeOf(i).h + STACK_GAP;
+  // Down the column, a row at a time: a root, then each child right of its parent, as long as one is placed; the next
+  // root under the lowest card of the row, or its test card.
+  for (const root of items) {
+    if (parentOf(root)) continue;
+    place(root, colX, colY);
+    rowEnd.set(root.id, { root: root.id, x: colX + sizeOf(root).w });
+    let bottom = colY + sizeOf(root).h + below(root.id);
+    for (let more = true; more;) {
+      more = false;
+      for (const i of items) {
+        const p = parentOf(i);
+        if (placed.has(i.id) || !p || !placed.has(p)) continue;
+        const row = rowEnd.get(p)!;
+        const end = rowEnd.get(row.root)!;
+        const y = placed.get(p)!.y;
+        place(i, end.x + GAP, y);
+        end.x += GAP + sizeOf(i).w;
+        rowEnd.set(i.id, row);
+        bottom = Math.max(bottom, y + sizeOf(i).h + below(i.id));
+        more = true;
+      }
     }
-  for (let more = true; more;) {
-    more = false;
-    for (const i of items) {
-      const p = parentOf(i);
-      if (placed.has(i.id) || !p || !placed.has(p)) continue;
-      const row = rowEnd.get(p)!;
-      const end = rowEnd.get(row.root)!;
-      place(i, end.x + GAP, placed.get(p)!.y);
-      end.x += GAP + sizeOf(i).w;
-      rowEnd.set(i.id, row);
-      more = true;
-    }
+    colY = bottom + STACK_GAP;
   }
   const team = items.map((i) => placed.get(i.id)!);
+  // No test card for a subagent that has no card (folded in the pile, forgotten by the plan).
+  const tests: Placed<TestRun>[] = [];
+  for (const [under, r] of runs) {
+    const sub = placed.get(under);
+    const card = under === 'centre' ? centre : sub?.kind === 'sub' ? sub : undefined;
+    if (!card) continue;
+    tests.push({ ...r, x: card.x, y: card.y + card.h + TEST.gap, w: card.w, h: TEST.h });
+  }
 
   for (const i of team) {
     const p = parentOf(i);
@@ -402,7 +425,7 @@ function computeFrame(agent: Agent, opts: FrameOpts): Frame {
     } else links.push({ id, state: 'run', x1, y1, x2: lane, y2: centre.y, via: [[lane, y1]] });
   }
 
-  const boxes: Box[] = [centre, ...(north ? [north] : []), ...west, ...(westMore ? [westMore] : []), ...team];
+  const boxes: Box[] = [centre, ...(north ? [north] : []), ...west, ...(westMore ? [westMore] : []), ...team, ...tests];
   return {
     agentId: agent.id,
     w: Math.max(...boxes.map((b) => b.x + b.w)),
@@ -412,6 +435,7 @@ function computeFrame(agent: Agent, opts: FrameOpts): Frame {
     west,
     westMore,
     team,
+    tests,
     links,
   };
 }

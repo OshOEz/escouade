@@ -7,6 +7,7 @@
   import { fDur } from '../../lib/format';
   import { t } from '../../lib/i18n';
   import { openUrl } from '../../lib/opener';
+  import { tip } from '../../lib/tip';
   import { app } from '../../lib/state.svelte';
   import type { Ribbon } from '../../lib/workspace-landing';
 
@@ -45,7 +46,7 @@
   <p class="line mono">{item.line}</p>
   {#if item.steps?.length}
     <ol class="steps">
-      {#each item.steps as s, i (i)}<li class={s.state} title={s.name}><span class="sr">{s.name}</span></li>{/each}
+      {#each item.steps as s, i (i)}<li class={s.state} use:tip={s.name}><span class="sr">{s.name}</span></li>{/each}
     </ol>
   {:else if item.total !== null}
     <p class="checks">{t('workspace.ribbon.checks', { total: item.total, failed: item.failed ?? 0 })}</p>
