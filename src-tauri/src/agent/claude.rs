@@ -164,6 +164,7 @@ impl AgentRt {
         let files = (parent.is_none() && matches!(name, "TodoWrite" | "TaskCreate" | "TaskUpdate"))
             .then(|| self.plan_list.clone())
             .flatten();
+        self.canvas_apply(fx, |c| c.on_tool_use(parent, id, name, input, now));
         self.plan_apply(fx, |plan| {
             let change = plan.on_tool_use(parent, id, name, input, now);
             match (parent, files) {
