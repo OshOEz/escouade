@@ -23,4 +23,5 @@ export default defineZone('workspace', {
     question: { one: 'question', other: 'questions' },
   },
   discLabel: '{name}, {state}',
+  discProgress: { one: '{count} of {total} task done', other: '{count} of {total} tasks done' },
 });

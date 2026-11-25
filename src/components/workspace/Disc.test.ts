@@ -38,6 +38,13 @@ describe('the disc of an agent', () => {
     expect(screen.getByText('Lance cargo test -p escou…')).toBeTruthy();
   });
 
+  it('tells a screen reader its progress and its questions', () => {
+    renderDisc(
+      agent({ name: 'audit', status: 'waiting', requests: [req('q1'), req('q2')], plan: planWith(['done', 'pending', 'pending']) }),
+    );
+    expect(screen.getByRole('button', { name: 'audit, À toi, 1 tâche faite sur 3, 2 questions' })).toBeTruthy();
+  });
+
   it('is picked by a click and by Enter', async () => {
     const onpick = vi.fn();
     renderDisc(agent({ id: 'a9' }), onpick);

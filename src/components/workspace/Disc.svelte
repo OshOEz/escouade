@@ -11,6 +11,16 @@
 
   const state = $derived(t(`workspace.state.${disc.state}`));
   const percent = $derived(disc.total ? Math.round((disc.done / disc.total) * 100) : 0);
+  // Said to a screen reader: what the colours and the satellites show.
+  const label = $derived(
+    [
+      t('workspace.discLabel', { name: disc.name, state }),
+      disc.total ? t('workspace.discProgress', { count: disc.done, total: disc.total }) : '',
+      ...disc.satellites.filter((s) => s.kind === 'question').map((s) => t('workspace.questions', { count: s.count })),
+    ]
+      .filter(Boolean)
+      .join(', '),
+  );
 
   // The line in mono at 10.5 px: 25 characters fit in the disc, the rest is cut.
   const ACT_MAX = 25;
@@ -69,7 +79,7 @@
   transform="translate({disc.x + disc.w / 2} {disc.y + disc.h / 2})"
   role="button"
   tabindex="0"
-  aria-label={t('workspace.discLabel', { name: disc.name, state })}
+  aria-label={label}
   onclick={() => onpick(disc.agentId)}
   onkeydown={key}
 >

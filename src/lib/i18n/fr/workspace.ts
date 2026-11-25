@@ -28,4 +28,6 @@ export default {
   },
   /** A disc, for a screen reader: « release-2-3, En cours ». */
   discLabel: '{name}, {state}',
+  /** What a screen reader hears after it: the plan, then the questions. */
+  discProgress: { one: '{count} tâche faite sur {total}', other: '{count} tâches faites sur {total}' },
 } as const satisfies Tree;

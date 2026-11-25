@@ -22,6 +22,8 @@
   let view: HTMLDivElement | undefined = $state();
   let cam = $state<Camera>({ x: 0, y: 0, zoom: 1 });
   let drag: { x: number; y: number } | null = $state(null);
+  /** The user placed the camera: a resize of the window no longer fits it. */
+  let moved = false;
 
   const size = () => ({ w: view?.clientWidth ?? 0, h: view?.clientHeight ?? 0 });
   const centre = () => {
@@ -32,7 +34,12 @@
   // Fitted on opening, and on « Ajuster »: the camera is not kept.
   function fitAll() {
     cam = fit(world, size());
+    moved = false;
   }
+  const place = (next: Camera) => {
+    cam = next;
+    moved = true;
+  };
   $effect(() => {
     // Only on opening: the agents changing must not move the camera the user placed.
     if (view) untrack(fitAll);
@@ -40,25 +47,26 @@
 
   const zoomBy = (factor: number) => {
     const [px, py] = centre();
-    cam = zoomAt(cam, factor, px, py);
+    place(zoomAt(cam, factor, px, py));
   };
 
   function wheel(e: WheelEvent) {
     e.preventDefault();
     if (e.ctrlKey || e.metaKey) {
       const r = view!.getBoundingClientRect();
-      cam = zoomAt(cam, Math.exp(-e.deltaY * 0.01), e.clientX - r.left, e.clientY - r.top);
-    } else cam = pan(cam, -e.deltaX, -e.deltaY);
+      place(zoomAt(cam, Math.exp(-e.deltaY * 0.01), e.clientX - r.left, e.clientY - r.top));
+    } else place(pan(cam, -e.deltaX, -e.deltaY));
   }
 
   function down(e: PointerEvent) {
-    if ((e.target as Element).closest('button, [role="button"]')) return;
+    // The main button alone: a right click keeps its menu, a middle click its own use.
+    if (e.button > 0 || (e.target as Element).closest('button, [role="button"]')) return;
     drag = { x: e.clientX, y: e.clientY };
     view?.setPointerCapture?.(e.pointerId);
   }
   function move(e: PointerEvent) {
     if (!drag) return;
-    cam = pan(cam, e.clientX - drag.x, e.clientY - drag.y);
+    place(pan(cam, e.clientX - drag.x, e.clientY - drag.y));
     drag = { x: e.clientX, y: e.clientY };
   }
   const up = () => (drag = null);
@@ -68,15 +76,16 @@
     const d = world.items.find((i) => i.agentId === agentId);
     if (!d) return;
     const [px, py] = centre();
-    cam = { zoom: 1, x: px - (d.x + d.w / 2), y: py - (d.y + d.h / 2) };
+    place({ zoom: 1, x: px - (d.x + d.w / 2), y: py - (d.y + d.h / 2) });
   }
 
-  // Escape leaves the canvas, unless the focus is in a field, or a menu or a dialog is open.
+  // Escape leaves the canvas, unless the focus is in a field, or a menu, a dialog or a popover is open (it is theirs).
+  const OVER = '[aria-modal="true"], [role="dialog"], [role="listbox"], [role="menu"]';
   const typing = (el: Element | null) =>
     !!el && (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement || (el as HTMLElement).isContentEditable);
   function key(e: KeyboardEvent) {
     if (e.metaKey || e.ctrlKey || e.altKey || e.defaultPrevented) return;
-    if (typing(document.activeElement) || menu.open || document.querySelector('[aria-modal="true"]')) return;
+    if (typing(document.activeElement) || menu.open || document.querySelector(OVER)) return;
     if (e.key === 'Escape') app.closeWorkspace(project.id);
     else if (e.key === '+' || e.key === '=') zoomBy(ZOOM_STEP);
     else if (e.key === '-') zoomBy(1 / ZOOM_STEP);
@@ -86,7 +95,7 @@
   }
 </script>
 
-<svelte:window onkeydown={key} />
+<svelte:window onkeydown={key} onresize={() => !moved && fitAll()} />
 
 <div
   class="ws"

@@ -1,5 +1,5 @@
 import { fireEvent, render, screen } from '@testing-library/svelte';
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { setLang } from '../../lib/i18n';
 import { app } from '../../lib/state.svelte';
 import { agent, fakeBackend, project, resetApp } from '../../test/ipc';
@@ -75,6 +75,56 @@ describe('the workspace', () => {
     expect(zoomShown()).toBe(opened);
     await fireEvent.keyDown(window, { key: '+' });
     expect(zoomShown()).not.toBe(opened);
+  });
+
+  it('pans with the main button only', async () => {
+    resetApp({ agents: [agent()] });
+    show();
+    const ws = screen.getByRole('application');
+    const world = () => (document.querySelector('.world') as HTMLElement).style.transform;
+    // jsdom's pointer events carry no coordinates: mouse events under their names do.
+    const ptr = (type: string, init: MouseEventInit) => fireEvent(ws, new MouseEvent(type, { bubbles: true, ...init }));
+    const before = world();
+    await ptr('pointerdown', { button: 2, clientX: 0, clientY: 0 });
+    await ptr('pointermove', { clientX: 50, clientY: 50 });
+    await ptr('pointerup', {});
+    expect(world()).toBe(before);
+    await ptr('pointerdown', { button: 0, clientX: 0, clientY: 0 });
+    await ptr('pointermove', { clientX: 50, clientY: 50 });
+    expect(world()).not.toBe(before);
+  });
+
+  it('fits again when the window is resized, until the camera is moved', async () => {
+    let width = 400;
+    const spy = vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockImplementation(() => width);
+    const spyH = vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockImplementation(() => 800);
+    resetApp({ agents: [agent()] });
+    show();
+    const small = zoomShown();
+    width = 1200;
+    await fireEvent(window, new Event('resize'));
+    const large = zoomShown();
+    expect(large).not.toBe(small);
+    await fireEvent.click(screen.getByRole('button', { name: 'Zoomer' }));
+    const placed = zoomShown();
+    width = 400;
+    await fireEvent(window, new Event('resize'));
+    expect(zoomShown()).toBe(placed);
+    spy.mockRestore();
+    spyH.mockRestore();
+  });
+
+  it('does not close on Escape while a dialog or a popover is open', async () => {
+    resetApp({ agents: [agent()] });
+    app.openWorkspace('p1');
+    show();
+    for (const role of ['dialog', 'listbox']) {
+      const pop = document.body.appendChild(document.createElement('div'));
+      pop.setAttribute('role', role);
+      await fireEvent.keyDown(window, { key: 'Escape' });
+      expect(app.workspaceOn).toBe(true);
+      pop.remove();
+    }
   });
 
   it('closes on « Quitter »', async () => {
