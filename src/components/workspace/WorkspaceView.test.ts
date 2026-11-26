@@ -7,8 +7,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { dropConversation } from '../../lib/conversations.svelte';
 import { setLang } from '../../lib/i18n';
 import { app } from '../../lib/state.svelte';
-import { agent, fakeBackend, project, resetApp } from '../../test/ipc';
-import { cmd, kit, planWith, planWithRunning, questionItem, req, sub } from '../../test/workspace';
+import { agent, fakeBackend, project, pullRequest, resetApp } from '../../test/ipc';
+import { check, cmd, kit, planWith, planWithRunning, prDetail, questionItem, req, sub } from '../../test/workspace';
 import WorkspaceView from './WorkspaceView.svelte';
 import { HUD_H } from '../../lib/workspace-camera';
 
@@ -91,6 +91,37 @@ describe('the workspace', () => {
     const { container } = render(WorkspaceView, {});
     expect(pieces(container).map((p) => p.id)).toEqual(['a1', 'a2', 'a3']);
     expect(container.querySelectorAll('path.link.run')).toHaveLength(3);
+  });
+
+  it('reads its pull request again every minute while a check or a deployment runs, never once all is done', async () => {
+    vi.useFakeTimers();
+    try {
+      const pending = { ...prDetail(), checks: [check('lint', 'pending')] };
+      const backend = fakeBackend({ get_conversation: () => [], agent_pr_detail: () => ({ data: pending }) });
+      resetApp({ agents: [agent({ id: 'a1', prs: [pullRequest({ number: 41, state: 'open', checks: 'pending' })] })] });
+      show();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(backend.called('agent_pr_detail')).toHaveLength(1);
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(backend.called('agent_pr_detail')).toHaveLength(2);
+
+      const deploying = { ...prDetail(), deployments: [{ environment: 'Preview', state: 'in_progress', url: null }] };
+      const b2 = fakeBackend({ get_conversation: () => [], agent_pr_detail: () => ({ data: deploying }) });
+      resetApp({ agents: [agent({ id: 'a2', prs: [pullRequest({ number: 42, state: 'open', checks: 'success' })] })] });
+      show();
+      await vi.advanceTimersByTimeAsync(0);
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(b2.called('agent_pr_detail').filter((c) => c.args.number === 42)).toHaveLength(2);
+
+      const done = fakeBackend({ get_conversation: () => [], agent_pr_detail: () => ({ data: prDetail() }) });
+      resetApp({ agents: [agent({ id: 'a3', prs: [pullRequest({ number: 43, state: 'open', checks: 'success' })] })] });
+      show();
+      await vi.advanceTimersByTimeAsync(0);
+      await vi.advanceTimersByTimeAsync(180_000);
+      expect(done.called('agent_pr_detail').filter((c) => c.args.number === 43)).toHaveLength(1);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('says when there is no agent', () => {

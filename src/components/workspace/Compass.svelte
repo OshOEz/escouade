@@ -49,6 +49,16 @@
     void prKey;
     untrack(() => void readPrDetail(agent));
   });
+  // And once a minute while one of its checks or deployments runs: its steps and times move on (`readPrDetail` reads it
+  // no more often).
+  const live = $derived(
+    !!prKey && landing.some((l) => (l.kind === 'deploy' || (l.kind === 'ci' && l.number !== null)) && l.state === 'running'),
+  );
+  $effect(() => {
+    if (!live) return;
+    const every = setInterval(() => void readPrDetail(agent), 60_000);
+    return () => clearInterval(every);
+  });
   const pileOf = (side: PileSide) => frame.piles.find((p) => p.side === side);
   const testOf = (under: string) => frame.tests.find((r) => r.under === under);
   const at = (b: Box | (Size & { x: number; y: number })) => `left:${b.x}px;top:${b.y}px;width:${b.w}px;height:${b.h}px`;
