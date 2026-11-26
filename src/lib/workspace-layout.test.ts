@@ -255,7 +255,7 @@ describe('the compass of the workspace', () => {
       agent({
         id,
         projectId,
-        plan: planWith(['inProgress'], { agents: [sub('s1'), sub('s2', 'completed')] }),
+        plan: planWith(['inProgress'], { agents: [sub('s1'), sub('s2', 'done')] }),
         canvas: { tools: [kit('plugin', 'escouade', 1, 1)], subs: [{ call: 's1', tools: [kit('skill', 'tdd', 1, 1)] }] },
       });
     const near = layoutColumns(

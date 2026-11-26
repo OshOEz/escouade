@@ -47,6 +47,8 @@
     }),
   );
   const agents = $derived(columns.flatMap((c) => c.agents));
+  /** Who launched each agent launched, by its name: the dotted link's word, said in text. */
+  const launchedBy = $derived(new Map(columns.flatMap((c) => c.launched.map(([from, to]) => [to, app.agents[from]?.name ?? '']))));
   const projectOf = $derived(new Map(columns.map((c) => [c.project.id, c.project])));
   /** Its pile of ended subagents unfolded, by agent; when it was unfolded last (a failure since stays out of the pile). */
   let teamOpen = $state<Record<string, boolean>>({});
@@ -238,7 +240,7 @@
   class="ws"
   class:pan={!!drag}
   bind:this={view}
-  role="application"
+  role="region"
   aria-label={t('workspace.label')}
   style:background-size="{DOT * cam.zoom}px {DOT * cam.zoom}px"
   style:background-position="{cam.x}px {cam.y}px"
@@ -248,6 +250,10 @@
   onpointerup={up}
   onpointercancel={up}
 >
+  <!-- First in the keyboard's order: one leaves without going through every card. -->
+  <button class="hud exit btn" onclick={leave}>
+    <Icon name="left" size={14} /><span>{t('workspace.exit')}</span>
+  </button>
   {#if agents.length}
     <div class="world" style:transform="translate({cam.x}px, {cam.y}px) scale({cam.zoom})">
       {#if shown.items.length}<Links links={shown.links} w={shown.w} h={shown.h} />{/if}
@@ -267,6 +273,7 @@
             frame={f}
             agent={a}
             landing={landing.get(a.id)}
+            launchedBy={launchedBy.get(a.id)}
             ontoggle={toggleTeam}
             ontoggletools={(id) => (toolsOpen[id] = !toolsOpen[id])}
             onsize={(id, h) => sized(a.id, id, h)}
@@ -280,9 +287,6 @@
     <p class="empty">{t(project ? 'workspace.empty' : 'workspace.emptyAll')}</p>
   {/if}
 
-  <button class="hud exit btn" onclick={leave}>
-    <Icon name="left" size={14} /><span>{t('workspace.exit')}</span>
-  </button>
   <div class="hud bar">
     <button aria-label={t('workspace.zoomOut')} onclick={() => zoomBy(1 / ZOOM_STEP)}>−</button>
     <span class="pct">{t('workspace.zoom', { percent: Math.round(cam.zoom * 100) })}</span>

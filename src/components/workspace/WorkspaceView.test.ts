@@ -8,7 +8,7 @@ import { dropConversation } from '../../lib/conversations.svelte';
 import { setLang } from '../../lib/i18n';
 import { app } from '../../lib/state.svelte';
 import { agent, fakeBackend, project, pullRequest, resetApp } from '../../test/ipc';
-import { check, cmd, kit, planWith, planWithRunning, prDetail, questionItem, req, sub } from '../../test/workspace';
+import { bg, check, cmd, kit, planWith, planWithRunning, prDetail, questionItem, req, sub } from '../../test/workspace';
 import WorkspaceView from './WorkspaceView.svelte';
 import { HUD_H } from '../../lib/workspace-camera';
 
@@ -172,6 +172,54 @@ describe('the workspace', () => {
     expect(slot('centre').style.top).toBe(`${500 + 48}px`);
   });
 
+  describe('with the keyboard and a screen reader', () => {
+    const FOCUSABLE = 'button:not([disabled]), a[href], input, textarea, select, [tabindex]:not([tabindex="-1"])';
+
+    it('is a region, « Quitter » first, and reaches every card: tools, background tasks, ended subagents, the zone', async () => {
+      resetApp({
+        agents: [
+          agent({
+            id: 'a1',
+            name: 'un',
+            plan: planWith([], { agents: [sub('s1', 'failed')], bgTasks: [bg('b1')] }),
+            canvas: { tools: [kit('skill', 'tdd')], subs: [] },
+          }),
+        ],
+      });
+      const { container } = show();
+      expect(screen.getByRole('region', { name: 'Toile des agents' })).toBeTruthy();
+      expect(container.querySelector(FOCUSABLE)!.textContent).toContain('Quitter le workspace');
+      for (const sel of ['article.tool', 'article.card.bg', 'article.card.sub', '[data-side="south"] h3'])
+        expect(container.querySelector(sel)!.matches(FOCUSABLE), sel).toBe(true);
+    });
+
+    it('opens a conversation on Enter, as on a double click', async () => {
+      resetApp({ agents: [agent({ id: 'a1', name: 'un', plan: planWith([], { agents: [sub('s1', 'failed')], bgTasks: [bg('b1')] }) })] });
+      const { container } = show();
+      const at = (sel: string) => container.querySelector(sel) as HTMLElement;
+      await fireEvent.keyDown(at('article.card.sub'), { key: 'Enter' });
+      expect(app.workspaceOn).toBe(false);
+      expect(app.subView.a1).toBe('s1');
+      app.openWorkspace('p1');
+      await tick();
+      await fireEvent.keyDown(at('article.card.bg'), { key: 'Enter' });
+      expect(app.taskView.a1).toBe('b1');
+      app.openWorkspace('p1');
+      await tick();
+      await fireEvent.keyDown(at('article.agent'), { key: 'Enter' });
+      expect(app.workspaceOn).toBe(false);
+      expect(app.ui.selectedAgent.p1).toBe('a1');
+    });
+
+    it('says in words who launched an agent, not only on its dotted link', () => {
+      const b = agent({ id: 'a2', name: 'deux', status: 'running' });
+      const a = agent({ id: 'a1', name: 'un', plan: planWith([], { driven: [{ agent: 'a2', at: 1 }] }) });
+      resetApp({ agents: [a, b] });
+      const { container } = show();
+      expect(container.querySelector('[data-agent="a2"]')!.textContent).toContain('lancé par un');
+    });
+  });
+
   it('zooms with its buttons, within bounds', async () => {
     resetApp({ agents: [agent()] });
     show();
@@ -207,7 +255,7 @@ describe('the workspace', () => {
   it('pans with the main button only', async () => {
     resetApp({ agents: [agent()] });
     show();
-    const ws = screen.getByRole('application');
+    const ws = screen.getByRole('region', { name: 'Toile des agents' });
     const world = () => (document.querySelector('.world') as HTMLElement).style.transform;
     // jsdom's pointer events carry no coordinates: mouse events under their names do.
     const ptr = (type: string, init: MouseEventInit) => fireEvent(ws, new MouseEvent(type, { bubbles: true, ...init }));

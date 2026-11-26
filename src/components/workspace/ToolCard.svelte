@@ -18,7 +18,9 @@
   );
 </script>
 
-<article class="tool {tool.kind}" class:running={tool.running} data-side="west" aria-label={label}>
+<!-- Reached by Tab, as every card of the canvas: a screen reader reads it. -->
+<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+<article class="tool {tool.kind}" class:running={tool.running} data-side="west" aria-label={label} tabindex="0">
   <header>
     <span class="ico"><Icon name={tool.kind === 'skill' ? 'scroll' : 'box'} size={14} /></span>
     <b class="name" use:tip={tool.name}>{name}</b>

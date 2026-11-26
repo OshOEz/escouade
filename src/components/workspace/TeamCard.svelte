@@ -78,7 +78,6 @@
   // The request answered: its field takes the focus back, else the card itself (focusable by script alone).
   function focusBack() {
     if (field) return field.focus();
-    wrap?.setAttribute('tabindex', '-1');
     wrap?.focus();
   }
 
@@ -102,6 +101,13 @@
     if (!sub || (e.target as HTMLElement).closest('input, button')) return;
     app.openSubagent(agent.id, sub.id);
   }
+  /** Enter on the card itself does what a double click does: its conversation, or its task's output. */
+  function enter(e: KeyboardEvent) {
+    if (e.key !== 'Enter' || e.target !== e.currentTarget) return;
+    e.preventDefault();
+    if (sub) app.openSubagent(agent.id, sub.id);
+    else if (item.kind === 'bg') app.openTask(agent.id, item.row.id);
+  }
 </script>
 
 <svelte:window bind:innerHeight />
@@ -117,9 +123,12 @@
   </button>
 {:else if item.kind === 'bg'}
   {@const ms = bgDuration(item.row, app.now)}
+  <!-- svelte-ignore a11y_no_noninteractive_tabindex, a11y_no_noninteractive_element_interactions -->
   <article
     class="card bg {item.row.status}"
     data-side="east"
+    tabindex="0"
+    onkeydown={enter}
     aria-label={t('workspace.card.label', { name: kindLabel(item.row.kind), state: t(`bgtasks.status.${item.row.status}`) })}
   >
     <header>
@@ -131,10 +140,13 @@
 {:else if sub}
   {@const ms = subDuration(sub, app.now)}
   {@const word = t(`subagents.status.${sub.status ?? 'unknown'}`)}
+  <!-- svelte-ignore a11y_no_noninteractive_tabindex, a11y_no_noninteractive_element_interactions -->
   <article
     class="card sub {sub.status}"
     class:asks
     data-side="east"
+    tabindex="0"
+    onkeydown={enter}
     aria-label={t('workspace.card.label', { name, state: word })}
     style:min-height="{SUB.h}px"
     ondblclick={open}

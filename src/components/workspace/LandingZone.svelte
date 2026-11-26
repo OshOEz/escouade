@@ -28,7 +28,8 @@
 
 <section class="zone" data-side="south" aria-label={title} use:observeHeight={onsize}>
   <i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i>
-  <h3 class:above={coming.length > 0}>{title}</h3>
+  <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+  <h3 class:above={coming.length > 0} tabindex="0">{title}</h3>
   {#if !items.length}
     <p class="empty">{t('workspace.land.empty')}</p>
   {/if}

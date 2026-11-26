@@ -186,13 +186,22 @@
     if ((e.target as HTMLElement).closest('input, button')) return;
     app.selectAgent(agentId);
   }
+  /** Enter on the card itself opens its conversation, as a double click. */
+  function enter(e: KeyboardEvent) {
+    if (e.key !== 'Enter' || e.target !== e.currentTarget) return;
+    e.preventDefault();
+    app.selectAgent(agentId);
+  }
 </script>
 
 <svelte:window bind:innerHeight />
 
+<!-- svelte-ignore a11y_no_noninteractive_tabindex, a11y_no_noninteractive_element_interactions -->
 <article
   class="agent {agent.status}"
   data-side="centre"
+  tabindex="0"
+  onkeydown={enter}
   aria-label={t('workspace.card.label', { name: agent.name, state: stateWord })}
   class:sub-asks={asking.length > 0}
   style:min-height="{CARD.h}px"

@@ -33,6 +33,8 @@ export default defineZone('workspace', {
     state: { running: 'running', success: 'passed', failure: 'failed', stopped: 'stopped' },
   },
   launched: 'launched',
+  /** The same, said in text on the agent launched (the link is drawn alone). */
+  launchedBy: 'launched by {name}',
   tool: {
     label: '{kind} {name}, {calls}',
     skill: 'Skill',

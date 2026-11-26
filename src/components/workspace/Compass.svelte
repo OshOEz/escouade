@@ -27,6 +27,7 @@
     onsize,
     onunfold,
     zoom = 1,
+    launchedBy,
   }: {
     frame: Placed<Frame>;
     agent: Agent;
@@ -38,6 +39,8 @@
     /** At mid-height, a folded side clicked. */
     onunfold?: (agentId: string, side: Side) => void;
     zoom?: number;
+    /** The name of the agent that launched it: its dotted link is drawn, this says it. */
+    launchedBy?: string;
   } = $props();
 
   // Its open pull request's detail (checks, deployments) read when it is on screen, and when its checks change.
@@ -100,6 +103,7 @@
       </button>
     </div>
   {/if}
+  {#if launchedBy}<p class="sr">{t('workspace.launchedBy', { name: launchedBy })}</p>{/if}
   <div class="slot" style={at(frame.centre)}>
     <AgentCard {agent} shown={frame.team.filter((i) => i.kind === 'sub').map((i) => i.id)} onsize={(h) => onsize?.('centre', h)} {zoom} />
   </div>
@@ -116,6 +120,14 @@
 </div>
 
 <style>
+  .sr {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
   .compass,
   .slot {
     position: absolute;

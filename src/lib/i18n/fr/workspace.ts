@@ -39,6 +39,8 @@ export default {
   },
   /** The word on the dotted link from an agent to one it launched. */
   launched: 'a lancé',
+  /** The same, said in text on the agent launched (the link is drawn alone). */
+  launchedBy: 'lancé par {name}',
   /** A skill or a plugin, on its card above the agent's, and as a tag on a subagent's card. */
   tool: {
     label: '{kind} {name}, {calls}',
