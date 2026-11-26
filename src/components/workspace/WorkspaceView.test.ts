@@ -138,6 +138,28 @@ describe('the workspace', () => {
     expect(screen.getByText('1 question')).toBeTruthy();
   });
 
+  it("leaves the wheel to the plan's list while it can scroll that way, else pans", async () => {
+    resetApp({ agents: [agent({ id: 'a1', plan: planWith(Array(12).fill('pending')) })] });
+    const { container } = show();
+    const list = container.querySelector('[data-side="north"] .list') as HTMLElement;
+    list.style.overflowY = 'auto'; // jsdom reads no stylesheet
+    Object.defineProperty(list, 'scrollHeight', { value: 400 });
+    Object.defineProperty(list, 'clientHeight', { value: 232 });
+    const row = list.firstElementChild as HTMLElement;
+    const wheel = (deltaY: number) => {
+      const e = new WheelEvent('wheel', { deltaY, bubbles: true, cancelable: true });
+      row.dispatchEvent(e);
+      return e.defaultPrevented;
+    };
+    const before = camOf();
+    expect(wheel(50)).toBe(false); // down, room below: the list scrolls
+    await tick();
+    expect(camOf()).toEqual(before);
+    expect(wheel(-50)).toBe(true); // up, at the top: the canvas pans
+    await tick();
+    expect(camOf()).not.toEqual(before);
+  });
+
   it('zooms with its buttons, within bounds', async () => {
     resetApp({ agents: [agent()] });
     show();

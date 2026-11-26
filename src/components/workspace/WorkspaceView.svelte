@@ -156,7 +156,17 @@
     zoomAround(factor, px, py);
   };
 
+  /** A box under the pointer that scrolls and can that way (a plan's list): the wheel is its own, as in AskInset. */
+  function scrolls(e: WheelEvent): boolean {
+    for (let el = e.target as HTMLElement | null; el && el !== view; el = el.parentElement) {
+      if (!['auto', 'scroll'].includes(getComputedStyle(el).overflowY)) continue;
+      if (e.deltaY < 0 ? el.scrollTop > 0 : e.deltaY > 0 && el.scrollTop + el.clientHeight < el.scrollHeight - 1) return true;
+    }
+    return false;
+  }
+
   function wheel(e: WheelEvent) {
+    if (!e.ctrlKey && !e.metaKey && scrolls(e)) return;
     e.preventDefault();
     if (e.ctrlKey || e.metaKey) {
       const r = view!.getBoundingClientRect();
