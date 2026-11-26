@@ -1259,6 +1259,30 @@ describe('workspace', () => {
     expect(app.ui.view).toBe('project');
   });
 
+  it('leaves the view under it as it was: « Quitter » goes back to it', async () => {
+    const back = [
+      [() => app.openBoard('p1'), () => app.boardOn],
+      [() => app.openDocs('p1'), () => app.docsOn],
+      [() => app.openPrs('p1'), () => app.prsOn],
+      [() => app.selectTerm('t1'), () => app.selectedTerm.p1 === 't1'],
+      [() => app.selectLaunch('c1'), () => app.selectedLaunch.p1 === 'c1'],
+      [() => app.selectPage('k1'), () => app.selectedPage.p1 === 'k1'],
+    ] as const;
+    for (const [open, on] of back) {
+      open();
+      app.openWorkspace('p1');
+      expect(app.workspaceOn).toBe(true);
+      app.closeWorkspace('p1');
+      expect(on()).toBe(true);
+    }
+    fakeBackend();
+    await app.openEditor({ projectId: 'p1', source: 'project', path: 'a.ts' });
+    app.openWorkspace('p1');
+    expect(app.editorOn).toBe(false);
+    app.closeWorkspace('p1');
+    expect(app.editorOn).toBe(true);
+  });
+
   it('gives way to an agent, a terminal, a launch or a page picked in the sidebar', () => {
     resetApp({ projects: [project({ id: 'p1' })], agents: [agent({ id: 'a1', projectId: 'p1' })] });
     app.openWorkspace('p1');

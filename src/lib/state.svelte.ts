@@ -1977,18 +1977,14 @@ class AppState {
     if (projectId) this.board[projectId] = false;
   }
 
-  /** Shows the « Workspace » of a project: the canvas of its agents, in place of every other view of its main area. */
+  /**
+   * Shows the « Workspace » of a project: the canvas of its agents, over every other view of its main area (they all give
+   * way to it), which it leaves as they were: « Quitter » goes back to the view under it.
+   */
   openWorkspace(projectId = this.ui.activeProject) {
     if (!projectId) return;
     this.ui.activeProject = projectId;
     this.ui.view = 'project';
-    this.board[projectId] = false;
-    this.docs[projectId] = false;
-    this.prs[projectId] = false;
-    this.selectedTerm[projectId] = null;
-    this.selectedPage[projectId] = null;
-    this.selectedLaunch[projectId] = null;
-    this.closeEditor(projectId);
     this.workspace[projectId] = true;
     this.persistUi();
   }
