@@ -166,6 +166,8 @@ export type FrameOpts = {
   testCommand?: string;
   /** The landing zone's height measured. */
   southH?: number;
+  /** The plan's banner's height measured, open (the reader may have sized its list): its size by default without. */
+  northH?: number;
   /** Its altitude: at `mid`, the sides not in `unfolded` are piles (never those of an agent that waits). */
   level?: Level;
   unfolded?: Side[];
@@ -251,7 +253,7 @@ const frames = new WeakMap<Agent, Map<string, { key: string; frame: Frame }>>();
  * column on the right. A subagent whose parent is in the team, and a background task whose subagent is, lie right of it.
  */
 export function frameOf(agent: Agent, opts: FrameOpts = {}): Frame {
-  const key = `${!!opts.teamOpen}|${opts.seenAt ?? 0}|${opts.centreH ?? ''}|${opts.planOpen !== false}|${JSON.stringify(opts.teamH ?? {})}|${!!opts.toolsOpen}|${opts.testCommand ?? ''}|${opts.southH ?? ''}|${opts.level ?? ''}|${opts.unfolded ?? ''}|${opts.landing?.length ?? 0}:${opts.landing?.filter((l) => !landed(l)).length ?? 0}`;
+  const key = `${!!opts.teamOpen}|${opts.seenAt ?? 0}|${opts.centreH ?? ''}|${opts.planOpen !== false}|${JSON.stringify(opts.teamH ?? {})}|${!!opts.toolsOpen}|${opts.testCommand ?? ''}|${opts.southH ?? ''}|${opts.northH ?? ''}|${opts.level ?? ''}|${opts.unfolded ?? ''}|${opts.landing?.length ?? 0}:${opts.landing?.filter((l) => !landed(l)).length ?? 0}`;
   let byLevel = frames.get(agent);
   if (!byLevel) frames.set(agent, (byLevel = new Map()));
   const known = byLevel.get(opts.level ?? '');
@@ -274,7 +276,10 @@ function computeFrame(agent: Agent, opts: FrameOpts): Frame {
   let north: Box | null = null;
   const northMini = !!tasks.length && folded('north');
   if (tasks.length) {
-    const h = opts.planOpen === false || northMini ? PLAN.folded : PLAN.head + Math.min(tasks.length * PLAN.row + PLAN.pad, PLAN.list);
+    const h =
+      opts.planOpen === false || northMini
+        ? PLAN.folded
+        : opts.northH || PLAN.head + Math.min(tasks.length * PLAN.row + PLAN.pad, PLAN.list);
     north = { x: 0, y: 0, w: PLAN.w, h };
   }
   const top = north ? north.h + GAP : 0;

@@ -1,24 +1,31 @@
 <script lang="ts">
   // The plan of an agent near, north of its card (spec 2026-11-25-vue-workspace-design.md, « Au nord », and « Choix
   // validés le 25 novembre, après le lot 1 ») : the conversation's own banner, as it is there, in a box of the canvas.
+  import { observeHeight } from '../../lib/resize';
   import type { Agent } from '../../lib/types';
   import PlanBanner from '../PlanBanner.svelte';
 
-  // `mini`: at mid-height, its head and its gauge alone; a click on it unfolds it (`onunfold`).
-  let { agent, mini = false, onunfold }: { agent: Agent; mini?: boolean; onunfold?: () => void } = $props();
+  // `mini`: at mid-height, its head and its gauge alone; a click on it unfolds it (`onunfold`). `onsize`: its height, the
+  // list as the reader sized it.
+  let {
+    agent,
+    mini = false,
+    onunfold,
+    onsize = () => {},
+  }: { agent: Agent; mini?: boolean; onunfold?: () => void; onsize?: (h: number) => void } = $props();
 </script>
 
-<section class="north" data-side="north">
+<section class="north" data-side="north" use:observeHeight={onsize}>
   <PlanBanner {agent} folded={mini} {onunfold} />
 </section>
 
 <style>
-  /* A surface of the work area: the banner's own column, list and grip inside, its list scrolling past 232 px. */
+  /* A surface of the work area: the banner's own column, list and grip inside, its list scrolling past its height (232 px,
+     or the reader's); its own height, measured. */
   .north {
     display: flex;
     flex-direction: column;
     box-sizing: border-box;
-    height: 100%;
     overflow: hidden;
     border-radius: var(--r);
     background: var(--panel);

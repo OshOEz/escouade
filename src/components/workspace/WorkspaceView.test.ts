@@ -160,6 +160,18 @@ describe('the workspace', () => {
     expect(camOf()).not.toEqual(before);
   });
 
+  it("places the card under the plan's banner at the height it has, the reader's included", async () => {
+    vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockImplementation(function (this: HTMLElement) {
+      return this.dataset.side === 'north' ? 500 : 0;
+    });
+    resetApp({ agents: [agent({ id: 'a1', plan: planWith(Array(12).fill('pending')) })] });
+    const { container } = show();
+    await tick();
+    const slot = (side: string) => container.querySelector(`[data-side="${side}"]`)!.parentElement as HTMLElement;
+    expect(slot('north').style.height).toBe('500px');
+    expect(slot('centre').style.top).toBe(`${500 + 48}px`);
+  });
+
   it('zooms with its buttons, within bounds', async () => {
     resetApp({ agents: [agent()] });
     show();

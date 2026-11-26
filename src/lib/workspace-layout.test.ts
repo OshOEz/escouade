@@ -63,6 +63,14 @@ describe('the compass of the workspace', () => {
     expect(north(30)).toBe(north(40));
     expect(north(7, false)).toBeLessThan(north(3));
   });
+  it("takes the banner's height measured (the reader's own), never folded", () => {
+    const a = agent({ plan: planWith(Array(12).fill('pending')) });
+    const f = frameOf(a, { northH: 420 });
+    expect(f.north!.h).toBe(420);
+    expect(f.centre.y).toBe(420 + GAP);
+    expect(frameOf(a, { northH: 420, planOpen: false }).north!.h).toBe(frameOf(a, { planOpen: false }).north!.h);
+    expect(frameOf(a, { northH: 420, level: 'mid' }).north!.h).toBe(frameOf(a, { level: 'mid' }).north!.h);
+  });
   it('puts the team on the east, folds the ended, keeps a failure not seen', () => {
     const a = agent({ plan: planWith([], { agents: [sub('s1'), sub('s2', 'done'), sub('s3', 'failed')] }) });
     const kinds = teamOf(a, {}).map((i) => i.id);

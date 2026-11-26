@@ -71,6 +71,7 @@
       teamH: heights[a.id],
       testCommand: projectOf.get(a.projectId)?.board.testCommand,
       southH: heights[a.id]?.south || undefined,
+      northH: heights[a.id]?.north || undefined,
     });
   function sized(agentId: string, id: string, h: number) {
     const mine = heights[agentId];

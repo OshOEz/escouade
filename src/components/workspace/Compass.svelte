@@ -81,7 +81,13 @@
 
 <div class="compass" data-agent={frame.agentId} style={at(frame)}>
   {#if frame.north}<div class="slot" style={at(frame.north)}>
-      <PlanBand {agent} mini={frame.northMini} onunfold={() => onunfold?.(agent.id, 'north')} />
+      <!-- Its height open alone: folded, the layout knows it. -->
+      <PlanBand
+        {agent}
+        mini={frame.northMini}
+        onunfold={() => onunfold?.(agent.id, 'north')}
+        onsize={(h) => !frame.northMini && onsize?.('north', h)}
+      />
     </div>{/if}
   {@render pile('west')}
   {#each frame.west as tool (`${tool.kind}:${tool.name}`)}
