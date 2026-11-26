@@ -28,6 +28,8 @@ export default defineZone('workspace', {
   ribbon: {
     label: '{kind}, {state}',
     output: 'Output',
+    /** Its name for a screen reader: the card it opens. */
+    outputOf: 'Output of {title}',
     checks: { one: '{count} check, {failed} failed', other: '{count} checks, {failed} failed' },
     kind: { tests: 'Tests', ci: 'CI', deploy: 'Deployment' },
     state: { running: 'running', success: 'passed', failure: 'failed', stopped: 'stopped' },

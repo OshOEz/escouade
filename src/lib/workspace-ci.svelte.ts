@@ -36,6 +36,12 @@ export async function readPrDetail(agent: Agent): Promise<void> {
   }
 }
 
+// An agent removed: nothing kept of it.
+app.onAgentRemoved((id) => {
+  delete asked[id];
+  delete prDetails[id];
+});
+
 /** How often the project is said followed (the core forgets it after 15 minutes). */
 const KEEP_EVERY = 5 * 60 * 1000;
 

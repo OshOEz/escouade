@@ -254,6 +254,7 @@
   <button class="hud exit btn" onclick={leave}>
     <Icon name="left" size={14} /><span>{t('workspace.exit')}</span>
   </button>
+  <div class="pad"></div>
   {#if agents.length}
     <div class="world" style:transform="translate({cam.x}px, {cam.y}px) scale({cam.zoom})">
       {#if shown.items.length}<Links links={shown.links} w={shown.w} h={shown.h} />{/if}
@@ -310,9 +311,15 @@
     min-height: 0;
     overflow: hidden;
     cursor: grab;
-    touch-action: none;
     background-color: var(--panel);
     background-image: radial-gradient(var(--line-2) 1px, transparent 1px);
+  }
+  /* The background under the cards: a finger there pans the canvas; on a card, an inset or a list scrolls (a touch-action
+     is the intersection of its ancestors'). */
+  .pad {
+    position: absolute;
+    inset: 0;
+    touch-action: none;
   }
   .ws.pan {
     cursor: grabbing;

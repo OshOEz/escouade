@@ -26,13 +26,15 @@ export default {
     empty: 'Rien n’a encore atterri',
     artifact: 'Artefact · version {n} · {ago}',
     open: 'Ouvrir ↗',
-    /** The name of a page's button for a screen reader. */
+    /** The name of a page's button (or a ribbon card's address) for a screen reader. */
     openPage: 'Ouvrir {title}',
   },
   /** A card with a ribbon: a test run, a CI, a deployment. */
   ribbon: {
     label: '{kind}, {state}',
     output: 'Sortie',
+    /** Its name for a screen reader: the card it opens. */
+    outputOf: 'Sortie de {title}',
     checks: { one: '{count} contrôle, {failed} en échec', other: '{count} contrôles, {failed} en échec' },
     kind: { tests: 'Tests', ci: 'CI', deploy: 'Déploiement' },
     state: { running: 'en cours', success: 'réussi', failure: 'en échec', stopped: 'arrêté' },

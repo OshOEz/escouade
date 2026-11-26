@@ -18,7 +18,7 @@ describe('the card with a ribbon', () => {
     expect(screen.getByRole('article', { name: 'Tests, en échec' })).toBeTruthy();
     expect(screen.getByText('npm test')).toBeTruthy();
     expect(container.querySelector('.ribbon.stripes.failure')).toBeTruthy();
-    await fireEvent.click(screen.getByRole('button', { name: 'Sortie' }));
+    await fireEvent.click(screen.getByRole('button', { name: /^Sortie/ }));
     expect(app.taskView.a1).toBe('t1');
     expect(app.workspaceOn).toBe(false);
   });
@@ -26,7 +26,7 @@ describe('the card with a ribbon', () => {
   it('opens a terminal call in the conversation, on the call', async () => {
     resetApp({ agents: [agent({ id: 'a1' })] });
     render(RibbonCard, { agentId: 'a1', item: { ...ribbon('tests', 'success'), opens: { kind: 'call', call: 'c1' } }, side: 'centre' });
-    await fireEvent.click(screen.getByRole('button', { name: 'Sortie' }));
+    await fireEvent.click(screen.getByRole('button', { name: /^Sortie/ }));
     expect(conversationOf('a1').jump).toBe('c1');
   });
 
@@ -52,5 +52,17 @@ describe('the card with a ribbon', () => {
     setLang('en');
     render(RibbonCard, { agentId: 'a1', item: one, side: 'south' });
     expect(screen.getByText('1 check, 1 failed')).toBeTruthy();
+  });
+
+  it('names its button by its card for a screen reader, its word first', () => {
+    render(RibbonCard, {
+      agentId: 'a1',
+      item: { ...ribbon('tests', 'success'), line: 'npm test', opens: { kind: 'call', call: 'c1' } },
+      side: 'centre',
+    });
+    expect(screen.getByRole('button', { name: 'Sortie de Tests · npm test' })).toHaveTextContent('Sortie');
+    const ci = { ...ribbon('ci', 'failure'), number: 12, line: 'feat/x', opens: { kind: 'url', url: 'https://h/pr/12' } as const };
+    render(RibbonCard, { agentId: 'a1', item: ci, side: 'south' });
+    expect(screen.getByRole('button', { name: 'Ouvrir CI #12 · feat/x' })).toBeTruthy();
   });
 });

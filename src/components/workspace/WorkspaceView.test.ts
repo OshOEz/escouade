@@ -463,6 +463,17 @@ describe('the workspace', () => {
     );
   });
 
+  it('keeps the touch for the canvas on its background alone: an inset or a list scrolls under a finger', () => {
+    const source = readFileSync(resolve(dirname(fileURLToPath(import.meta.url)), 'WorkspaceView.svelte'), 'utf8');
+    const rule = (sel: string) => source.match(new RegExp(`\\n  ${sel.replace('.', '\\.')} \\{([^}]*)\\}`))?.[1] ?? '';
+    expect(rule('.ws')).not.toContain('touch-action');
+    expect(rule('.pad')).toContain('touch-action: none');
+    resetApp({ agents: [agent()] });
+    const { container } = show();
+    const pad = container.querySelector('.ws > .pad')!;
+    expect(pad.nextElementSibling?.matches('.world')).toBe(true);
+  });
+
   describe('an agent that waits', () => {
     it('is unfolded at every zoom, the others in piles', async () => {
       fakeBackend({ get_conversation: () => [questionItem('q1')] });

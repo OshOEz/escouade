@@ -15,6 +15,8 @@
 
   const kind = $derived(t(`workspace.ribbon.kind.${item.kind}`));
   const state = $derived(t(`workspace.ribbon.state.${item.state}`));
+  /** The card as its button names it for a screen reader: « Tests · npm test », « CI #12 · feat/x ». */
+  const title = $derived([item.number === null ? kind : `${kind} #${item.number}`, item.line].filter(Boolean).join(' · '));
   const ms = $derived(
     item.since === null ? null : item.state === 'running' ? app.now - item.since : item.until === null ? null : item.until - item.since,
   );
@@ -55,8 +57,11 @@
     <footer>
       <span class="where">{item.where}</span>
       {#if item.opens}
-        <button type="button" class="btn" onclick={open}
-          >{item.opens.kind === 'url' ? t('workspace.land.open') : t('workspace.ribbon.output')}</button
+        <button
+          type="button"
+          class="btn"
+          aria-label={item.opens.kind === 'url' ? t('workspace.land.openPage', { title }) : t('workspace.ribbon.outputOf', { title })}
+          onclick={open}>{item.opens.kind === 'url' ? t('workspace.land.open') : t('workspace.ribbon.output')}</button
         >
       {/if}
     </footer>

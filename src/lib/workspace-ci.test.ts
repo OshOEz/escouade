@@ -1,9 +1,26 @@
 import { describe, expect, it, vi } from 'vitest';
-import { agent, fakeBackend, pullRequest } from '../test/ipc';
+import { agent, CLAUDE_ENGINE, fakeBackend, project, pullRequest, SETTINGS } from '../test/ipc';
+import type { InitialState, UiEvent } from './types';
 import { check, prDetail, projectEnvs } from '../test/workspace';
 import { app } from './state.svelte';
 import { followEnvironments, prDetails, readPrDetail } from './workspace-ci.svelte';
 import { landingOf } from './workspace-landing';
+
+const INITIAL: InitialState = {
+  projects: [project()],
+  agents: [],
+  ui: { activeProject: 'p1', view: 'project', selectedAgent: {} },
+  settings: SETTINGS,
+  usage: { todayCost: 0, accounts: [], current: { claude: 'principal' } },
+  git: {},
+  shells: [],
+  terminals: [],
+  tickets: [],
+  claudeFound: true,
+  version: '0.1.0',
+  models: [],
+  engines: [CLAUDE_ENGINE],
+};
 
 describe('what the canvas reads of the CI', () => {
   it("reads the detail of the agent's open pull request", async () => {
@@ -89,5 +106,22 @@ describe('what the canvas reads of the CI', () => {
     await new Promise((r) => setTimeout(r, 0));
     expect(b2.called('project_environments')).toHaveLength(1);
     expect(b2.called('project_environments_read')).toHaveLength(0);
+  });
+
+  it('forgets the detail of an agent removed', async () => {
+    let channel: { onmessage: (e: UiEvent) => void } | null = null;
+    const a = agent({ id: 'gone', prs: [pullRequest({ number: 9, state: 'open' })] });
+    fakeBackend({
+      subscribe: (args: any) => {
+        channel = args.channel;
+        return { ...INITIAL, agents: [a] };
+      },
+      agent_pr_detail: () => ({ data: prDetail() }),
+    });
+    await app.init();
+    await readPrDetail(a);
+    expect(prDetails.gone).toBeTruthy();
+    channel!.onmessage({ type: 'agentRemoved', id: 'gone', projectId: 'p1' });
+    expect(prDetails.gone).toBeUndefined();
   });
 });
