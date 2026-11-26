@@ -93,5 +93,8 @@ describe('testsOf', () => {
       const a = agent({ plan: planWith([], { bgTasks: [{ ...bg('t'), command: 'npm test', status }] }) });
       expect(testsOf(a, '')[0].state).toBe('stopped');
     }
+    // A terminal call cut by a restart: the core says it stopped, not failed.
+    const cut = agent({ canvas: { tools: [], subs: [], commands: [cmd('c1', 'npm test', { stopped: true })] } });
+    expect(testsOf(cut, '')[0].state).toBe('stopped');
   });
 });

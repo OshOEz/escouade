@@ -146,10 +146,18 @@ const run = (
 });
 
 const callRun = (under: string, c: CommandRun): TestRun =>
-  run(under, c.call, c.command, c.endedAt == null ? 'running' : c.failed ? 'failure' : 'success', c.startedAt, c.endedAt ?? null, {
-    kind: 'call',
-    call: c.call,
-  });
+  run(
+    under,
+    c.call,
+    c.command,
+    c.endedAt == null ? 'running' : c.stopped ? 'stopped' : c.failed ? 'failure' : 'success',
+    c.startedAt,
+    c.endedAt ?? null,
+    {
+      kind: 'call',
+      call: c.call,
+    },
+  );
 
 /** The latest test run of each card of the agent: its own first, then its subagents' in the plan's order. */
 export function testsOf(agent: Agent, testCommand: string): TestRun[] {

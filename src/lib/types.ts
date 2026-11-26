@@ -2397,6 +2397,8 @@ export interface CommandRun {
   startedAt: number;
   endedAt?: number | null;
   failed: boolean;
+  /** Cut short by the end of the process (a restart): neither passed nor failed. */
+  stopped?: boolean;
 }
 
 /** How far an agent is through a plan: its task list, its subagents, its workflows. */

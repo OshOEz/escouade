@@ -113,6 +113,8 @@ pub struct CommandRun {
     pub started_at: i64,
     pub ended_at: Option<i64>,
     pub failed: bool,
+    /// Cut short by the end of the process (a restart): neither passed nor failed.
+    pub stopped: bool,
 }
 
 /// The first address of a published artifact in `text`, as `ARTIFACT_URL` of `src/lib/tools.ts`.
@@ -271,6 +273,7 @@ impl Canvas {
                 started_at: now,
                 ended_at: None,
                 failed: false,
+                stopped: false,
             });
             return Change::View;
         }
@@ -369,7 +372,7 @@ impl Canvas {
         for c in self.commands.iter_mut().chain(commands) {
             if c.ended_at.is_none() {
                 c.ended_at = Some(now);
-                c.failed = true;
+                c.stopped = true;
                 change = Change::View;
             }
         }

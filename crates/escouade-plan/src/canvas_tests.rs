@@ -273,14 +273,21 @@ fn a_command_ends_failed_or_not_by_its_result_and_is_cut_on_a_character() {
 }
 
 #[test]
-fn a_command_cut_short_ends_failed() {
+fn a_command_cut_short_by_a_restart_ends_stopped_not_failed() {
     let mut c = Canvas::default();
     c.on_tool_use(None, "b1", "Bash", &json!({"command": "cargo test"}), 1);
+    c.on_tool_use(Some("s1"), "b2", "Bash", &json!({"command": "npm test"}), 1);
     c.close_running(5);
-    assert_eq!(
-        (c.commands[0].ended_at, c.commands[0].failed),
-        (Some(5), true)
-    );
+    for run in [&c.commands[0], &c.subs[0].commands[0]] {
+        assert_eq!(
+            (run.ended_at, run.failed, run.stopped),
+            (Some(5), false, true)
+        );
+    }
+    // Saved before it knew the word: not stopped.
+    let old: CommandRun =
+        serde_json::from_value(json!({"call": "b", "command": "x", "failed": true})).unwrap();
+    assert!(!old.stopped);
 }
 
 #[test]
