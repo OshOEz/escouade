@@ -19,7 +19,7 @@ describe('a pile of a compass at mid-height', () => {
 
   it('rings when one of its items runs', () => {
     const { container } = render(PileCard, { pile: { side: 'east', count: 2, running: true }, onunfold: () => {} });
-    expect(screen.getByRole('button', { name: "Déplier l'équipe (2)" })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Déplier l’équipe (2)' })).toBeTruthy();
     expect(container.querySelector('button.running')).toBeTruthy();
   });
 });

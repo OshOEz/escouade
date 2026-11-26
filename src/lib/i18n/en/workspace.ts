@@ -28,7 +28,7 @@ export default defineZone('workspace', {
   ribbon: {
     label: '{kind}, {state}',
     output: 'Output',
-    checks: '{total} checks, {failed} failed',
+    checks: { one: '{count} check, {failed} failed', other: '{count} checks, {failed} failed' },
     kind: { tests: 'Tests', ci: 'CI', deploy: 'Deployment' },
     state: { running: 'running', success: 'passed', failure: 'failed', stopped: 'stopped' },
   },

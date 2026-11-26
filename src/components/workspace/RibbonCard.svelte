@@ -49,7 +49,7 @@
       {#each item.steps as s, i (i)}<li class={s.state} use:tip={s.name}><span class="sr">{s.name}</span></li>{/each}
     </ol>
   {:else if item.total !== null}
-    <p class="checks">{t('workspace.ribbon.checks', { total: item.total, failed: item.failed ?? 0 })}</p>
+    <p class="checks">{t('workspace.ribbon.checks', { count: item.total, failed: item.failed ?? 0 })}</p>
   {/if}
   {#if item.where || item.opens}
     <footer>

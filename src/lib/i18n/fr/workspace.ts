@@ -33,7 +33,7 @@ export default {
   ribbon: {
     label: '{kind}, {state}',
     output: 'Sortie',
-    checks: '{total} contrôles, {failed} en échec',
+    checks: { one: '{count} contrôle, {failed} en échec', other: '{count} contrôles, {failed} en échec' },
     kind: { tests: 'Tests', ci: 'CI', deploy: 'Déploiement' },
     state: { running: 'en cours', success: 'réussi', failure: 'en échec', stopped: 'arrêté' },
   },
@@ -60,7 +60,7 @@ export default {
     east: 'Équipe ×{count}',
     south: 'Livrables ×{count}',
     /** Its name for a screen reader: what a click does. */
-    unfold: { west: 'Déplier les outils ({count})', east: "Déplier l'équipe ({count})", south: 'Déplier les livrables ({count})' },
+    unfold: { west: 'Déplier les outils ({count})', east: 'Déplier l’équipe ({count})', south: 'Déplier les livrables ({count})' },
   },
   /** The team, east of the card: its subagents and background tasks. */
   team: {

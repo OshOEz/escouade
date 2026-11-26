@@ -41,4 +41,16 @@ describe('the card with a ribbon', () => {
     expect(screen.getByRole('article', { name: 'Tests, arrêté' })).toBeTruthy();
     expect(container.querySelector('.ribbon.stopped:not(.running)')).toBeTruthy();
   });
+
+  it('counts the checks of a branch in good French and English, one or several', () => {
+    const one = { ...ribbon('ci', 'failure'), total: 1, failed: 1 };
+    const { unmount } = render(RibbonCard, { agentId: 'a1', item: one, side: 'south' });
+    expect(screen.getByText('1 contrôle, 1 en échec')).toBeTruthy();
+    unmount();
+    render(RibbonCard, { agentId: 'a1', item: { ...one, total: 3 }, side: 'south' });
+    expect(screen.getByText('3 contrôles, 1 en échec')).toBeTruthy();
+    setLang('en');
+    render(RibbonCard, { agentId: 'a1', item: one, side: 'south' });
+    expect(screen.getByText('1 check, 1 failed')).toBeTruthy();
+  });
 });
