@@ -5,7 +5,7 @@ import { connection, type ServerInfo } from './connection.svelte';
 import { conversationOf, dropConversation } from './conversations.svelte';
 import { forgetDraft, getDraft } from './drafts';
 import { cancelHeld, heldOf } from './outbox.svelte';
-import { routeOf, submitDraft } from './send.svelte';
+import { outgoing, routeOf, submitDraft } from './send.svelte';
 import { app } from './state.svelte';
 import type { Agent, ConvItem, InitialState, QuestionItem } from './types';
 
@@ -91,6 +91,40 @@ describe('submitDraft', () => {
     });
     await submitDraft(app.agents.a1, 'a1', 'Bonjour', []).done;
     expect(getDraft('a1').text).toBe('Bonjour');
+  });
+
+  it('sends nothing, and says so, while a message already waits for its worktree', async () => {
+    const backend = await start([agent({ id: 'a1' })]);
+    outgoing.a1 = 'worktree';
+    try {
+      expect(submitDraft(app.agents.a1, 'a1', 'encore', []).cleared).toBe('none');
+      expect(app.toasts.map((x) => x.text)).toContain('Un message attend déjà la fin de la préparation.');
+      expect(backend.called('send_message')).toHaveLength(0);
+    } finally {
+      delete outgoing.a1;
+    }
+  });
+
+  it("sends a second message after the first, never beside it, without waiting for another agent's", async () => {
+    let release!: () => void;
+    const order: string[] = [];
+    await start([agent({ id: 'a1' }), agent({ id: 'a2' })], {
+      send_message: (args: { id: string; text: string }) => {
+        order.push(`${args.id}:${args.text}`);
+        return args.text === 'un' ? new Promise<void>((r) => (release = r)) : null;
+      },
+    });
+    const first = submitDraft(app.agents.a1, 'a1', 'un', []);
+    const second = submitDraft(app.agents.a1, 'a1', 'deux', []);
+    const other = submitDraft(app.agents.a2, 'a2', 'autre', []);
+    expect(second.cleared).toBe('all');
+    await other.done;
+    expect(order).toEqual(['a1:un', 'a2:autre']);
+    release();
+    await Promise.all([first.done, second.done]);
+    expect(order).toEqual(['a1:un', 'a2:autre', 'a1:deux']);
+    dropConversation('a2');
+    forgetDraft('a2');
   });
 
   it('sends nothing while the server connection is cut', async () => {

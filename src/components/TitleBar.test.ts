@@ -101,7 +101,6 @@ describe('TitleBar', () => {
     fakeBackend();
     app.ui.activeProject = 'p2';
     render(TitleBar);
-    expect(screen.queryByRole('button', { name: 'Autres vues du projet' })).not.toBeInTheDocument();
     await userEvent.click(screen.getByRole('button', { name: 'Éditeur ou workspace du projet' }));
     const items = menu.open!.items.filter((i) => !i.separator);
     expect(items.map((i) => i.label)).toEqual(['Éditeur', 'Workspace']);

@@ -336,14 +336,14 @@ describe('the workspace', () => {
     expect(app.workspaceOn).toBe(false);
   });
 
-  it('shows the compasses in piles below 60 %, down to 30 %, never a disc', async () => {
+  it("shows the compasses in piles below 60 %, down to 30 %, the agent's card kept", async () => {
     resetApp({ agents: [agent({ id: 'a1', name: 'un', canvas: { tools: [kit('skill', 'a')], subs: [] } })] });
     const { container } = show();
     expect(screen.getByRole('article', { name: /Skill a/ })).toBeTruthy();
     await zoomTo(0.3);
     expect(screen.getByRole('button', { name: 'Déplier les outils (1)' })).toBeTruthy();
     expect(screen.getByRole('textbox', { name: 'Écrire à un' })).toBeTruthy();
-    expect(container.querySelector('.disc, svg.one')).toBeNull();
+    expect(container.querySelector('article.tool')).toBeNull();
   });
   it('keeps the agent in the middle where it was when the altitude changes', async () => {
     const restore = sized();
