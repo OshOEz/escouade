@@ -23,15 +23,15 @@ et écrire à un agent sans ouvrir sa conversation.
 
 Buts :
 
-- une toile par projet, où chaque agent non archivé est un objet relié à ce qu'il utilise, lance et produit ;
-- lisible de loin (six agents sur un écran) comme de près (un agent et tout son détail) ;
+- une toile par projet, où chaque agent non archivé est un objet relié à ce qu'il utilise, lance et produit, et une
+  toile de tous les projets depuis la « Vue d'ensemble » ;
+- lisible de haut (les boussoles en piles) comme de près (un agent et tout son détail) ;
 - répondre aux questions et aux permissions, et écrire à un agent, depuis la toile ;
 - du mouvement seulement là où quelque chose se passe.
 
 Hors périmètre (première version) :
 
 - déplacer les cartes à la main et mémoriser leur place : Escouade range ;
-- une toile de tous les projets ;
 - une mini-carte, une miniature de la page d'un artefact, modifier le plan depuis la toile ;
 - la toile dans un volet de l'écran partagé.
 
@@ -61,54 +61,38 @@ l'utilisateur qui a choisi la boussole et les trois altitudes.
 - Le bouton « Éditeur » de la barre de titre (`TitleBar.svelte`) devient un menu à deux lignes, « Éditeur » et
   « Workspace », ouvert par `menu.showAt`. Le glisser du bouton vers un volet garde son sens actuel (l'éditeur).
 - « Workspace » ouvre la toile du projet courant à la place de la zone de travail. La barre latérale reste.
-- La toile a un bouton « Quitter le workspace » en haut à gauche, et `Échap` fait de même quand aucun champ n'a le
-  focus. On revient à la vue d'avant.
+- La « Vue d'ensemble » a un bouton « Workspace » : la toile de tous les projets, par-dessus elle.
+- La toile a un bouton « Quitter le workspace » en haut à gauche (le premier dans l'ordre du clavier), et `Échap` fait
+  de même quand aucun champ n'a le focus. On revient à la vue d'avant : le Kanban, les docs, les PR, un terminal,
+  l'éditeur… tels qu'ils étaient, ou la liste de la « Vue d'ensemble ».
 - État : un drapeau par projet, à côté de `board`, `docs`, `prs` dans `state.svelte.ts`, avec `openWorkspace` et
-  `closeWorkspace`. Comme les autres `open*`, il éteint les vues sœurs ; les autres `open*` l'éteignent.
-- Double-clic sur une carte d'agent ou de sous-agent : quitte la toile et ouvre sa conversation (`selectAgent`,
-  `openSubagent`).
+  `closeWorkspace`. Il passe devant les vues sœurs sans les éteindre (elles lui cèdent, et reviennent en quittant) ;
+  les autres `open*` l'éteignent. La toile de tous les projets : `overviewCanvas`, `openOverviewCanvas`,
+  `closeOverviewCanvas`.
+- Double-clic sur une carte d'agent ou de sous-agent, ou `Entrée` sur la carte : quitte la toile et ouvre sa
+  conversation (`selectAgent`, `openSubagent`) ; sur une tâche de fond, sa sortie (`openTask`).
 
 ## La toile
 
 - Fond à points, repris du workspace de Kata avec les couleurs d'Escouade : `radial-gradient` d'un point de 1,2 px tous
   les 18 px, dont le pas et l'origine suivent la caméra.
-- Se déplacer : glisser le fond, ou la molette. Zoomer : Ctrl/⌘ + molette ou pincement, autour du pointeur, de 30 % à
+- Se déplacer : glisser le fond, ou la molette (sauf sur une liste qui défile encore dans ce sens, celle du plan ou
+  l'encart d'une question). Zoomer : Ctrl/⌘ + molette ou pincement, autour du pointeur, de 30 % à
   250 %. Clavier : `+`, `-`, `0` (ajuster).
 - Une barre flottante en haut au centre : `−`, le pourcentage, `+`, « Ajuster », puis « n agents · n questions ».
-- À l'ouverture, la toile s'ajuste pour montrer tous les agents. La caméra n'est pas mémorisée.
-- Les agents sont rangés par Escouade, dans l'ordre de la barre latérale, en lignes qui passent à la suivante. Un agent
-  lancé par un autre (`drivenAgents`) est posé à sa droite, relié par un trait pointillé « a lancé ».
+- À l'ouverture, la toile est à 100 % : le premier agent (ou la première colonne) en haut à gauche, sous la barre
+  flottante. « Ajuster » (et `0`) cadre tout. La caméra n'est pas mémorisée.
+- Les agents sont rangés par Escouade, l'un sous l'autre, dans l'ordre de la barre latérale. Un agent lancé par un
+  autre (`drivenAgents`) garde sa place, relié à lui par un trait pointillé « a lancé » qui longe la gauche des cartes ;
+  sa carte le dit aussi en mots (« lancé par … »), pour un lecteur d'écran.
+- Sur la toile de tous les projets, chaque projet est une colonne de ses agents sous son nom (avec sa couleur), les
+  projets côte à côte dans l'ordre du rail, ceux sans agent omis.
 
-## Les trois altitudes
+## Les altitudes
 
-Le zoom choisit ce qu'on montre. Les seuils (mon choix, à régler à l'usage) : de loin sous 45 %, à mi-hauteur de 45 à
-60 %, de près au-delà (60 % demandé par l'utilisateur le 26 novembre, au lieu de 80 %).
-
-### De loin : le disque et ses satellites
-
-D'après le croquis de l'utilisateur. Un disque par agent :
-
-- en haut, un point et l'état en capitales (« En cours », « À toi », « Terminé », « Erreur ») ;
-- le nom de l'agent, en gras ;
-- une ligne de ce qu'il fait (`cardActivity`) ;
-- la jauge du plan en segments, un par tâche, et « 3/7 · 43 % » ; « sans plan » sinon.
-
-Le contour prend la couleur de l'état (`--run`, `--wait`, `--del`, gris quand il a fini). Un agent qui attend
-l'utilisateur a un fond teinté de jaune et un halo qui pulse.
-
-Les **satellites** sont des arcs posés sur le flanc droit du disque, centrés sur l'horizontale. Seuls ceux qui ont
-quelque chose à dire sont montrés, toujours dans cet ordre de haut en bas :
-
-| Satellite | Ce qu'il dit | Couleur |
-|---|---|---|
-| équipe | nombre de sous-agents et de tâches de fond en cours | vert |
-| outils | nombre de skills et de plugins utilisés | violet |
-| livrables | nombre d'artefacts | bleu |
-| CI | « CI » et son état en un mot ; un déploiement de même | vert, rouge en échec |
-| question | nombre de questions et de permissions en attente | jaune |
-
-Une orbite en pointillé passe sous les satellites ; elle tourne tant que l'agent travaille. Un clic sur un satellite
-zoome sur l'agent, du côté concerné.
+Le zoom choisit ce qu'on montre : à mi-hauteur sous 60 % (jusqu'au zoom minimal, 30 %), de près à partir de 60 %. Il
+y avait une troisième altitude, de loin (un disque par agent et ses satellites) : retirée le 26 novembre, à la demande
+de l'utilisateur.
 
 ### À mi-hauteur : des piles
 
@@ -146,8 +130,7 @@ ses lignes et la barre de saisie, l'encart jaune de la conversation : `QuestionC
 quels, avec plusieurs questions, les réponses multiples, les descriptions, « Envoyer ». Ces deux composants prennent
 un élément de conversation, pas `requests` : la toile charge la conversation d'un agent tant qu'il attend (voir « D'où
 viennent les données »). La question d'un sous-agent (`sub`) s'affiche sur la carte du sous-agent, qui grandit comme
-celle d'un agent ; la carte de l'agent prend un contour jaune et dit « question de <sous-agent> ». Dans la vue de
-loin, le satellite question de l'agent compte aussi celles de ses sous-agents. La carte ne dépasse pas 70 %
+celle d'un agent ; la carte de l'agent prend un contour jaune et dit « question de <sous-agent> ». La carte ne dépasse pas 70 %
 de la hauteur de la fenêtre (à 100 % de zoom) ; au-delà, l'encart défile dans la carte. Les objets voisins se
 décalent ; rien ne se chevauche.
 
@@ -156,7 +139,9 @@ décalent ; rien ne se chevauche.
 Une bande horizontale au-dessus de l'agent, reliée par un trait : la pastille « Plan », son titre, « 3/7 tâches ·
 43 % », la jauge en segments de `PlanBanner`, puis une tuile par tâche (numéro, titre, ce qu'elle fait, sa jauge). La
 tâche en cours est cerclée de vert, les tâches faites sont estompées. Au-delà de 9 tâches, la bande montre les faites
-repliées en « n faites », la ou les tâches en cours et les suivantes. Sans plan, pas de bande.
+repliées en « n faites », la ou les tâches en cours et les suivantes. Sans plan, pas de bande. Sa hauteur est celle
+du bandeau mesuré, liste comprise à la hauteur que le lecteur lui a donnée dans la conversation ; la liste y défile à
+la molette.
 
 ### À l'ouest : l'outillage
 
@@ -255,18 +240,21 @@ Précisions :
   pour chaque altitude. Testée seule (vitest), comme `lib/workflow-diagram.ts`.
 - Les traits sont un seul `<svg>` sous les cartes ; les cartes sont du HTML positionné, pour garder les champs, le
   focus et les composants existants.
-- Composants sous `src/components/workspace/` : la vue, le disque, la carte d'agent, la bande du plan, la carte
-  d'outil, la carte d'équipe, la zone d'atterrissage, la carte d'artefact, la carte à ruban.
+- Composants sous `src/components/workspace/` : la vue, la carte d'agent, la bande du plan, la carte
+  d'outil, la pile, la carte d'équipe, la zone d'atterrissage, la carte d'artefact, la carte à ruban.
 - Couleurs et rayons : les variables de `app.css` (`--run`, `--wait`, `--del`, `--info`, `--raise`, `--line-2`…), dans
   les deux thèmes. Une seule couleur à ajouter, le violet des skills.
 - Textes par `t()`, en français et en anglais.
-- Accessibilité : chaque carte est atteignable au clavier dans l'ordre nord, ouest, centre, est, sud ; les états sont
-  dits en mots et pas seulement en couleur ; `prefers-reduced-motion` fige flux, halo, orbite et ruban.
+- Accessibilité : la toile est une région ; chaque carte (outil, agent, sous-agent, tâche de fond, zone
+  d'atterrissage) est atteignable au clavier dans l'ordre nord, ouest, centre, est, sud, et `Entrée` ouvre ce qu'ouvre le
+  double-clic ; les états et le trait « a lancé » sont dits en mots et pas seulement en couleur ou en dessin ;
+  `prefers-reduced-motion` fige flux, halo et ruban.
 - Mode serveur : la vue lit l'état de la fenêtre, elle marche donc pareil pour une machine distante.
 
 ## Les lots
 
-Chacun est livrable seul et devient une carte Kanban.
+Chacun est livrable seul et devient une carte Kanban. (Le plan d'origine : la vue de loin du lot 1, la bascule du
+lot 2 et les satellites ont été retirés le 26 novembre.)
 
 1. **La toile** : le menu du bouton Éditeur, l'état, le fond, se déplacer, zoomer, quitter, et la vue de loin (disques
    et satellites équipe et question ; les autres satellites arrivent avec leur lot). Le placement connaît les
@@ -278,8 +266,6 @@ Chacun est livrable seul et devient une carte Kanban.
    l'appel.
 5. **La zone d'atterrissage** : la zone, l'artefact, la CI distante, la CI locale, le déploiement.
 6. **Les altitudes** : le niveau du milieu, avec ses piles.
-
-Un clic sur un satellite zoome sur l'agent ; il cadre le côté concerné une fois ce côté livré.
 
 ## Choix validés le 25 novembre
 
@@ -324,7 +310,7 @@ Demandés par l'utilisateur après avoir vu la toile :
 
 L'utilisateur n'a pas tranché ces points ; j'ai pris ma recommandation.
 
-- La toile montre les agents du projet ouvert, sans les archivés.
+- La toile montre les agents du projet ouvert (ou de tous les projets, depuis la « Vue d'ensemble »), sans les archivés.
 - Les sous-agents terminés sont repliés.
 - On peut écrire à un sous-agent tant qu'il tourne.
 - La carte d'artefact n'a pas de miniature de la page.

@@ -63,7 +63,7 @@
   --teal-ink: oklch(0.86 0.08 190);
   --teal-ink-2: oklch(0.82 0.09 190);
   --info: oklch(0.8 0.1 235);
-  /* The skills of the « Workspace »: their cards and satellite. */
+  /* The skills of the « Workspace »: their cards and their tags. */
   --skill: oklch(0.74 0.14 300);
   /* The temperature of a cache (ESC-398): red-orange when hot, amber half way, blue cooling. */
   --heat-hot: oklch(0.72 0.17 38);

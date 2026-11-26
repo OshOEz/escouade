@@ -67,7 +67,6 @@
   const at = (b: Box | (Size & { x: number; y: number })) => `left:${b.x}px;top:${b.y}px;width:${b.w}px;height:${b.h}px`;
 </script>
 
-<!-- A test card right after the card it is stuck under: the keyboard reads it next. -->
 {#snippet pile(side: PileSide)}
   {@const p = pileOf(side)}
   {#if p}
@@ -75,6 +74,7 @@
   {/if}
 {/snippet}
 
+<!-- A test card right after the card it is stuck under: the keyboard reads it next. -->
 {#snippet tests(under: string)}
   {@const run = testOf(under)}
   {#if run}
