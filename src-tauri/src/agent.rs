@@ -4233,7 +4233,8 @@ npm test")
             &std::env::temp_dir().join(format!("ccm-agent-tests-{}", std::process::id())),
         );
         let c = back.meta.canvas.unwrap();
-        assert!(c.commands[0].ended_at.is_some() && c.commands[0].failed);
+        // Cut by the restart: stopped, neither passed nor failed.
+        assert!(c.commands[0].ended_at.is_some() && c.commands[0].stopped && !c.commands[0].failed);
     }
 
     fn system(a: &mut AgentRt, f: Value) -> Effects {
